@@ -2,11 +2,11 @@
 
 배포 주소: [school-timetable.cosmicjh.workers.dev](https://school-timetable.cosmicjh.workers.dev) · [관리자](https://school-timetable.cosmicjh.workers.dev/admin.html)
 
-2026-10-30 GitHub `codex/workers-d1` 브랜치 푸시, 전용 원격 D1·Worker·운영 Secret 배포를 완료했습니다. 실제 학생 자료는 아직 이관하지 않았습니다. [실제 배포 결과와 남은 설정](docs/DEPLOYED_2026-10-30.md)을 확인하세요.
+운영 브랜치는 **main**입니다. 전용 Worker·D1을 그대로 사용하며, 기존 GitHub Pages 주소는 새 Workers 서비스로 이동합니다. [main 전환·임시 자원 정리 기록](docs/MAIN_RELEASE_2026-11-02.md)을 확인하세요.
 
 `cosmicjh/timetable`의 기존 HTML·모바일 CSS·HTML 내장 Pretendard·엑셀 등록·PNG·인쇄 화면을 유지하고, Apps Script 브리지를 같은 출처의 Workers API와 D1으로 교체했습니다. GitHub는 소스 관리와 Workers Builds 연결에 계속 사용합니다.
 
-이 프로젝트 루트는 **개인시간표 저장소의 루트**입니다. 다른 `course-allocation` 프로젝트의 Pages 설정이나 DB를 사용하지 않습니다. 이 작업의 복제본은 `course-allocation/timetable-cloudflare/`, 브랜치는 `codex/workers-d1`, 원본 커밋은 `bd6e7db`입니다. 기존 GitHub Pages·Apps Script·스프레드시트는 수정하거나 삭제하지 않았습니다.
+이 프로젝트 루트는 **개인시간표 저장소의 루트**입니다. 다른 `course-allocation` 프로젝트의 Pages 설정이나 DB를 사용하지 않습니다. 이 작업의 복제본은 `course-allocation/timetable-cloudflare/`, 운영 브랜치는 `main`, 최초 원본 커밋은 `bd6e7db`입니다. 기존 GitHub Pages 주소는 연결 전용으로 보존하고 Apps Script·스프레드시트 자료는 삭제하지 않습니다.
 
 ## 로컬 실행
 
@@ -35,6 +35,8 @@ pnpm test:all
 pnpm benchmark        # 학생 900명·분반 288개·배정 7,200개·교사 120명
 ```
 
+이번 main 전환에서는 성능 개선과 벤치마크 실행을 제외했습니다. 향후 작업용 benchmark 스크립트는 보존하며 CI에서 자동 실행하지 않습니다.
+
 Linux/macOS에서 브라우저가 없으면 `pnpm exec playwright install --with-deps chromium`을 먼저 실행합니다. 테스트는 가상 자료와 각각 새 로컬 D1을 사용합니다. 원격 DB를 초기화하지 않습니다. 결과·화면·PNG는 Git 제외 `test-results/`에 생성됩니다.
 
 ## 배포 설정
@@ -55,6 +57,7 @@ Linux/macOS에서 브라우저가 없으면 `pnpm exec playwright install --with
 
 ## 구현과 결과
 
+- [main 전환과 임시 자원 정리](docs/MAIN_RELEASE_2026-11-02.md)
 - [기존 API·기능 대응과 저장 구조](docs/ARCHITECTURE.md)
 - [배포·GitHub 연동·무료 한도·복구](docs/DEPLOYMENT.md)
 - [기존 백업 / 엑셀 이관과 결과 비교](docs/MIGRATION.md)

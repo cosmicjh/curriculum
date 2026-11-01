@@ -42,19 +42,19 @@ pnpm exec wrangler secret bulk private/bootstrap.local.json
 | Install | `pnpm install --frozen-lockfile` |
 | Build command | `pnpm build` |
 | Deploy command | `pnpm run deploy` |
-| Production branch | 최초 검증은 `codex/workers-d1`, 전환 완료 후 원하는 운영 브랜치 |
+| Production branch | `main` |
 | Assets | `./dist`, ASSETS 바인딩 |
 | D1 | DB → 실제 `school-timetable-db` |
 
-자동 배포에 필요한 Cloudflare 권한은 Builds 연결에서 설정합니다. 외부 CI를 사용하면 GitHub Secret에 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID를 설정합니다. 토큰과 bootstrap 파일을 커밋하지 않습니다. 추가된 GitHub Actions는 가상 자료 테스트만 수행하며 운영 배포나 자료 이관을 자동 실행하지 않습니다.
+자동 배포에 필요한 Cloudflare 권한은 Builds 연결에서 설정합니다. 외부 CI를 사용하면 GitHub Secret에 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID를 설정합니다. 토큰과 bootstrap 파일을 커밋하지 않습니다. 검증용 GitHub Actions는 가상 자료 기능 테스트만 수행하며 운영 자료 이관이나 성능 벤치마크를 실행하지 않습니다. Pages 연결 전용 workflow는 기존 주소를 새 서비스로 보내는 HTML만 게시합니다.
 
 마이그레이션은 최초 배포 전에 위 순서로 실행합니다. 이후 새 SQL 마이그레이션을 추가할 때도 원격 DB 백업 후 호환성 검토와 명시적인 마이그레이션을 먼저 실행합니다. 코드 재배포만으로 DB·계정·학생 자료를 초기화하지 않습니다.
 
 ## 기존 운영 주소 보존
 
-기존 `https://cosmicjh.github.io/timetable`과 Apps Script는 새 서비스 검증 전까지 그대로 둡니다. 전환 코드는 원격 `codex/workers-d1` 브랜치에 푸시했고 해당 코드로 Workers 배포를 완료했습니다. main 병합은 수행하지 않아 기존 Pages 화면이 유지됩니다.
+운영 코드는 main으로 통합합니다. 기존 https://cosmicjh.github.io/timetable 주소는 GitHub Actions의 Pages 연결 전용 workflow로 유지하며, 학생·교사·관리자 경로와 query/hash를 새 Worker 주소로 보냅니다. Pages에 업무 화면·API·학생 자료를 이중 배포하지 않습니다. 별도 legacy 브랜치는 만들지 않습니다.
 
-기존 GitHub Pages가 main의 파일을 자동 게시한다면 새 코드의 main 병합이 그 화면을 바꾸게 됩니다. 병합 전에 기존 커밋을 보존하는 별도 legacy 브랜치를 만들고 GitHub Pages의 게시 원본을 그 브랜치로 지정하여 기존 배포를 유지합니다. Workers는 새 운영 브랜치로 연결합니다. 기존 배포나 스프레드시트를 삭제할 필요가 없습니다. Google 서비스를 중단해도 새 Workers 서비스는 동일 출처 API와 D1만으로 운영됩니다.
+Cloudflare는 기존 school-timetable Worker와 school-timetable-db를 계속 사용합니다. 재배포에 새 DB 생성·스키마 초기화·Secret 재생성이 필요하지 않습니다. GitHub 연결을 사용할 경우 운영 브랜치를 main으로 설정합니다. 기존 Apps Script·스프레드시트 자료는 보존하되 새 서비스의 운영 의존은 없습니다.
 
 ## 구성·무료 범위
 
