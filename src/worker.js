@@ -2,6 +2,7 @@ import Core from './core.js';
 import * as D from './domain.js';
 import * as S from './storage.js';
 import * as Auth from './auth.js';
+import {allowedRequest,pagesRequest,cors} from './origin.js';
 const reads=new Set(['bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup']);
 const writes=new Set(['commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','backup','restore','changePassword']);
 const teacherActions=new Set(['teacherBootstrap','teacher','roster','classBatch']);
@@ -106,12 +107,11 @@ async function mutate(db,env,ctx,session,req,headers){
   const snap=S.snapshot(db,await S.load(db,ctx),'수동 백업');statements.push(...snap.statements);result={id:snap.id,backup:snap.backup};backupId=snap.id;historyOnly=true;
  }else if(action==='changePassword'){
   await Auth.rateLimit(db,env.request,'password');
-  try{statements=await Auth.passwordChangeStatements(db,env,req);}catch(e){if(e.code==='AUTH_REQUIRED'){await Auth.revoke(db,env.request);headers.append('Set-Cookie',Auth.cookie('teacher'));headers.append('Set-Cookie',Auth.cookie('admin'));}throw e;}
+  try{statements=await Auth.passwordChangeStatements(db,env,req);}catch(e){if(e.code==='AUTH_REQUIRED'){await Auth.revoke(db,env.request,env);if(!pagesRequest(env.request,env)){headers.append('Set-Cookie',Auth.cookie('teacher'));headers.append('Set-Cookie',Auth.cookie('admin'));}}throw e;}
   target=req.role;historyOnly=true;
  }else Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
  await S.commit(db,ctx,session,req,statements,{parts,before,after,target,backupId,activeTerm,historyOnly});
- if(action==='changePassword'&&req.role==='admin')headers.append('Set-Cookie',Auth.cookie('admin'));
- if(action==='changePassword'&&req.role==='teacher')headers.append('Set-Cookie',Auth.cookie('teacher'));
+ if(action==='changePassword'&&!pagesRequest(env.request,env))headers.append('Set-Cookie',Auth.cookie(req.role));
  const updated=await S.context(db);if(action==='changePassword')return true;
  const committedRevision=ctx.revision+(historyOnly?0:1);
  const savedRefresh=()=>Auth.fail(409,'SAVED_REFRESH_REQUIRED','저장은 완료됐지만 다른 변경이 이어졌습니다. 입력값을 보관하고 목록을 새로고침하여 결과를 확인하세요.');
@@ -127,12 +127,18 @@ async function mutate(db,env,ctx,session,req,headers){
 }
 async function api(request,env){
  const start=performance.now(),db=env.DB?S.database(env.DB):null,headers=new Headers({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'});let status=200,payload;
+ cors(request,env,headers);
  try{
   const url=new URL(request.url),path=url.pathname;
+  if(request.method==='OPTIONS'){
+   const requested=(request.headers.get('Access-Control-Request-Headers')||'').toLowerCase().split(',').map(x=>x.trim()).filter(Boolean);
+   if(!pagesRequest(request,env)||request.headers.get('Access-Control-Request-Method')!=='POST'||requested.some(h=>!['content-type','authorization'].includes(h)))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
+   headers.set('Access-Control-Allow-Methods','POST');headers.set('Access-Control-Allow-Headers','Content-Type, Authorization');return new Response(null,{status:204,headers});
+  }
   if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1'}},{headers});}
   const action=path.slice(5);if(!reads.has(action)&&!writes.has(action)&&!['login','logout','passwordParameters'].includes(action))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
   if(request.method!=='POST')Auth.fail(405,'METHOD_NOT_ALLOWED','POST 요청을 사용하세요.');
-  if(request.headers.get('Origin')!==url.origin||request.headers.get('Sec-Fetch-Site')==='cross-site')Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
+  if(!allowedRequest(request,env))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
   if(!request.headers.get('Content-Type')?.startsWith('application/json'))Auth.fail(415,'INVALID_REQUEST','JSON 요청을 사용하세요.');
   if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');
   const length=Number(request.headers.get('Content-Length')||0);if(length>10*1024*1024)Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');
@@ -141,11 +147,11 @@ async function api(request,env){
   let req;try{req=JSON.parse(new TextDecoder().decode(bytes));}catch{Auth.fail(400,'INVALID_REQUEST','JSON 형식을 확인하세요.');}if(!req||typeof req!=='object'||Array.isArray(req))Auth.fail(400,'INVALID_REQUEST','요청을 확인하세요.');req.action=action;
   let data;
   if(action==='passwordParameters')data=await Auth.parameters(db,env,req.role);
-  else if(action==='logout'){await Auth.revoke(db,request);headers.append('Set-Cookie',Auth.cookie('teacher'));headers.append('Set-Cookie',Auth.cookie('admin'));data=true;}
+  else if(action==='logout'){await Auth.revoke(db,request,env);if(!pagesRequest(request,env)){headers.append('Set-Cookie',Auth.cookie('teacher'));headers.append('Set-Cookie',Auth.cookie('admin'));}data=true;}
   else if(action==='login'){
    data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx):await teacherBoot(db,ctx);}
   }else{
-   const session=action==='bootstrap'||action==='student'?null:await Auth.authenticate(db,request,teacherActions.has(action)?'teacher':'admin');
+   const session=action==='bootstrap'||action==='student'?null:await Auth.authenticate(db,request,teacherActions.has(action)?'teacher':'admin',env);
    if(action==='student')await Auth.rateLimit(db,request,'student',60);
    const ctx=await S.context(db);
    if(req.viewTerm&&req.viewTerm!==ctx.term)Auth.fail(409,'TERM_CHANGED','활성 학기가 변경되어 해당 학기 자료를 다시 불러옵니다. 이전 입력값은 이전 학기의 초안으로 보관합니다.');

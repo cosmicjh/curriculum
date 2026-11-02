@@ -1,17 +1,14 @@
-name: Preserve previous timetable address
+name: Publish timetable on GitHub Pages
 on:
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/pages-redirect.yml'
-      - 'scripts/build-pages-redirect.mjs'
   workflow_dispatch:
 permissions:
   contents: read
   pages: write
   id-token: write
 concurrency:
-  group: pages-redirect
+  group: github-pages
   cancel-in-progress: true
 jobs:
   publish:
@@ -24,11 +21,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - run: pnpm install --frozen-lockfile
       - uses: actions/configure-pages@v5
-      - run: node scripts/build-pages-redirect.mjs
+      - run: pnpm build:pages
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: .cache/pages-redirect
+          path: .cache/pages-site
           retention-days: 1
       - uses: actions/deploy-pages@v4
         id: deployment

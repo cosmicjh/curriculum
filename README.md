@@ -1,12 +1,14 @@
-# 개인 시간표 · Workers + Static Assets + D1
+# 개인 시간표 · GitHub Pages + Workers API + D1
 
-배포 주소: [school-timetable.cosmicjh.workers.dev](https://school-timetable.cosmicjh.workers.dev) · [관리자](https://school-timetable.cosmicjh.workers.dev/admin.html)
+접속 주소: [cosmicjh.github.io/timetable](https://cosmicjh.github.io/timetable/) · [관리자](https://cosmicjh.github.io/timetable/admin.html)
 
-운영 브랜치는 **main**입니다. 전용 Worker·D1을 그대로 사용하며, 기존 GitHub Pages 주소는 새 Workers 서비스로 이동합니다. [main 전환·임시 자원 정리 기록](docs/MAIN_RELEASE_2026-11-02.md)을 확인하세요.
+운영 브랜치는 **main**입니다. 전용 Worker·D1을 그대로 사용하며, 화면은 GitHub Pages에서 직접 표시하고 API·데이터는 기존 Cloudflare를 유지합니다. [main 전환·임시 자원 정리 기록](docs/MAIN_RELEASE_2026-11-02.md)을 확인하세요.
 
-`cosmicjh/timetable`의 기존 HTML·모바일 CSS·HTML 내장 Pretendard·엑셀 등록·PNG·인쇄 화면을 유지하고, Apps Script 브리지를 같은 출처의 Workers API와 D1으로 교체했습니다. GitHub는 소스 관리와 Workers Builds 연결에 계속 사용합니다.
+`cosmicjh/timetable`의 기존 HTML·모바일 CSS·HTML 내장 Pretendard·엑셀 등록·PNG·인쇄 화면을 유지하고, Apps Script 브리지를 Workers API와 D1으로 교체했습니다. GitHub Pages 화면은 허용된 출처의 API를 호출하며 주소창은 github.io에 유지됩니다. GitHub는 소스 관리와 화면 자동 게시에 계속 사용합니다.
 
-이 프로젝트 루트는 **개인시간표 저장소의 루트**입니다. 다른 `course-allocation` 프로젝트의 Pages 설정이나 DB를 사용하지 않습니다. 이 작업의 복제본은 `course-allocation/timetable-cloudflare/`, 운영 브랜치는 `main`, 최초 원본 커밋은 `bd6e7db`입니다. 기존 GitHub Pages 주소는 연결 전용으로 보존하고 Apps Script·스프레드시트 자료는 삭제하지 않습니다.
+이 프로젝트 루트는 **개인시간표 저장소의 루트**입니다. 다른 `course-allocation` 프로젝트의 Pages 설정이나 DB를 사용하지 않습니다. 이 작업의 복제본은 `course-allocation/timetable-cloudflare/`, 운영 브랜치는 `main`, 최초 원본 커밋은 `bd6e7db`입니다. GitHub Pages 주소에서 실제 화면을 제공하고 Apps Script·스프레드시트 자료는 삭제하지 않습니다.
+
+GitHub 화면의 로그인은 탭 메모리에서만 유지하므로 새로고침하면 재로그인합니다. 토큰을 localStorage·sessionStorage·쿠키에 저장하지 않습니다. 기존 Workers 직접 접속의 HttpOnly 쿠키 인증도 유지합니다. [주소 전환과 인증 안내](docs/GITHUB_PAGES_2026-11-02.md)
 
 ## 로컬 실행
 
@@ -30,6 +32,7 @@ pnpm dev
 ```sh
 pnpm test             # 계산 규칙 + 실제 임시 D1 통합 테스트
 pnpm test:browser     # Edge(Windows) / Chromium, 모바일·PNG·인쇄·엑셀·입력 보호
+pnpm test:pages-browser # 격리된 두 출처에서 쿠키 없는 로그인·저장 검증
 pnpm test:worker      # Wrangler D1 마이그레이션·dry-run·실제 dev 라우팅
 pnpm test:all
 pnpm benchmark        # 학생 900명·분반 288개·배정 7,200개·교사 120명
@@ -47,16 +50,19 @@ Linux/macOS에서 브라우저가 없으면 `pnpm exec playwright install --with
 | Workers 프로젝트 / Wrangler name | `school-timetable` |
 | 저장소 루트 | `/` |
 | Worker 진입점 | `src/worker.js` |
-| build | `pnpm build` |
+| Pages build | `pnpm build:pages` → `.cache/pages-site` |
+| Worker build | `pnpm build` |
 | deploy | `pnpm run deploy` |
 | Static Assets | `assets.directory: ./dist`, `binding: ASSETS` |
-| API | 같은 Worker의 `/api/*`, Worker 우선 실행 |
+| API | `https://school-timetable.cosmicjh.workers.dev/api/*` |
+| 허용된 화면 출처 | `https://cosmicjh.github.io` |
 | D1 | `DB`, 새 `school-timetable-db`, `migrations/` |
 
-현재 계정의 D1·마이그레이션·인증값 등록은 완료했습니다. 다른 계정의 최초 구성과 재배포·이관·복구 순서는 [배포 안내](docs/DEPLOYMENT.md)를 따릅니다. Pages 프로젝트로 배포하지 않습니다.
+현재 계정의 D1·마이그레이션·인증값 등록은 완료했습니다. 다른 계정의 최초 구성과 재배포·이관·복구 순서는 [배포 안내](docs/DEPLOYMENT.md)를 따릅니다. 화면은 GitHub Pages로 게시하며 Cloudflare Pages 프로젝트는 사용하지 않습니다.
 
 ## 구현과 결과
 
+- [GitHub 주소에서 직접 접속](docs/GITHUB_PAGES_2026-11-02.md)
 - [main 전환과 임시 자원 정리](docs/MAIN_RELEASE_2026-11-02.md)
 - [기존 API·기능 대응과 저장 구조](docs/ARCHITECTURE.md)
 - [배포·GitHub 연동·무료 한도·복구](docs/DEPLOYMENT.md)

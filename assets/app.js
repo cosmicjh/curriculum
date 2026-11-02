@@ -26,7 +26,7 @@
   modal.addEventListener('cancel',e=>{if(busyCount)e.preventDefault();});
   function route(){const h=location.hash.match(/^#\/(home|student|teacher|admin)/);return h?h[1]:(document.body.dataset.page||'home');}
   function href(page){return '#/'+page;}
-  function session(role){try{const s=JSON.parse(sessionStorage.getItem('timetable.'+role)||'null');if(s&&s.expiresAt>Date.now())return s;}catch(e){}sessionStorage.removeItem('timetable.'+role);return null;}
+  function session(role){try{const s=JSON.parse(sessionStorage.getItem('timetable.'+role)||'null');if(s&&s.expiresAt>Date.now()&&TTApi.hasSession(role))return s;}catch(e){}sessionStorage.removeItem('timetable.'+role);return null;}
   function token(role){return (session(role)||role==='teacher'&&session('admin')||{}).token||'';}
   async function call(action,args={},role){const writes=new Set(['commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','backup','restore','changePassword']);const viewTerm=role==='admin'?state.admin?.store.term:role==='teacher'?state.teacherBoot?.meta.term:undefined;return TTApi.request(action,{...(!['adminBootstrap','teacherBootstrap','login','logout'].includes(action)&&viewTerm?{viewTerm}:{}),...(writes.has(action)?{expectedTerm:state.admin?.store.term,expectedRevision:state.admin?.meta.revision}:{}),...args});}
   function toast(message){$('#toast').textContent=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').textContent='',5500);}

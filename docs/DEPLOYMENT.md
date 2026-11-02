@@ -1,6 +1,6 @@
 # Cloudflare 배포·복구 안내
 
-현재 서비스는 [school-timetable.cosmicjh.workers.dev](https://school-timetable.cosmicjh.workers.dev)에 배포되어 있습니다. 현재 계정의 D1 생성·스키마·Secret 등록은 완료했으므로 재생성하지 않습니다. 아래 최초 준비 절차는 새 계정/새 설치용입니다. [실제 배포 결과](DEPLOYED_2026-10-30.md)를 먼저 확인하세요.
+접속 화면은 [cosmicjh.github.io/timetable](https://cosmicjh.github.io/timetable/)에서 제공하고 API는 기존 school-timetable Worker에 있습니다. [GitHub Pages 주소 구성](GITHUB_PAGES_2026-11-02.md)을 확인하세요. 현재 계정의 D1 생성·스키마·Secret 등록은 완료했으므로 재생성하지 않습니다. 아래 최초 준비 절차는 새 계정/새 설치용입니다. [실제 배포 결과](DEPLOYED_2026-10-30.md)를 먼저 확인하세요.
 
 이 안내의 명령은 개인시간표 GitHub 저장소 루트에서 실행합니다. 이 작업의 로컬 복제본은 `course-allocation/timetable-cloudflare`입니다. 기존 시수배당 저장소 루트의 Wrangler 파일과 DB는 다른 서비스입니다.
 
@@ -33,7 +33,7 @@ pnpm exec wrangler secret bulk private/bootstrap.local.json
 
 ## GitHub 연동 자동 배포
 
-기존 GitHub 저장소 `cosmicjh/timetable`을 유지합니다. Cloudflare → Workers & Pages에서 **Worker** `school-timetable`의 Builds에 이 저장소를 연결합니다. Pages 프로젝트를 생성하지 않습니다.
+기존 GitHub 저장소 `cosmicjh/timetable`을 유지합니다. Cloudflare → Workers & Pages에서 **Worker** `school-timetable`의 Builds에 이 저장소를 연결합니다. Cloudflare Pages 프로젝트를 생성하지 않습니다. GitHub Pages는 `.github/workflows/pages.yml`이 실제 화면을 게시합니다.
 
 | 설정 | 값 |
 | --- | --- |
@@ -46,15 +46,17 @@ pnpm exec wrangler secret bulk private/bootstrap.local.json
 | Assets | `./dist`, ASSETS 바인딩 |
 | D1 | DB → 실제 `school-timetable-db` |
 
-자동 배포에 필요한 Cloudflare 권한은 Builds 연결에서 설정합니다. 외부 CI를 사용하면 GitHub Secret에 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID를 설정합니다. 토큰과 bootstrap 파일을 커밋하지 않습니다. 검증용 GitHub Actions는 가상 자료 기능 테스트만 수행하며 운영 자료 이관이나 성능 벤치마크를 실행하지 않습니다. Pages 연결 전용 workflow는 기존 주소를 새 서비스로 보내는 HTML만 게시합니다.
+자동 배포에 필요한 Cloudflare 권한은 Builds 연결에서 설정합니다. 외부 CI를 사용하면 GitHub Secret에 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID를 설정합니다. 토큰과 bootstrap 파일을 커밋하지 않습니다. 검증용 GitHub Actions는 가상 자료 기능 테스트만 수행하며 운영 자료 이관이나 성능 벤치마크를 실행하지 않습니다. GitHub Pages workflow는 검증된 공개 HTML·CSS·JS만 게시하고 API·DB·시험 자료·비밀값을 포함하지 않습니다.
 
 마이그레이션은 최초 배포 전에 위 순서로 실행합니다. 이후 새 SQL 마이그레이션을 추가할 때도 원격 DB 백업 후 호환성 검토와 명시적인 마이그레이션을 먼저 실행합니다. 코드 재배포만으로 DB·계정·학생 자료를 초기화하지 않습니다.
 
-## 기존 운영 주소 보존
+## 접속 주소와 운영 자료 보존
 
-운영 코드는 main으로 통합합니다. 기존 https://cosmicjh.github.io/timetable 주소는 GitHub Actions의 Pages 연결 전용 workflow로 유지하며, 학생·교사·관리자 경로와 query/hash를 새 Worker 주소로 보냅니다. Pages에 업무 화면·API·학생 자료를 이중 배포하지 않습니다. 별도 legacy 브랜치는 만들지 않습니다.
+운영 주소는 https://cosmicjh.github.io/timetable/ 입니다. GitHub Pages가 실제 화면을 표시하며 다른 사이트로 이동시키거나 iframe으로 감싸지 않습니다. API와 데이터는 기존 Cloudflare Worker·D1을 계속 사용합니다.
 
-Cloudflare는 기존 school-timetable Worker와 school-timetable-db를 계속 사용합니다. 재배포에 새 DB 생성·스키마 초기화·Secret 재생성이 필요하지 않습니다. GitHub 연결을 사용할 경우 운영 브랜치를 main으로 설정합니다. 기존 Apps Script·스프레드시트 자료는 보존하되 새 서비스의 운영 의존은 없습니다.
+main push 시 Pages workflow가 pnpm build:pages를 실행하여 공개 파일만 게시합니다. Cloudflare API 코드 변경은 pnpm run deploy로 먼저 반영합니다. FRONTEND_ORIGIN은 https://cosmicjh.github.io로 제한합니다. 새 DB 생성·스키마 초기화·Secret 재생성은 하지 않습니다.
+
+GitHub 주소에서는 타 사이트 쿠키 없이 탭 메모리 세션으로 인증합니다. 새로고침하면 재로그인합니다. 기존 Worker 직접 접속은 HttpOnly·Secure·SameSite 쿠키를 유지합니다. 두 화면은 같은 계정·D1을 사용하고 서버 권한·로그아웃·비밀번호 변경에 의한 세션 폐기를 동일하게 적용합니다.
 
 ## 구성·무료 범위
 

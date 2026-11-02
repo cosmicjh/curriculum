@@ -27,5 +27,8 @@
   },
   "account_id": "965071bae1ca798003675034b0ce7ce5",
   "workers_dev": true,
-  "preview_urls": false
+  "preview_urls": false,
+  "vars": {
+    "FRONTEND_ORIGIN": "https://cosmicjh.github.io"
+  }
 }

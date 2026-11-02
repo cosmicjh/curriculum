@@ -1,5 +1,7 @@
 # 전환 구조와 기존 기능 대응
 
+현재 접속 주소는 GitHub Pages입니다. [GitHub 화면과 Workers API의 인증·출처 분리](GITHUB_PAGES_2026-11-02.md)를 함께 확인하세요. 아래 쿠키 설명은 Workers 직접 접속에 해당하고 GitHub 화면에는 탭 메모리 세션이 적용됩니다.
+
 ## 확인한 원본
 
 - 실제 작업 원본: `https://github.com/cosmicjh/timetable`, 커밋 `bd6e7db`.
@@ -12,7 +14,7 @@ Code.gs 전체를 서버에서 흉내 내지 않고 저장·권한·캐시·잠�
 
 ## API 대응
 
-모든 업무 요청은 `POST /api/{action}`, JSON 본문을 사용합니다. 성공은 `{ok:true,data}`, 오류는 `{ok:false,code,error}`와 HTTP 오류 상태입니다. 응답은 `Cache-Control: no-store`입니다. 출처가 정확히 일치하는 요청만 허용합니다. 기존 token 인자는 폐기했고 실제 세션은 HttpOnly 쿠키에만 있습니다.
+모든 업무 요청은 `POST /api/{action}`, JSON 본문을 사용합니다. 성공은 `{ok:true,data}`, 오류는 `{ok:false,code,error}`와 HTTP 오류 상태입니다. 응답은 `Cache-Control: no-store`입니다. Worker 자체 출처 또는 설정된 GitHub 출처의 요청만 허용합니다. Workers 직접 접속은 HttpOnly 쿠키, GitHub 화면은 메모리에만 보관하는 세션을 사용합니다.
 
 | 기존 Code.gs action | 권한 / 새 동작 |
 | --- | --- |
