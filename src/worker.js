@@ -1,11 +1,12 @@
+import {classSwap} from './class-swap.js';
 import Core from './core.js';
 import * as D from './domain.js';
 import * as S from './storage.js';
 import * as Auth from './auth.js';
 import {allowedRequest,pagesRequest,cors} from './origin.js';
-const reads=new Set(['bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup']);
+const reads=new Set(['classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup']);
 const writes=new Set(['commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','backup','restore','changePassword']);
-const teacherActions=new Set(['teacherBootstrap','teacher','roster','classBatch']);
+const teacherActions=new Set(['classSwap','teacherBootstrap','teacher','roster','classBatch']);
 async function teacherBoot(db,ctx,req={}){
  const m=await S.metadata(db,ctx,true);if(req.knownRevision===m.revision)return {unchanged:true,revision:m.revision,historyRevision:m.historyRevision,meta:m};
  const teachers=(await db.all('SELECT name FROM teachers WHERE term_id=? ORDER BY name',ctx.term)).map(r=>r.name);
@@ -141,8 +142,9 @@ async function api(request,env){
   if(!allowedRequest(request,env))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
   if(!request.headers.get('Content-Type')?.startsWith('application/json'))Auth.fail(415,'INVALID_REQUEST','JSON 요청을 사용하세요.');
   if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');
-  const length=Number(request.headers.get('Content-Length')||0);if(length>10*1024*1024)Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');
-  const reader=request.body?.getReader(),chunks=[];let size=0;if(reader){while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>10*1024*1024){await reader.cancel();Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');}chunks.push(value);}}
+  const maxBody=action==='classSwap'?256*1024:10*1024*1024;
+  const length=Number(request.headers.get('Content-Length')||0);if(length>maxBody)Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');
+  const reader=request.body?.getReader(),chunks=[];let size=0;if(reader){while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>maxBody){await reader.cancel();Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');}chunks.push(value);}}
   const bytes=new Uint8Array(size);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.length;}
   let req;try{req=JSON.parse(new TextDecoder().decode(bytes));}catch{Auth.fail(400,'INVALID_REQUEST','JSON 형식을 확인하세요.');}if(!req||typeof req!=='object'||Array.isArray(req))Auth.fail(400,'INVALID_REQUEST','요청을 확인하세요.');req.action=action;
   let data;
@@ -152,6 +154,7 @@ async function api(request,env){
    data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx):await teacherBoot(db,ctx);}
   }else{
    const session=action==='bootstrap'||action==='student'?null:await Auth.authenticate(db,request,teacherActions.has(action)?'teacher':'admin',env);
+   if(action==='classSwap'){data=await classSwap(env,session,req);return Response.json({ok:true,data},{headers});}
    if(action==='student')await Auth.rateLimit(db,request,'student',60);
    const ctx=await S.context(db);
    if(req.viewTerm&&req.viewTerm!==ctx.term)Auth.fail(409,'TERM_CHANGED','활성 학기가 변경되어 해당 학기 자료를 다시 불러옵니다. 이전 입력값은 이전 학기의 초안으로 보관합니다.');

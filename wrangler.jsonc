@@ -17,6 +17,12 @@
       "database_name": "school-timetable-db",
       "migrations_dir": "migrations",
       "database_id": "c4c3186c-bcfa-4bb9-959f-5086151abce8"
+    },
+    {
+      "binding": "CLASS_SWAP_DB",
+      "database_name": "class-swap-db",
+      "database_id": "d4e9d2e3-35cb-475f-b128-c78d714cd354",
+      "migrations_dir": "vendor/class-swap/migrations"
     }
   ],
   "build": {

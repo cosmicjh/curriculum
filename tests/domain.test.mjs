@@ -6,8 +6,8 @@ import Core from '../src/core.js';
 import {fixture} from './fixture.mjs';
 import * as D from '../src/domain.js';
 import {createHash} from 'node:crypto';
-test('original four HTML files, embedded font and responsive/print CSS remain unchanged',async()=>{
- const baseline=JSON.parse(await readFile('tests/fixtures/ui-baseline.json','utf8'));for(const [file,expected] of Object.entries(baseline)){const content=(await readFile(file,'utf8')).replaceAll('\r\n','\n');assert.equal(createHash('sha256').update(content).digest('hex'),expected,file);if(file.endsWith('.html'))assert.match(content,/id="embedded-pretendard".*data:font\/woff2;base64,/);}
+test('original HTML, embedded font and base CSS are preserved beneath the integration styles',async()=>{
+ const baseline=JSON.parse(await readFile('tests/fixtures/ui-baseline.json','utf8'));for(const [file,expected] of Object.entries(baseline)){const content=(await readFile(file,'utf8')).replaceAll('\r\n','\n');assert.equal(createHash('sha256').update(file==='assets/style.css'?content.split('\n.teacher-tools')[0]:content).digest('hex'),expected,file);if(file.endsWith('.html'))assert.match(content,/id="embedded-pretendard".*data:font\/woff2;base64,/);}
 });
 test('original Core.gs synthetic golden results: student, teacher, rosters and 2+1 slots',async()=>{
  const golden=JSON.parse(await readFile('tests/fixtures/legacy-results.json','utf8')),store=fixture(),rt=Core.runtime(store);

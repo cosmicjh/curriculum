@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/cosmicjh/cheomdancs",
+  "branch": "codex/cloudflare-workers-migration",
+  "files": {
+    "src/shared/core.js": "a7991560fe08b16ef7055913de82cc512592e8e94ecdaab1ecfc16c869060b83",
+    "src/shared/backup.js": "dfc916bdc9f606c2a8379eff2f26923b53411816df5322c8aace96622ca8896e",
+    "src/server/storage.js": "9c04e5f6d17f4ee6c3e57915bb0db8bfe6ff545472b027e90e4aaa2b70365a50",
+    "src/server/crypto.js": "e283b05153a06d34a0137973cc090498ceb40cd2cbfd62c44557cb9b9a366098",
+    "src/server/errors.js": "8e702747b3c46f71950e5b8a7ca9d2718777ab1766b392a631dd8949a47333a9",
+    "src/client/index.html": "d5b782ff96e846d6e15a1cf37d4e0cb6947d891a92a7cd98695a14e101f4bdd1",
+    "src/client/app.js": "76eabcddf15af4d0426438004a4d4e1fe660e6be144a30d80aee7eb204d061c4",
+    "src/client/xlsx.full.min.js": "ac8d774d39bb05a527f87912e2c283e237e3633120b31acf20bc6eef0e19eede",
+    "src/client/LICENSE-Pretendard.txt": "3b8ac478fa32708ecd929cd7eae8cc32aba1710ca8ec95386d0db9db89ce57dd",
+    "src/client/LICENSE-SheetJS.txt": "f9463066a83f512aaa2c4f5bda7514c82110ec46b703f477d112c90d33b7ed83",
+    "migrations/0001_class_swap.sql": "788caa4fc4c270927fad7bb9c5840c8d310a5523cc02c1a403a40430acc6139b",
+    "migrations/0002_import_documents.sql": "bade8ce327ba749c1d591913d3272342aee5b0c2f8ab260419fdb966d09f853e"
+  },
+  "revision": "22969ac08150d80f31ec9caf35f2b1e5caebd709"
+}

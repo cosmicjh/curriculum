@@ -1,0 +1,2 @@
+* text=auto eol=lf
+vendor/class-swap/** -text -whitespace

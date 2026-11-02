@@ -1,0 +1,5 @@
+import {C} from '../vendor/class-swap/src/shared/core.js';
+import {today} from '../vendor/class-swap/src/shared/backup.js';
+const futureWeek=C.monday(C.addDays(today(),14));
+export function synthetic(){return C.validateDataset({schema:1,meta:{label:'가상 검증 시간표'},slots:[0,1,2,3,4].flatMap(day=>[1,2,3].map(period=>({day,period}))),teachers:[{id:'a',name:'가교사'},{id:'b',name:'나교사'},{id:'c',name:'다교사'}],electives:[{grade:2,subject:'미적분',abbr:'미적분'},{grade:3,subject:'물리학Ⅱ',abbr:'물리Ⅱ'},{grade:3,subject:'중국 문화',abbr:'중문화'}],lessons:[{teacherId:'a',day:0,period:1,subject:'과학',room:'1-1'},{teacherId:'b',day:1,period:2,subject:'수학',room:'1-1'},{teacherId:'c',day:0,period:1,subject:'국어',room:'1-2'},{teacherId:'c',day:1,period:2,subject:'공강B',room:'스터디카'}]});}
+export const rawPlan=(suffix='0123456789abcdef')=>({id:'p_'+suffix,version:0,teacherA:'a',reason:'출장',submitDate:'2026-11-02',submitter:'가교사',items:[{mode:'swap',dateA:futureWeek,periodA:1,teacherB:'b',dateB:C.addDays(futureWeek,1),periodB:2}]});

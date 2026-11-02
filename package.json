@@ -17,12 +17,13 @@
     "test": "node --test tests/*.test.mjs",
     "test:browser": "node tests/browser.mjs",
     "test:worker": "node tests/wrangler.mjs",
-    "test:all": "pnpm test && pnpm test:browser && pnpm test:pages-browser && pnpm test:worker",
+    "test:all": "pnpm test && pnpm test:browser && pnpm test:pages-browser && pnpm test:worker && pnpm test:teacher-tools",
     "benchmark": "node scripts/benchmark.mjs",
     "compare:backups": "node scripts/compare-backups.mjs",
     "test:remote": "node scripts/verify-remote.mjs",
     "build:pages": "node scripts/build-pages.mjs",
-    "test:pages-browser": "node tests/pages-browser.mjs"
+    "test:pages-browser": "node tests/pages-browser.mjs",
+    "test:teacher-tools": "node tests/teacher-tools-browser.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
