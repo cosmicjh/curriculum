@@ -47,13 +47,21 @@ export function prepareImport(store,payload,preserve=true,revision=''){
   const ids=new Set(imported.map(s=>s.id));for(const s of store.sections)if(!ids.has(s.id))imported.push(s);
   next.sections=imported;parts.push('sections');
  }
- if(payload.students){const seen=new Set();for(const raw of payload.students){
-  const sourceKey=Core.key(raw),candidates=next.students.filter(s=>s.sourceKey===sourceKey||Core.key(s)===sourceKey);if(candidates.length>1)throw Error('학번 연결이 모호합니다: '+sourceKey);
-  const old=candidates[0],s=old?structuredClone(old):{id:crypto.randomUUID(),sourceKey,status:'재학',choices:{},manualFields:[]};if(seen.has(s.id))throw Error('등록 학생이 중복됩니다: '+sourceKey);seen.add(s.id);
+ if(payload.students){
+ const seen=new Set(),studentsByKey=new Map(),sectionsBySource=new Map();
+ // Build lookup keys once. Re-normalizing every section for every choice can
+ // exhaust the deployed Worker's CPU before its atomic D1 write starts.
+ for(const section of next.sections)if(!sectionsBySource.has(section.sourceKey))sectionsBySource.set(section.sourceKey,section);
+ const keys=s=>new Set([s.sourceKey,Core.key(s)]);
+ function indexStudent(s,index,remove=false){for(const key of keys(s)){if(remove)studentsByKey.get(key)?.delete(index);else{if(!studentsByKey.has(key))studentsByKey.set(key,new Set());studentsByKey.get(key).add(index);}}}
+ next.students.forEach((s,index)=>indexStudent(s,index));
+ for(const raw of payload.students){
+  const sourceKey=Core.key(raw),candidates=Array.from(studentsByKey.get(sourceKey)||[]);if(candidates.length>1)throw Error('학번 연결이 모호합니다: '+sourceKey);
+  const index=candidates[0],old=index===undefined?null:next.students[index],s=old?structuredClone(old):{id:crypto.randomUUID(),sourceKey,status:'재학',choices:{},manualFields:[]};if(seen.has(s.id))throw Error('등록 학생이 중복됩니다: '+sourceKey);seen.add(s.id);
   for(const k of ['grade','classNum','number','name','note']){const value=['grade','classNum','number'].includes(k)?Core.number(raw[k]):clean(raw[k],k==='note'?500:80);if(preserve&&old&&s.manualFields.includes(k)){if(value!==s[k])summary.preservedFields++;}else s[k]=value;}
-  for(const subject of Object.keys(raw.choices||{})){const value=clean(raw.choices[subject],30);if(preserve&&old&&s.manualFields.includes('choice:'+subject)){if(value!==s.choices[subject])summary.preservedFields++;}else {const mapped=next.sections.find(c=>c.sourceKey===Core.sectionKey(raw.grade,subject,value));s.choices[mapped?.subject||subject]=mapped?.code||value;}}
+  for(const subject of Object.keys(raw.choices||{})){const value=clean(raw.choices[subject],30);if(preserve&&old&&s.manualFields.includes('choice:'+subject)){if(value!==s.choices[subject])summary.preservedFields++;}else {const mapped=sectionsBySource.get(Core.sectionKey(raw.grade,subject,value));s.choices[mapped?.subject||subject]=mapped?.code||value;}}
   if(!preserve)s.manualFields=s.manualFields.filter(k=>k==='status');s.updatedAt=new Date().toISOString();
-  if(old){next.students[next.students.indexOf(old)]=s;if(JSON.stringify({...s,updatedAt:old.updatedAt})!==JSON.stringify(old))summary.changedStudents++;}else{next.students.push(s);summary.addedStudents++;}
+  if(old){indexStudent(old,index,true);next.students[index]=s;indexStudent(s,index);if(JSON.stringify({...s,updatedAt:old.updatedAt})!==JSON.stringify(old))summary.changedStudents++;}else{const addedIndex=next.students.length;next.students.push(s);indexStudent(s,addedIndex);summary.addedStudents++;}
  }
  const grades=new Set(payload.students.map(s=>String(s.grade)));summary.missingStudents=store.students.filter(s=>grades.has(s.grade)&&!seen.has(s.id)).length;
  if(summary.missingStudents)summary.warnings.push('업로드에 없는 기존 학생 '+summary.missingStudents+'명은 유지합니다.');parts.push('students');}

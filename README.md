@@ -62,6 +62,7 @@ Linux/macOS에서 브라우저가 없으면 `pnpm exec playwright install --with
 
 ## 구현과 결과
 
+- [자료 등록 연결 오류 수정](docs/IMPORT_FIX_2026-11-02.md)
 - [GitHub 주소에서 직접 접속](docs/GITHUB_PAGES_2026-11-02.md)
 - [main 전환과 임시 자원 정리](docs/MAIN_RELEASE_2026-11-02.md)
 - [기존 API·기능 대응과 저장 구조](docs/ARCHITECTURE.md)
