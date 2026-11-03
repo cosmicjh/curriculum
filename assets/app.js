@@ -14,20 +14,33 @@
   let busyCount=0,toastTimer;
   const app=$('#app'),modal=$('#modal');
   const swapPane=document.createElement('section');swapPane.id='class-swap-pane';swapPane.className='shell';swapPane.hidden=true;swapPane.setAttribute('aria-label','결보강');app.after(swapPane);
-  let swapFrame=null,swapObserver=null;
-  function swapDirty(){return Boolean(swapFrame?.contentWindow.ClassSwapEmbed?.dirty);}
+  let swapView=null;
+  function swapDirty(){return Boolean(swapView?.dirty);}
   function hideSwap(){swapPane.hidden=true;app.classList.remove("teacher-tools");}
   function showSwap(){
     if(!token('teacher')||state.route!=='teacher'){hideSwap();return;}
     swapPane.hidden=false;app.classList.add("teacher-tools");
-    if(!swapFrame){swapFrame=document.createElement('iframe');swapFrame.title='결보강 도구';swapFrame.addEventListener('load',()=>{swapObserver?.disconnect();if(!swapFrame)return;const shell=swapFrame.contentDocument.querySelector('.shell');if(shell){swapObserver=new ResizeObserver(()=>{if(swapFrame&&!swapPane.hidden)swapFrame.style.height=Math.ceil(shell.getBoundingClientRect().height+24)+'px';});swapObserver.observe(shell);}});const url=new URL('class-swap/index.html',location.href);url.searchParams.set('v',window.TIMETABLE_CONFIG?.assetVersion||'1');swapFrame.src=url.href;swapPane.append(swapFrame);}
-    else swapFrame.contentWindow.ClassSwapEmbed?.resume();
+    run(async()=>{
+      if(swapView){await swapView.resume();return;}
+      const base=new URL('class-swap/',location.href),version=window.TIMETABLE_CONFIG?.assetVersion||'1';
+      const [module,response,initial]=await Promise.all([import(new URL('app.js?v='+version,base)),fetch(new URL('view.html?v='+version,base)),requestSwap('resume')]);
+      if(!response.ok)throw Error('결보강 화면을 불러오지 못했습니다. 다시 선택해 주세요.');
+      const html=await response.text(),host=document.createElement('div'),root=host.attachShadow({mode:'open'});root.innerHTML=html;
+      swapView=module.mountClassSwap(root,initial,{request:requestSwap,selectedTeacher:()=>state.teacherName||'',print:(html,css,page)=>run(()=>printClassSwap(html,css,page),null,false)});
+      swapPane.replaceChildren(host);
+    });
   }
-  function discardSwap(){swapObserver?.disconnect();swapObserver=null;swapFrame?.contentWindow.ClassSwapEmbed?.discard();swapFrame?.remove();swapFrame=null;hideSwap();}
-  window.TimetableClassSwap=Object.freeze({selectedTeacher:()=>state.teacherName||'',async request({action,payload={}}){
-    try{const data=await TTApi.request('classSwap',{swapAction:action,swapPayload:payload});return {ok:true,data};}
-    catch(error){if(error.code==='AUTH_REQUIRED'){rememberForms();sessionStorage.removeItem('timetable.teacher');sessionStorage.removeItem('timetable.admin');state.teacherBoot=null;state.timetable=null;if(state.route==='teacher')renderLogin('teacher');}return {ok:false,code:error.code,message:error.message};}
-  }});
+  function discardSwap(){swapView?.destroy();swapView=null;swapPane.replaceChildren();hideSwap();}
+  async function requestSwap(action,payload={}){
+    try{return await TTApi.request('classSwap',{swapAction:action,swapPayload:payload});}
+    catch(error){if(error.code==='AUTH_REQUIRED'){rememberForms();sessionStorage.removeItem('timetable.teacher');sessionStorage.removeItem('timetable.admin');state.teacherBoot=null;state.timetable=null;if(state.route==='teacher')renderLogin('teacher');}throw error;}
+  }
+  async function printClassSwap(html,css,page){
+    const target=$('#print-root'),host=document.createElement('div'),style=document.createElement('style');
+    style.textContent=page;host.attachShadow({mode:'open'}).innerHTML='<style>'+css+'</style><div id="printRoot">'+html+'</div>';
+    target.className='print-root';target.replaceChildren(style,host);await document.fonts.ready;
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));window.print();
+  }
   window.addEventListener('beforeunload',event=>{if(swapDirty()){event.preventDefault();event.returnValue='';}});
 
   const surfaces=[$('#header'),app,modal,swapPane],lockedControls=new Map();
