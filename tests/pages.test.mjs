@@ -10,4 +10,6 @@ test('Pages serves the original app and embedded font without redirects, private
  }
  const config=await readFile('.cache/pages-site/config.js','utf8');assert(config.includes('https://school-timetable.cosmicjh.workers.dev/api/'));assert(!config.includes('PASSWORD_'));
  assert(!files.includes('_headers'));assert(!files.includes('scripts/build-pages.mjs'));
+ assert.deepEqual(files.filter(f=>f.replaceAll('\\','/').startsWith('class-swap/')).map(f=>f.replaceAll('\\','/').slice('class-swap/'.length)).sort(),['LICENSE-Pretendard.txt','LICENSE-SheetJS.txt','app.js','core.js','index.html','xlsx.full.min.js']);
+ const child=await readFile('.cache/pages-site/class-swap/index.html','utf8');assert.match(child,/app\.js\?v=[a-f0-9]{12}/);
 });

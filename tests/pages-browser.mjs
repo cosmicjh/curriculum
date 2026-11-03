@@ -41,6 +41,37 @@ try{
  await step('refresh requires a new login and logout revokes the in-memory Pages session',async()=>{
   await page.reload();await idle();await page.locator('#password').waitFor();assert.equal(await page.locator('[data-action=new-student]').count(),0);await login();await page.locator('[data-action=logout]').click();await page.locator('#password').waitFor();await idle();assert.equal(await page.evaluate(()=>TTApi.hasSession('admin')),false);
  });
+ await step('Separate password buttons select the intended role and preserve unsaved settings',async()=>{
+  await login();await page.locator('[data-action=admin-tab]').filter({hasText:'설정',exact:true}).click();await idle();
+  assert.equal(await page.locator('#password-role').count(),0);assert.equal(await page.locator('[data-action=password-dialog]').count(),2);
+  const teacher=await h.login('teacher');
+  await page.locator('#set-school').fill('비밀번호 변경 중 설정 유지');
+  await page.getByRole('button',{name:'교사 비밀번호 변경',exact:true}).click();
+  assert.equal(await page.locator('#modal h2').textContent(),'교사 비밀번호 변경');
+  assert.equal(await page.locator('form[data-form=password]').getAttribute('data-role'),'teacher');
+  await page.locator('#password-current').fill('1234');await page.locator('#password-new').fill('교사5678');await page.locator('#password-confirm').fill('다른비밀번호');
+  const before=requests.filter(r=>r.action==='changePassword').length;
+  await page.locator('form[data-form=password] button.primary').click();await idle();
+  assert.match(await page.locator('#toast').textContent(),/확인이 다릅니다/);assert.equal(requests.filter(r=>r.action==='changePassword').length,before);
+  await page.locator('#password-confirm').fill('교사5678');
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:'test-results/password-teacher-mobile.png',fullPage:true});
+  await page.locator('form[data-form=password] button.primary').click();await page.waitForFunction(()=>!document.querySelector('#modal').open);await idle();
+  assert.equal(await page.locator('#set-school').inputValue(),'비밀번호 변경 중 설정 유지');assert.equal(await page.locator('#password-new').count(),0);
+  assert.equal((await h.api('teacherBootstrap',{},teacher.cookie)).status,401);await h.login('teacher','교사5678');assert.equal((await h.api('adminBootstrap',{},cookieAdmin.cookie)).status,200);
+ });
+ await step('Admin password button requires a fresh login and revokes existing admin sessions',async()=>{
+  const teacher=await h.login('teacher','교사5678');
+  await page.setViewportSize({width:1440,height:1000});
+  await page.getByRole('button',{name:'관리자 비밀번호 변경',exact:true}).click();
+  assert.equal(await page.locator('#modal h2').textContent(),'관리자 비밀번호 변경');
+  assert.equal(await page.locator('form[data-form=password]').getAttribute('data-role'),'admin');assert.equal(await page.locator('#password-new').inputValue(),'');
+  await page.locator('#password-current').fill('1234');await page.locator('#password-new').fill('관리자5678');await page.locator('#password-confirm').fill('관리자5678');
+  await page.screenshot({path:'test-results/password-admin-desktop.png',fullPage:true});
+  await page.locator('form[data-form=password] button.primary').click();await page.locator('#password').waitFor();await idle();
+  assert.equal((await h.api('adminBootstrap',{},cookieAdmin.cookie)).status,401);assert.equal((await h.api('teacherBootstrap',{},teacher.cookie)).status,200);
+  assert.equal(await page.evaluate(()=>TTApi.hasSession('admin')),false);await page.locator('#password').fill('관리자5678');await page.locator('form[data-form=login] button').click();await page.locator('[data-action=password-dialog]').first().waitFor();await idle();
+ });
  // Intercepted browser requests can omit network preflights; pages-api.test covers them separately.
  assert(requests.filter(r=>r.method==='POST').every(r=>r.origin===pages));assert(requests.some(r=>r.action==='saveStudent'&&r.authorized));assert.deepEqual(errors,[]);
  await writeFile('test-results/pages-browser.json',JSON.stringify({steps,requests,errors},null,2)+'\n');

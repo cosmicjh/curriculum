@@ -26,8 +26,8 @@ jobs:
       - run: pnpm setup:local
       - run: pnpm test:all
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: failure()
         with:
           name: synthetic-local-results
           path: test-results/
-          retention-days: 7
+          retention-days: 1

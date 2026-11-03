@@ -1,12 +1,16 @@
-# 개인 시간표 · GitHub Pages + Workers API + D1
+# 개인 시간표 · 결보강 도구 · GitHub Pages + Workers API + D1
 
 접속 주소: [cosmicjh.github.io/timetable](https://cosmicjh.github.io/timetable/) · [관리자](https://cosmicjh.github.io/timetable/admin.html)
+
+두 도구의 소스와 빌드를 `cosmicjh/timetable` 저장소에서 관리합니다. 교사 로그인 후 **개인 시간표 · 결보강 · 교과 명렬표 · 학급 인쇄** 탭을 전환하며, 결보강에 다시 로그인할 필요가 없습니다. 개인시간표와 결보강은 기존의 서로 다른 D1 DB를 그대로 연결하므로 자료를 복사하거나 비밀번호를 초기화하지 않습니다. [통합 구조와 배포 안내](docs/teacher-tools.md)
+
+관리자 → 설정의 **교사 비밀번호 변경**, **관리자 비밀번호 변경** 버튼에서 각각 변경합니다. 버튼을 누르면 현재 관리자 비밀번호와 새 비밀번호를 입력하는 창이 열립니다. 교사 비밀번호는 두 통합 도구의 공통 로그인에 적용되며, 관리자 비밀번호를 바꾸면 다시 로그인합니다.
 
 운영 브랜치는 **main**입니다. 전용 Worker·D1을 그대로 사용하며, 화면은 GitHub Pages에서 직접 표시하고 API·데이터는 기존 Cloudflare를 유지합니다. [main 전환·임시 자원 정리 기록](docs/MAIN_RELEASE_2026-11-02.md)을 확인하세요.
 
 `cosmicjh/timetable`의 기존 HTML·모바일 CSS·HTML 내장 Pretendard·엑셀 등록·PNG·인쇄 화면을 유지하고, Apps Script 브리지를 Workers API와 D1으로 교체했습니다. GitHub Pages 화면은 허용된 출처의 API를 호출하며 주소창은 github.io에 유지됩니다. GitHub는 소스 관리와 화면 자동 게시에 계속 사용합니다.
 
-이 프로젝트 루트는 **개인시간표 저장소의 루트**입니다. 다른 `course-allocation` 프로젝트의 Pages 설정이나 DB를 사용하지 않습니다. 이 작업의 복제본은 `course-allocation/timetable-cloudflare/`, 운영 브랜치는 `main`, 최초 원본 커밋은 `bd6e7db`입니다. GitHub Pages 주소에서 실제 화면을 제공하고 Apps Script·스프레드시트 자료는 삭제하지 않습니다.
+이 프로젝트 루트는 **개인시간표·결보강 통합 저장소의 루트**입니다. 다른 `course-allocation` 프로젝트의 Pages 설정이나 DB를 사용하지 않습니다. 이 작업의 복제본은 `course-allocation/timetable-cloudflare/`, 운영 브랜치는 `main`, 최초 원본 커밋은 `bd6e7db`입니다. GitHub Pages 주소에서 실제 화면을 제공하고 Apps Script·스프레드시트 자료는 삭제하지 않습니다.
 
 GitHub 화면의 로그인은 탭 메모리에서만 유지하므로 새로고침하면 재로그인합니다. 토큰을 localStorage·sessionStorage·쿠키에 저장하지 않습니다. 기존 Workers 직접 접속의 HttpOnly 쿠키 인증도 유지합니다. [주소 전환과 인증 안내](docs/GITHUB_PAGES_2026-11-02.md)
 
@@ -57,6 +61,7 @@ Linux/macOS에서 브라우저가 없으면 `pnpm exec playwright install --with
 | API | `https://school-timetable.cosmicjh.workers.dev/api/*` |
 | 허용된 화면 출처 | `https://cosmicjh.github.io` |
 | D1 | `DB`, 새 `school-timetable-db`, `migrations/` |
+| 결보강 D1 | `CLASS_SWAP_DB`, 기존 `class-swap-db`, `vendor/class-swap/migrations/` |
 
 현재 계정의 D1·마이그레이션·인증값 등록은 완료했습니다. 다른 계정의 최초 구성과 재배포·이관·복구 순서는 [배포 안내](docs/DEPLOYMENT.md)를 따릅니다. 화면은 GitHub Pages로 게시하며 Cloudflare Pages 프로젝트는 사용하지 않습니다.
 
