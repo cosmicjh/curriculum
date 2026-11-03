@@ -32,7 +32,7 @@
   }
   function discardSwap(){swapView?.destroy();swapView=null;swapPane.replaceChildren();hideSwap();}
   async function requestSwap(action,payload={}){
-    try{return await TTApi.request('classSwap',{swapAction:action,swapPayload:payload});}
+    try{const result=await TTApi.request('classSwap',{swapAction:action,swapPayload:payload});if(result.teacherBootstrap){state.teacherBoot=result.teacherBootstrap;state.timetable=null;state.roster=null;useMeta(state.teacherBoot.meta);renderTeacher();}return result;}
     catch(error){if(error.code==='AUTH_REQUIRED'){rememberForms();sessionStorage.removeItem('timetable.teacher');sessionStorage.removeItem('timetable.admin');state.teacherBoot=null;state.timetable=null;if(state.route==='teacher')renderLogin('teacher');}throw error;}
   }
   async function printClassSwap(html,css,page){

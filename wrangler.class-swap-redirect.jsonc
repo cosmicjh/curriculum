@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "class-swap",
+  "main": "src/legacy-class-swap.js",
+  "compatibility_date": "2026-07-30",
+  "account_id": "965071bae1ca798003675034b0ce7ce5",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {"enabled": false}
+}

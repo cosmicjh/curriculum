@@ -39,8 +39,14 @@ var TTCore = (function () {
       if(seen[norm(name)])throw Error('교사명이 중복됩니다: '+name);
       seen[norm(name)]=true;
       var slots=[];
-      DAYS.forEach(function(d){(columns[d]||[]).forEach(function(col,p){
-        slots.push({day:d,period:p+1,rawSubject:text((rows[i]||[])[col]),rawRoom:text((rows[i+1]||[])[col])});
+      DAYS.forEach(function(d){var previous=null;(columns[d]||[]).forEach(function(col,p){
+        var slot={day:d,period:p+1,rawSubject:text((rows[i]||[])[col]),rawRoom:text((rows[i+1]||[])[col])};
+        if(/^(?:[─━-]*[▷▶>→]|→)$/.test(slot.rawSubject)){
+          if(!previous)throw Error(name+'의 연속수업 연결 표시를 확인하세요.');
+          previous.blockId=previous.blockId||'teacher:'+norm(name)+':'+d+':'+previous.period;
+          slot.rawSubject=previous.rawSubject;slot.rawRoom=slot.rawRoom||previous.rawRoom;slot.blockId=previous.blockId;
+        }
+        slots.push(slot);previous=slot.rawSubject&&!(slot.rawSubject==='공강'&&!slot.rawRoom)?slot:null;
       });});
       teachers.push({id:'teacher:'+norm(name),name:name,slots:slots});
     }
@@ -137,6 +143,7 @@ var TTCore = (function () {
     if(!teacher)throw Error('교사 정보를 찾을 수 없습니다.');
     return {kind:'teacher',name:teacher.name,cells:teacher.slots.map(function(l){
       var binding=rt.bindings[slotKey(teacher.name,l.day,l.period)], s=binding.section, cell=blank(l.day,l.period);
+      if(l.period>Number((rt.store.settings||defaultSettings()).periods[l.day]||0))return cell;
       cell.subject=s?s.subject:l.rawSubject;cell.sectionCode=s?s.code:'';cell.room=s?(s.room||l.rawRoom):l.rawRoom;cell.isElective=!!s;
       if(s)cell.roster={kind:'elective',sectionId:s.id};
       else if(binding.candidates.length>1)cell.roster={kind:'choose',sectionIds:binding.candidates.map(function(c){return c.id;})};

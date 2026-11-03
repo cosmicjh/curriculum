@@ -5,11 +5,10 @@ import {resolve,extname} from 'node:path';
 import {harness} from './harness.mjs';
 import {backup} from './fixture.mjs';
 import '../scripts/build-pages.mjs';
-import {synthetic,rawPlan} from './class-swap-fixture.mjs';
+import {sharedBackup,sharedStore,rawPlan,ids} from './class-swap-fixture.mjs';
 // Reserved test hosts only. Every browser request is fulfilled locally or aborted.
 const pages='https://timetable-pages.test',api='https://timetable-api.test',h=await harness({frontendOrigin:pages});
-const cookieAdmin=await h.login();assert((await h.mutation('restore',{backup:backup()},cookieAdmin.cookie)).ok);
-await h.sqlOn('CLASS_SWAP_DB','UPDATE state SET dataset=?,revision=1,data_rev=1 WHERE id=1',JSON.stringify(synthetic()));
+const cookieAdmin=await h.login();assert((await h.mutation('restore',{backup:sharedBackup()},cookieAdmin.cookie)).ok);
 let browser,swapGate;const errors=[],requests=[],steps=[];await mkdir('test-results',{recursive:true});
 async function step(name,fn){await fn();steps.push(name);console.log('PASS '+name);}
 try{
@@ -38,7 +37,7 @@ try{
  const swapIdle=()=>swap.locator('#uiLock:not([disabled])').waitFor();
  await step('Class swap is a native timetable view with no login screen even while its data is delayed',async()=>{
   await page.goto(pages+'/timetable/teacher.html');await idle();await login();
-  await page.locator('#teacher-name').fill('가상교사');await page.locator('form[data-form=teacher] button').click();await page.locator('.tt').waitFor();await idle();
+  await page.locator('#teacher-name').fill('가교사');await page.locator('form[data-form=teacher] button').click();await page.locator('.tt').waitFor();await idle();
   let release;swapGate=new Promise(resolve=>release=resolve);
   await page.locator('[data-tab=classSwap]').click();await page.waitForFunction(()=>document.body.dataset.loading==='true');
   assert.equal(await page.locator('input[type=password]').count(),0);assert.equal(await page.locator('iframe').count(),0);
@@ -49,23 +48,36 @@ try{
  });
  const plan=rawPlan();
  await step('The native view preserves drafts, saves and cancels in D1, and uses the shared print area',async()=>{
-  await swap.locator('#teacherA').selectOption('a');await swap.locator('#reason').fill('통합 검증');
+  await swap.locator('#teacherA').selectOption(ids.a);await swap.locator('#reason').fill('통합 검증');
   await swap.locator('#dateA').fill(plan.items[0].dateA);await swap.locator('#dateA').dispatchEvent('change');
   await swap.locator('#weekB').fill(plan.items[0].dateA);await swap.locator('#weekB').dispatchEvent('change');
-  await swap.locator('[data-action=cellA][data-day="0"][data-period="1"]').click();await swap.locator('#teacherB').selectOption('b');await swap.locator('[data-action=cellB][data-day="1"][data-period="2"]').click();await swap.locator('[data-action=add]').click();
+  await swap.locator('[data-action=cellA][data-day="0"][data-period="1"]').click();await swap.locator('#teacherB').selectOption(ids.b);await swap.locator('[data-action=cellB][data-day="1"][data-period="2"]').click();await swap.locator('[data-action=add]').click();
   assert.equal(await swap.locator('#itemCount').textContent(),'1건');
   await page.locator('[data-tab=timetable]').click();assert.equal(await page.locator('#app .tt').count(),1);await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();assert.equal(await swap.locator('#reason').inputValue(),'통합 검증');assert.equal(await swap.locator('#itemCount').textContent(),'1건');
-  await swap.locator('[data-action=save]').click();await swapIdle();assert.equal((await h.sqlOn('CLASS_SWAP_DB','SELECT count(*) n FROM reservations')).results[0].n,4);
+  await swap.locator('[data-action=save]').click();await swapIdle();assert.equal((await h.sql('SELECT count(*) n FROM swap_reservations')).results[0].n,4);
   await page.evaluate(()=>{window.print=()=>{window.printCalled=true;};});await swap.locator('[data-action=printDraft]').click();await page.waitForFunction(()=>window.printCalled);assert.equal(await page.locator('#print-root .print-page').count(),1);assert.match(await page.locator('#print-root > style').textContent(),/A4 portrait/);
   await page.setViewportSize({width:794,height:1123});await page.emulateMedia({media:'print'});assert(await page.locator('#print-root .print-page').isVisible());await page.screenshot({path:'test-results/class-swap-print.png',fullPage:true});await page.emulateMedia({media:'screen'});await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
   await swap.locator('[data-action=noticeDraft]').click();await page.waitForFunction(()=>document.querySelector('#print-root > style')?.textContent.includes('landscape'));assert.equal(await page.locator('#print-root .notice-page').count(),1);await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
-  await swap.locator('[data-action=nav]').filter({hasText:'저장된 계획서'}).click();page.once('dialog',d=>d.accept());await swap.locator('[data-action=cancelPlan]').first().click();await swapIdle();assert.equal((await h.sqlOn('CLASS_SWAP_DB','SELECT count(*) n FROM reservations')).results[0].n,0);
+  await swap.locator('[data-action=nav]').filter({hasText:'저장된 계획서'}).click();page.once('dialog',d=>d.accept());await swap.locator('[data-action=cancelPlan]').first().click();await swapIdle();assert.equal((await h.sql('SELECT count(*) n FROM swap_reservations')).results[0].n,0);
   await swap.locator('[data-action=nav]').filter({hasText:'계획서 작성'}).click();
  });
  await step('Session expiry uses only the shared login and retains the native draft through reauthentication',async()=>{
   await swap.locator('#reason').fill('로그인 후에도 유지');await h.sql("DELETE FROM sessions WHERE role='teacher'");
   await swap.locator('#writeView [data-action=refresh]').click();await page.locator('#password').waitFor();await idle();await login();await swap.locator('#appView').waitFor({state:'visible'});await swapIdle();assert.equal(await swap.locator('#reason').inputValue(),'로그인 후에도 유지');
   assert.equal(await page.locator('#class-swap-pane > div').count(),1);assert.equal(await swap.locator('input[type=password]').count(),0);
+ });
+ await step('One administrator XLSX update changes both the teacher timetable and class swap',async()=>{
+  const manager=await context.newPage();await manager.goto(pages+'/timetable/admin.html');await manager.waitForFunction(()=>document.body.dataset.loading==='false');await manager.locator('#password').fill('1234');await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=imports]').click();await manager.waitForFunction(()=>document.body.dataset.loading==='false');
+  await manager.evaluate(()=>TTAssets.load('xlsx'));const store=sharedStore();store.teacherRows[2][2]='공통 수정 과학';store.teacherRows.push(['4','추가교사'],['','']);
+  const bytes=await manager.evaluate(rows=>{const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet(rows),'교사시간표');return Array.from(new Uint8Array(XLSX.write(book,{type:'array',bookType:'xlsx'})));},store.teacherRows);
+  await manager.locator('#import-teacher').setInputFiles({name:'shared-teachers.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(bytes)});await manager.locator('form[data-form=preview-import] button').click();await manager.locator('[data-action=commit-import]').waitFor();await manager.waitForFunction(()=>document.body.dataset.loading==='false');await manager.locator('[data-action=commit-import]').click();await manager.waitForFunction(()=>document.body.dataset.loading==='false');
+  await swap.locator('#writeView [data-action=refresh]').click();await swapIdle();assert.match(await swap.locator('#teacherA').textContent(),/추가교사/);await swap.locator('#teacherA').selectOption(ids.a);assert.match(await swap.locator('#tableA').textContent(),/공통 수정 과학/);
+  await page.locator('[data-tab=timetable]').click();await page.locator('#teacher-name').fill('가교사');await page.locator('form[data-form=teacher] button').click();await idle();assert.match(await page.locator('#app .tt').textContent(),/공통 수정 과학/);await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();await manager.close();
+ });
+ await step('Term changes update the shared heading and keep unsaved class swap drafts per term',async()=>{
+  await swap.locator('#reason').fill('이전 학기 초안');const settings={...sharedStore().settings,academicYear:2027,semester:1};assert((await h.mutation('saveSettings',{settings},cookieAdmin.cookie)).ok);
+  await swap.locator('#writeView [data-action=refresh]').click();await swapIdle();await idle();assert.match(await page.locator('#app .term-label').textContent(),/2027학년도 1학기/);assert.equal(await swap.locator('#reason').inputValue(),'');assert(await swap.locator('#noDataset').isVisible());
+  assert((await h.mutation('switchTerm',{term:'2026-2'},cookieAdmin.cookie)).ok);await swap.locator('#writeView [data-action=refresh]').click();await swapIdle();await idle();assert.equal(await swap.locator('#reason').inputValue(),'이전 학기 초안');assert.match(await page.locator('#app .term-label').textContent(),/2026학년도 2학기/);
  });
  await step('Minimal monochrome mobile and desktop views preserve Pretendard and fit the page',async()=>{
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

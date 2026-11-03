@@ -1,4 +1,4 @@
-import {classSwap} from './class-swap.js';
+import {classSwap,validateSchedule} from './class-swap.js';
 import Core from './core.js';
 import * as D from './domain.js';
 import * as S from './storage.js';
@@ -68,7 +68,7 @@ async function read(db,ctx,req){
  Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
 }
 async function mutate(db,env,ctx,session,req,headers){
- let result=true,statements=[],parts=[],before=null,after=null,target='',backupId=null,changedStudents=[],changedSection=null,bootstrap=false,activeTerm=ctx.term,historyOnly=false;
+ let result=true,statements=[],parts=[],before=null,after=null,target='',backupId=null,changedStudents=[],changedSection=null,bootstrap=false,activeTerm=ctx.term,historyOnly=false,nextSwapStore=null;
  const action=req.action;
  if(action==='saveStudent'){
   const st=await S.load(db,ctx,['students','sections'],'AND id=?',[req.student?.id||'']);if(req.student?.id&&!st.students.length)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');
@@ -102,7 +102,7 @@ async function mutate(db,env,ctx,session,req,headers){
   const st=await S.load(db,ctx);let next;
   if(action==='commitImport'){const p=D.prepareImport(st,req.payload,req.preserveManual!==false,String(ctx.revision));if(p.summary.errors.length)throw Error(p.summary.errors.join('\n'));next=p.store;parts=p.parts;result=p.summary;}
   else {const raw=req.backup||await S.readBackup(db,req.backupId);if(raw.format!=='school-timetable-backup'||raw.schemaVersion!==1)throw Error('백업 형식·버전을 확인하세요.');next=structuredClone(raw.store);if(!next?.settings||String(next.settings.academicYear)+'-'+next.settings.semester!==ctx.term||next.term&&next.term!==ctx.term)throw Error('백업과 현재 학기가 다릅니다. 먼저 해당 학기로 전환하세요.');next.term=ctx.term;next.overrides??=[];next.blocks??=[];parts=['students','sections','teacherRows','overrides','blocks','config'];}
-  D.assertStore(next);const snap=S.snapshot(db,st,action==='restore'?'복원 전':'자료 등록 전');backupId=snap.id;
+  D.assertStore(next);nextSwapStore=next;const snap=S.snapshot(db,st,action==='restore'?'복원 전':'자료 등록 전');backupId=snap.id;
   statements.push(...snap.statements,...S.replaceParts(db,next,parts));if(parts.includes('config'))statements.push(db.prepare('UPDATE terms SET settings=? WHERE id=?',JSON.stringify(D.settings(next.settings)),ctx.term));bootstrap=true;after=action==='commitImport'?result:{backupId:req.backupId||'파일'};target=ctx.term;
  }else if(action==='backup'){
   const snap=S.snapshot(db,await S.load(db,ctx),'수동 백업');statements.push(...snap.statements);result={id:snap.id,backup:snap.backup};backupId=snap.id;historyOnly=true;
@@ -111,6 +111,17 @@ async function mutate(db,env,ctx,session,req,headers){
   try{statements=await Auth.passwordChangeStatements(db,env,req);}catch(e){if(e.code==='AUTH_REQUIRED'){await Auth.revoke(db,env.request,env);if(!pagesRequest(env.request,env)){headers.append('Set-Cookie',Auth.cookie('teacher'));headers.append('Set-Cookie',Auth.cookie('admin'));}}throw e;}
   target=req.role;historyOnly=true;
  }else Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
+ if(action!=='switchTerm'&&parts.some(p=>p!=='students')){
+  const proposed=nextSwapStore||await S.load(db,{...ctx,term:activeTerm,settings:action==='saveSettings'?result:ctx.settings},['sections','teacherRows','overrides','blocks']);
+  if(changedSection)proposed.sections=[...proposed.sections.filter(s=>s.id!==changedSection.id),changedSection];
+  if(action==='saveOverride'){const o=req.override;proposed.overrides=proposed.overrides.filter(x=>Core.slotKey(x.teacher,x.day,x.period)!==Core.slotKey(o.teacher,o.day,o.period));if(o.sectionId)proposed.overrides.push(o);}
+  if(action==='saveBlock'||action==='saveBlocks'){
+   const blocks=action==='saveBlock'?[req.block]:req.blocks;
+   proposed.blocks=proposed.blocks.filter(x=>action==='saveBlocks'?x.grade!==String(req.grade):!blocks.some(b=>String(b.grade)===x.grade&&b.day===x.day&&Number(b.period)===x.period));
+   proposed.blocks.push(...blocks.filter(b=>b.block));
+  }
+  await validateSchedule(db,proposed);
+ }
  await S.commit(db,ctx,session,req,statements,{parts,before,after,target,backupId,activeTerm,historyOnly});
  if(action==='changePassword'&&!pagesRequest(env.request,env))headers.append('Set-Cookie',Auth.cookie(req.role));
  const updated=await S.context(db);if(action==='changePassword')return true;
@@ -136,7 +147,7 @@ async function api(request,env){
    if(!pagesRequest(request,env)||request.headers.get('Access-Control-Request-Method')!=='POST'||requested.some(h=>!['content-type','authorization'].includes(h)))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
    headers.set('Access-Control-Allow-Methods','POST');headers.set('Access-Control-Allow-Headers','Content-Type, Authorization');return new Response(null,{status:204,headers});
   }
-  if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1'}},{headers});}
+  if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1',sharedTimetable:true}},{headers});}
   const action=path.slice(5);if(!reads.has(action)&&!writes.has(action)&&!['login','logout','passwordParameters'].includes(action))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
   if(request.method!=='POST')Auth.fail(405,'METHOD_NOT_ALLOWED','POST 요청을 사용하세요.');
   if(!allowedRequest(request,env))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
@@ -154,19 +165,23 @@ async function api(request,env){
    data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx):await teacherBoot(db,ctx);}
   }else{
    const session=action==='bootstrap'||action==='student'?null:await Auth.authenticate(db,request,teacherActions.has(action)?'teacher':'admin',env);
-   if(action==='classSwap'){data=await classSwap(env,session,req);return Response.json({ok:true,data},{headers});}
    if(action==='student')await Auth.rateLimit(db,request,'student',60);
    const ctx=await S.context(db);
    if(req.viewTerm&&req.viewTerm!==ctx.term)Auth.fail(409,'TERM_CHANGED','활성 학기가 변경되어 해당 학기 자료를 다시 불러옵니다. 이전 입력값은 이전 학기의 초안으로 보관합니다.');
-   if(writes.has(action)){if(req.expectedTerm!==ctx.term||req.expectedRevision!==String(ctx.revision))Auth.fail(409,'CONFLICT','자료 또는 학기가 변경되었습니다. 입력값을 복사한 뒤 새로고침하여 다시 저장하세요.');data=await mutate(db,{...env,request},ctx,session,req,headers);}
+   if(action==='classSwap'){
+    data=await classSwap(db,ctx,session,req);
+    if(['load','resume'].includes(req.swapAction)&&req.swapPayload.term&&req.swapPayload.term!==ctx.term){data.teacherBootstrap=await teacherBoot(db,ctx);const current=await db.first('SELECT revision,active_term FROM app_state WHERE id=1');if(current.revision!==ctx.revision||current.active_term!==ctx.term)Auth.fail(409,'READ_CHANGED','자료가 변경되었습니다. 다시 조회하세요.');}
+   }
+   else if(writes.has(action)){if(req.expectedTerm!==ctx.term||req.expectedRevision!==String(ctx.revision))Auth.fail(409,'CONFLICT','자료 또는 학기가 변경되었습니다. 입력값을 복사한 뒤 새로고침하여 다시 저장하세요.');data=await mutate(db,{...env,request},ctx,session,req,headers);}
    else {data=await read(db,ctx,req);const check=await db.first('SELECT revision,active_term FROM app_state WHERE id=1');if(check.revision!==ctx.revision||check.active_term!==ctx.term)Auth.fail(409,'READ_CHANGED','자료가 변경되었습니다. 다시 조회하세요.');}
   }
   payload={ok:true,data};
  }catch(e){
   if(String(e.message).includes('revision_conflict')){e.status=409;e.code='CONFLICT';}
   if(String(e.message).includes('auth_required')){e.status=401;e.code='AUTH_REQUIRED';}
+  if(String(e.message).includes('shared_migration_in_progress')){e.status=503;e.code='MIGRATING';e.message='자료 통합 중입니다. 잠시 후 다시 저장하세요. 입력 내용은 유지됩니다.';}
   if(/UNIQUE constraint failed/.test(e.message)){e.status=409;e.code='CONFLICT';}
-  status=e.status||400;payload={ok:false,code:e.code||'REQUEST_ERROR',error:status>=500?'서버 설정 또는 처리를 확인하세요.':e.message};if(status===429)headers.set('Retry-After','60');
+  status=e.status||400;payload={ok:false,code:e.code||'REQUEST_ERROR',error:status>=500&&e.code!=='MIGRATING'?'서버 설정 또는 처리를 확인하세요.':e.message};if(status===429)headers.set('Retry-After','60');
  }
  headers.set('Server-Timing',`app;dur=${(performance.now()-start).toFixed(2)}, db;dur=${(db?.stats.ms||0).toFixed(2)}`);headers.set('X-D1-Rows-Read',String(db?.stats.read||0));headers.set('X-D1-Rows-Written',String(db?.stats.written||0));
  return Response.json(payload,{status,headers});

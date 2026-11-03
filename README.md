@@ -2,7 +2,7 @@
 
 접속 주소: [cosmicjh.github.io/timetable](https://cosmicjh.github.io/timetable/) · [관리자](https://cosmicjh.github.io/timetable/admin.html)
 
-두 도구의 소스와 빌드를 `cosmicjh/timetable` 저장소에서 관리합니다. 교사 로그인 후 **개인 시간표 · 결보강 · 교과 명렬표 · 학급 인쇄** 탭을 전환하며, 결보강에 다시 로그인할 필요가 없습니다. 개인시간표와 결보강은 기존의 서로 다른 D1 DB를 그대로 연결하므로 자료를 복사하거나 비밀번호를 초기화하지 않습니다. [통합 구조와 배포 안내](docs/teacher-tools.md)
+두 도구의 소스와 빌드를 `cosmicjh/timetable` 저장소에서 관리합니다. 교사 로그인 후 **개인 시간표 · 결보강 · 교과 명렬표 · 학급 인쇄** 탭을 전환하며, 결보강에 다시 로그인할 필요가 없습니다. **관리자에서 한 번 등록·수정한 교사·시간표·선택분반·수업 연결·요일별 교시를 두 기능이 함께 사용합니다.** 저장은 기존 `school-timetable-db` 하나로 통합하고, 결보강 계획서와 예약도 이 DB에 보존합니다. [통합 구조와 배포 안내](docs/teacher-tools.md)
 
 결보강은 별도 문서나 로그인 화면을 열지 않고 시간표 페이지의 기능으로 직접 표시합니다. 글꼴·인쇄 영역·세션을 공유하고, 재로그인이 필요하면 시간표의 공통 로그인 화면에서 처리합니다.
 
@@ -63,7 +63,7 @@ Linux/macOS에서 브라우저가 없으면 `pnpm exec playwright install --with
 | API | `https://school-timetable.cosmicjh.workers.dev/api/*` |
 | 허용된 화면 출처 | `https://cosmicjh.github.io` |
 | D1 | `DB`, 새 `school-timetable-db`, `migrations/` |
-| 결보강 D1 | `CLASS_SWAP_DB`, 기존 `class-swap-db`, `vendor/class-swap/migrations/` |
+| 결보강 저장 | 같은 `DB`, `swap_plans`·`swap_reservations`, `migrations/0002_shared_class_swap.sql` |
 
 현재 계정의 D1·마이그레이션·인증값 등록은 완료했습니다. 다른 계정의 최초 구성과 재배포·이관·복구 순서는 [배포 안내](docs/DEPLOYMENT.md)를 따릅니다. 화면은 GitHub Pages로 게시하며 Cloudflare Pages 프로젝트는 사용하지 않습니다.
 

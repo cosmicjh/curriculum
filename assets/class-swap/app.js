@@ -6,16 +6,22 @@ const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const uid=()=>{const a=new Uint32Array(4);crypto.getRandomValues(a);return Array.from(a,x=>x.toString(16).padStart(8,'0')).join('');};
 let busy=false,toastTimer=0;
-const S={dataset:null,plans:[],dataRev:'0',planRev:'0',view:'write',dirty:false,draft:null,sel:null,editIndex:-1,candidates:[]};
+const S={term:'',dataset:null,plans:[],dataRev:'0',planRev:'0',view:'write',dirty:false,draft:null,sel:null,editIndex:-1,candidates:[]},termDrafts=new Map();
 function resetDraft(){S.draft={id:'p_'+uid(),version:0,teacherA:'',reason:'',submitDate:today(),submitter:'',items:[]};S.dirty=false;resetSelection(false);}
 function resetSelection(preserveDates=true){const d=preserveDates&&S.sel?S.sel.dateA:today(),week=preserveDates&&S.sel?S.sel.weekB:C.monday(d);S.sel={mode:S.sel?S.sel.mode:'swap',dateA:d,periodA:0,weekB:week,teacherB:'',dateB:'',periodB:0,roomA:''};S.editIndex=-1;}
 function notify(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>{$('toast').hidden=true;},4500);}
 function showError(error){$('appError').textContent=error.message||String(error);$('appError').hidden=false;}
 function setBusy(value){busy=value;root.querySelectorAll('fieldset[data-lock]').forEach(e=>{e.disabled=value;});$('progress').hidden=!value;}
 async function work(fn){if(busy)return;setBusy(true);$('appError').hidden=true;try{return await fn();}catch(e){showError(e);}finally{setBusy(false);}}
-const api=(action,payload={})=>request(action,payload);
-function mergeSnapshot(v){if(v.dataset)S.dataset=v.dataset;else if(v.hasDataset===false)S.dataset=null;if(v.plans)S.plans=v.plans;S.dataRev=v.dataRev;S.planRev=v.planRev;}
-function showSnapshot(v){mergeSnapshot(v);if(!S.dirty&&!S.draft.teacherA){const teacher=S.dataset?.teachers.find(t=>t.name===selectedTeacher());if(teacher){S.draft.teacherA=teacher.id;S.draft.submitter=teacher.name;}}renderAll();}
+const api=(action,payload={})=>request(action,{term:S.term,...payload});
+function mergeSnapshot(v){if(v.dataset)S.dataset=v.dataset;else if(v.hasDataset===false)S.dataset=null;if(v.plans)S.plans=v.plans;S.term=v.term||S.term;S.dataRev=v.dataRev;S.planRev=v.planRev;}
+function showSnapshot(v){
+ const switched=!!S.term&&v.term!==S.term;
+ if(switched)termDrafts.set(S.term,{draft:S.draft,sel:S.sel,dirty:S.dirty,editIndex:S.editIndex,view:S.view});
+ mergeSnapshot(v);
+ if(switched){const previous=termDrafts.get(S.term);if(previous){Object.assign(S,previous);termDrafts.delete(S.term);}else{resetDraft();S.view='write';}}
+ if(!S.dirty&&!S.draft.teacherA){const teacher=S.dataset?.teachers.find(t=>t.name===selectedTeacher());if(teacher){S.draft.teacherA=teacher.id;S.draft.submitter=teacher.name;}}renderAll();
+}
 function markDirty(){S.dirty=true;$('dirtyLabel').hidden=false;}
 function teacherOptions(value,empty=true){return(empty?'<option value="">교사 선택</option>':'')+(S.dataset?S.dataset.teachers.slice().sort((a,b)=>a.name.localeCompare(b.name,'ko')).map(t=>'<option value="'+esc(t.id)+'"'+(t.id===value?' selected':'')+'>'+esc(t.name)+'</option>').join(''):'');}
 function currentItems(){return S.draft.items.filter((_,i)=>i!==S.editIndex);}
@@ -90,7 +96,7 @@ function addItem(){
 function saveDraft(){return work(async()=>{if(S.editIndex>=0)throw new Error('수정 중인 수업을 먼저 적용하거나 선택 취소해 주세요.');if(!S.dataset)throw new Error('등록된 시간표가 없습니다.');const raw=draftForSave();C.validatePlan(S.dataset,S.plans,raw);const r=await api('savePlan',{plan:raw,dataRev:S.dataRev});upsert(r.plan,r.planRev);S.draft=C.clone(r.plan);S.dirty=false;resetSelection();renderAll();notify('계획서를 저장했습니다.');});}
 function upsert(plan,rev){const i=S.plans.findIndex(p=>p.id===plan.id);if(i>=0)S.plans[i]=plan;else S.plans.push(plan);S.planRev=rev;}
 function switchView(view){S.view=view;renderAll();}
-async function refresh(){const r=await api('load',{dataRev:S.dataRev,planRev:S.planRev});mergeSnapshot(r);renderAll();notify('최신 자료를 불러왔습니다. 작성 중인 내용은 유지됩니다.');}
+async function refresh(){showSnapshot(await api('load',{dataRev:S.dataRev,planRev:S.planRev}));notify('최신 자료를 불러왔습니다. 작성 중인 내용은 학기별로 유지됩니다.');}
 function openPlan(id,copy){const p=S.plans.find(p=>p.id===id);if(!p)return;if(S.dirty&&!confirm('작성 중인 내용을 닫고 다른 계획서를 열겠습니까?'))return;S.draft=C.clone(p);if(copy){S.draft.id='p_'+uid();S.draft.version=0;S.draft.submitDate=today();delete S.draft.status;}S.dirty=!!copy;resetSelection();S.view='write';renderAll();window.scrollTo({top:0,behavior:'smooth'});}
 function editItem(index){const i=S.draft.items[index];if(!i)return;S.editIndex=index;S.sel={mode:i.mode,dateA:i.dateA,periodA:i.periodA,weekB:C.monday(i.dateB),teacherB:i.teacherB,dateB:i.dateB,periodB:i.periodB,roomA:i.roomA};renderSelection();$('tableA').scrollIntoView({behavior:'smooth',block:'center'});}
 function printableDraft(){if(!S.dataset)throw new Error('시간표를 먼저 등록해 주세요.');if(S.editIndex>=0)throw new Error('수정 중인 수업을 먼저 적용해 주세요.');const raw=draftForSave();return Object.assign({},raw,C.validatePlan(S.dataset,S.plans,raw));}
@@ -130,5 +136,5 @@ $('teacherB').addEventListener('change',()=>{S.sel.teacherB=$('teacherB').value;
 $('roomOverride').addEventListener('input',()=>{S.sel.roomA=$('roomOverride').value;});
 ['historySearch','historyStatus'].forEach(id=>$(id).addEventListener(id==='historySearch'?'input':'change',renderHistory));
 resetDraft();showSnapshot(initial);
-return Object.freeze({get dirty(){return S.dirty||S.editIndex>=0;},resume(){return work(async()=>showSnapshot(await api('resume',{dataRev:S.dataRev,planRev:S.planRev})));},destroy(){clearTimeout(toastTimer);root.replaceChildren();}});
+return Object.freeze({get dirty(){return S.dirty||S.editIndex>=0||Array.from(termDrafts.values()).some(d=>d.dirty||d.editIndex>=0);},resume(){return work(async()=>showSnapshot(await api('resume',{dataRev:S.dataRev,planRev:S.planRev})));},destroy(){clearTimeout(toastTimer);termDrafts.clear();root.replaceChildren();}});
 }

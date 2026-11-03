@@ -10,7 +10,7 @@ const require=createRequire(import.meta.url),cli=resolve(dirname(require.resolve
 const env={...process.env,CI:'true',WRANGLER_SEND_METRICS:'false',WRANGLER_LOG_PATH:resolve('test-results/wrangler-smoke.log')},results=[];
 await mkdir('test-results',{recursive:true});
 function child(args){const p=spawn(process.execPath,[cli,...args,'--config','wrangler.local.json'],{env,stdio:['ignore','pipe','pipe']});let out='';p.stdout.on('data',c=>out+=c);p.stderr.on('data',c=>out+=c);return {p,output:()=>out};}
-for(const args of [['d1','migrations','apply','DB','--local','--persist-to',persist],['d1','migrations','apply','CLASS_SWAP_DB','--local','--persist-to',persist],['deploy','--dry-run','--outdir','test-results/worker-bundle']]){
+for(const args of [['d1','migrations','apply','DB','--local','--persist-to',persist],['deploy','--dry-run','--outdir','test-results/worker-bundle']]){
  const {p,output}=child(args),code=await new Promise((r,j)=>{p.once('exit',r);p.once('error',j);});results.push({command:args.join(' '),code,output:output()});assert.equal(code,0,output());console.log('PASS Wrangler '+args.join(' '));
 }
 const probe=createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));

@@ -11,6 +11,8 @@ test('original HTML, embedded font and base CSS are preserved beneath the integr
 });
 test('original Core.gs synthetic golden results: student, teacher, rosters and 2+1 slots',async()=>{
  const golden=JSON.parse(await readFile('tests/fixtures/legacy-results.json','utf8')),store=fixture(),rt=Core.runtime(store);
+ // The shared operating periods now also clear the legacy teacher's unused Wed-7 room.
+ golden.teacher.cells.find(c=>c.day==='수'&&c.period===7).room='';
  assert.deepEqual(store.students.map(s=>Core.studentTimetable(rt,s)),golden.students);assert.deepEqual(Core.teacherTimetable(rt,'가상교사'),golden.teacher);assert.deepEqual(store.sections.map(s=>Core.roster(rt,{kind:'elective',sectionId:s.id})),golden.rosters);
 });
 test('five-file import: grade-3 two/three-unit merge, conflict detection and teacher matrix automatic columns',async()=>{
