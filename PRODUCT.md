@@ -20,4 +20,4 @@ web
 
 ## Capabilities and Constraints
 
-관리자 편집과 교사 열람 권한을 구분한다. 기존 학생 배정, 비밀번호와 결보강 기록을 보존한다. GitHub Pages와 Cloudflare Worker·D1으로 운영하며 cosmicjh/timetable의 main에서 배포한다. 이동수업 배치표는 24인치 FHD(1920×1080) 모니터에서 전체 교실을 가로 스크롤 없이 보이며, 2·3학년을 A3 또는 A4 가로 한 장으로 인쇄한다. 자동 실행 훅은 사용하지 않는다.
+관리자 편집과 교사 열람 권한을 구분한다. 기존 학생 배정, 비밀번호와 결보강 기록을 보존한다. GitHub Pages와 Cloudflare Worker·D1으로 운영하며 cosmicjh/timetable의 main에서 배포한다. 이동수업 배치표는 24인치 FHD(1920×1080) 모니터에서 2·3학년을 학년 전환 없이 한 표에서 함께 표시하고 전체 교실을 가로 스크롤 없이 보이며, 2·3학년을 A3 또는 A4 가로 한 장으로 인쇄한다. 자동 실행 훅은 사용하지 않는다.

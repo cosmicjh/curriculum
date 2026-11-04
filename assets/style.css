@@ -30,33 +30,54 @@
 .allocation-room-editor{display:grid;gap:14px;margin-top:20px}.allocation-room-row{display:grid;grid-template-columns:2fr 1fr 1.5fr auto;gap:10px;align-items:end;border-bottom:1px solid #eee;padding-bottom:14px}.allocation-room-row .check-label{padding-bottom:12px}.allocation-room-row .field{min-width:0}@media(max-width:600px){.allocation-room-row{grid-template-columns:2fr 1fr}.allocation-room-row .check-label{padding:0 0 10px}}
 .allocation-time{display:inline-block;white-space:nowrap;margin:0 2px}
 
+.allocation-grade-row th,.allocation-grade-row td{background:#ececec;color:#333;font-size:12px;font-weight:550}
+.allocation-table .allocation-grade-row th:first-child{background:#292929;color:#fff}
+.allocation-table .allocation-grade-row td{height:28px;padding:5px 3px;border-bottom-color:#c9c9c9}
+.allocation-table .allocation-empty{height:70px;text-align:center;color:#666}
+.allocation-room-row{grid-template-columns:minmax(130px,2fr) 70px repeat(2,minmax(100px,1.4fr)) auto}
+.allocation-dialog .allocation-room-row:has([data-homeroom-grade="1"]){grid-template-columns:repeat(2,minmax(120px,1fr))}
+@media(max-width:700px){.allocation-room-row{grid-template-columns:1fr 1fr}.allocation-grade-row th,.allocation-grade-row td{font-size:12px}}
 @media screen and (min-width:1100px){
- .shell:has(.allocation-view){max-width:none;margin:22px auto 32px;padding:0 20px}
- .shell:has(.allocation-view)>.view-head,.lookup:has(.allocation-view)>.view-head{margin-bottom:14px}
- .shell:has(.allocation-view) .admin-layout{display:block}
- .shell:has(.allocation-view) .admin-nav{flex-direction:row;gap:6px;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--border)}
- .shell:has(.allocation-view) .admin-nav button{padding:8px 13px}
- .allocation-view{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:20px}
+ body:has(.allocation-view) .topbar{max-width:none;height:48px;padding:0 20px}
+ .shell:has(.allocation-view){max-width:none;height:calc(100dvh - 60px);margin:12px auto 0;padding:0 20px 12px;display:flex;flex-direction:column}
+ .shell:has(.allocation-view)>.view-head,.lookup:has(.allocation-view)>.view-head{flex:none;margin-bottom:10px}
+ .shell:has(.allocation-view) .view-head>div{display:flex;align-items:baseline;gap:14px}
+ .shell:has(.allocation-view) .view-head h1{font-size:17px;letter-spacing:-.02em}
+ .shell:has(.allocation-view) .view-head p{margin:0}
+ .shell:has(.allocation-view) .admin-layout{display:flex;flex-direction:column;flex:1;min-height:0;gap:0}
+ .shell:has(.allocation-view) .admin-nav{flex:none;flex-direction:row;gap:6px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+ .shell:has(.allocation-view) .admin-nav button{padding:7px 13px}
+ .shell:has(.allocation-view) .admin-content,.lookup:has(.allocation-view),#teacher-allocation{display:flex;flex-direction:column;flex:1;min-height:0;width:100%}
+ .lookup:has(.allocation-view){margin:0}
+ .lookup:has(.allocation-view)>.tabs{flex:none;margin-bottom:12px;padding-bottom:8px}
+ .lookup:has(.allocation-view)>.tabs button{padding:7px 13px}
+ .allocation-view{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto minmax(0,1fr) auto;column-gap:20px;flex:1;min-height:0}
  .allocation-heading,#allocation-grid,.allocation-note{grid-column:1/-1;min-width:0}
- .allocation-heading{margin-bottom:12px;gap:12px;align-items:center}
- .allocation-heading h2{font-size:18px}.allocation-heading p{margin-top:5px}
- .allocation-filters{margin-bottom:8px;gap:10px;max-width:780px}
- .allocation-view>.toolbar{align-self:end;justify-content:end;margin-bottom:8px}
+ #allocation-grid{min-height:0}
+ .allocation-heading{margin-bottom:10px;gap:12px;align-items:center}
+ .allocation-heading h2{font-size:21px;letter-spacing:-.025em}.allocation-heading p{margin-top:4px;font-size:12px;color:#595959}
+ .allocation-heading button,.allocation-heading select,.allocation-view>.toolbar button{font-size:13px;padding:8px 12px;min-height:36px}
+ .allocation-filters{margin-bottom:10px;gap:18px;max-width:760px;align-items:center}
+ .allocation-filters>.field{display:flex;align-items:center;gap:8px}
+ .allocation-filters label{margin:0;white-space:nowrap;font-size:12px}
+ .allocation-filters .field input,.allocation-filters .field select{padding:8px 10px;font-size:13px}
+ .allocation-filters .allocation-search{max-width:480px}
+ .allocation-view>.toolbar{align-self:center;justify-content:end;margin-bottom:10px;gap:8px}
  .allocation-view:not(:has(>.toolbar)) .allocation-filters{grid-column:1/-1}
- .allocation-filters .field input,.allocation-filters .field select{padding:8px 10px}
- .allocation-sheet h3{margin:8px 0}
- .allocation-scroll{max-height:none;overflow:auto}
- .allocation-table{width:100%;min-width:0;font-size:11px}
+ .allocation-scroll{height:100%;max-height:none;overflow:auto;scrollbar-gutter:stable}
+ .allocation-table{width:100%;min-width:0;font-size:12.5px}
  .allocation-table th,.allocation-table td{width:auto;min-width:0;padding:5px 3px}
- .allocation-table tr>th:first-child{width:64px;min-width:0}
- .allocation-table thead th{height:52px}
- .allocation-table tbody th button{padding:3px 0}
- .allocation-table td{height:62px;padding:0}
- .allocation-cell{min-height:62px;padding:5px 3px}
- .allocation-table strong{line-height:1.25;word-break:normal}
- .allocation-table td>strong{padding:4px 3px 0}
- .allocation-teachers,.allocation-cell .allocation-teachers{font-size:10px;line-height:1.25;margin:4px 2px;word-break:keep-all}
- .allocation-times{font-size:10px;line-height:1.4;margin-top:4px}
- .allocation-vacant{font-size:10px;padding:4px 1px}
- .allocation-note{margin-top:10px}
+ .allocation-table tr>th:first-child{width:72px;min-width:0}
+ .allocation-table thead th{height:52px;font-size:12px;z-index:4}
+ .allocation-table thead th:first-child{z-index:5}
+ .allocation-table tbody th button{padding:3px 0;font-size:12.5px}
+ .allocation-table td{height:50px;padding:0}
+ .allocation-cell{min-height:50px;padding:6px 3px}
+ .allocation-table strong{line-height:1.3;word-break:normal;font-weight:600}
+ .allocation-table td>strong{padding:5px 3px 0}
+ .allocation-teachers,.allocation-cell .allocation-teachers{font-size:11.5px;line-height:1.25;margin:4px 0;word-break:keep-all;color:#454545}
+ .allocation-times{font-size:11px;line-height:1.35;margin-top:4px}
+ .allocation-vacant{font-size:11px;color:#999;padding:4px 1px}
+ .allocation-table .allocation-grade-row th,.allocation-table .allocation-grade-row td{height:28px;padding:4px 3px;font-size:12px}
+ .allocation-note{font-size:11px;margin-top:8px;line-height:1.4}
 }
