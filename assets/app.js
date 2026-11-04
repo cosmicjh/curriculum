@@ -22,7 +22,7 @@
     let view=allocationViews.get(key);
     if(!view){
       const version=window.TIMETABLE_CONFIG?.assetVersion||'1',module=await import('./allocations.js?v='+version),data=await call('allocation',{},role),host=document.createElement('div');
-      view=module.mountAllocation(host,data,{admin:role==='admin',request:(action,args={})=>call(action,args,role),loadXlsx:()=>TTAssets.load('xlsx'),print:async(html,kind)=>{const style=document.createElement('style');style.textContent='@page{size:A3 landscape;margin:8mm}';document.head.append(style);try{await print(html,kind);}finally{style.remove();}},onSaved:reply=>{state.admin=reply.bootstrap;state.teacherBoot=null;state.timetable=null;useMeta(reply.meta);toast('배치표를 저장했습니다.');},onError:error=>run(()=>{throw error;})});
+      view=module.mountAllocation(host,data,{admin:role==='admin',request:(action,args={})=>call(action,args,role),loadXlsx:()=>TTAssets.load('xlsx'),print:(html,kind,paper)=>print(html,kind,paper),onSaved:reply=>{state.admin=reply.bootstrap;state.teacherBoot=null;state.timetable=null;useMeta(reply.meta);toast('배치표를 저장했습니다.');},onError:error=>run(()=>{throw error;})});
       view.root=host;allocationViews.set(key,view);
     }
     root.replaceChildren(view.root);if(!view.dirty&&view.revision!==state.meta.revision)await view.refresh();
@@ -162,7 +162,22 @@
   function renderHistory(root){root.innerHTML='<div class="toolbar">'+select('switch-term',state.admin.terms,state.admin.store.term)+'<button data-action="switch-term">학기 전환</button><button data-action="backup">백업 저장</button><button data-action="restore-file">백업 불러오기</button><input type="file" id="restore-file" accept=".json" hidden></div><div class="table-scroll"><table class="data-table"><thead><tr><th>일시</th><th>작업</th><th>대상</th></tr></thead><tbody>'+state.admin.history.map(h=>'<tr><td>'+date(h.at)+'</td><td>'+esc(historyAction(h.action))+'</td><td>'+esc(h.target)+'</td></tr>').join('')+'</tbody></table></div><div class="settings-section"><h2 style="margin-bottom:18px">백업</h2><div class="table-scroll"><table class="data-table"><thead><tr><th>일시</th><th>이름</th><th></th></tr></thead><tbody>'+state.admin.backups.filter(b=>b.term===state.admin.store.term).map(b=>'<tr><td>'+date(b.at)+'</td><td>'+esc(b.label)+'</td><td><button class="mini" data-action="download-backup" data-id="'+esc(b.id)+'">다운로드</button> <button class="mini" data-action="restore-backup" data-id="'+esc(b.id)+'">복원</button></td></tr>').join('')+'</tbody></table></div></div>';}
   async function renderRoute(){hideSwap();state.route=route();header();if(state.route==='home')renderHome();if(state.route==='student')renderStudent();if(state.route==='teacher'){if(!token('teacher'))renderLogin('teacher');else await loadTeacher();}if(state.route==='admin'){if(!token('admin'))renderLogin('admin');else await loadAdmin();}}
   function download(blob,name){const link=document.createElement('a'),url=URL.createObjectURL(blob);link.href=url;link.download=name;link.hidden=true;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
-  async function print(html,kind){$('#print-root').className='print-root print-'+kind;$('#print-root').innerHTML=html;await document.fonts.load('600 12px "Pretendard Variable"',$('#print-root').textContent).catch(()=>{});await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));window.print();}
+  async function print(html,kind,paper='A3'){
+    const target=$('#print-root');target.className='print-root print-'+kind;target.innerHTML=html;
+    await document.fonts.load('600 12px "Pretendard Variable"',target.textContent).catch(()=>{});await document.fonts.ready;
+    let pageStyle;
+    try{
+      if(kind==='allocation'){
+        const size=paper==='A4'?{paper:'A4',width:285,height:198}:{paper:'A3',width:408,height:285},sheet=target.querySelector('.allocation-print');
+        pageStyle=document.createElement('style');pageStyle.textContent='@page{size:'+size.paper+' landscape;margin:6mm}';document.head.append(pageStyle);
+        target.classList.add('allocation-measure');
+        // Leave 2 mm for line-height rounding when the browser scales table rows.
+        const rect=sheet.getBoundingClientRect(),pxPerMm=rect.width/408,scale=Math.min(1,size.width*pxPerMm/Math.max(rect.width,sheet.scrollWidth),((size.height-2)*pxPerMm)/Math.max(rect.height,sheet.scrollHeight));
+        sheet.style.zoom=String(scale);target.classList.remove('allocation-measure');
+      }
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));window.print();
+    }finally{target.classList.remove('allocation-measure');pageStyle?.remove();}
+  }
   async function mutation(action,args){
     const teacher=$('#link-teacher')&&$('#link-teacher').value,grade=$('#block-grade')&&$('#block-grade').value,blocksOpen=$('#block-grade')&&$('#block-grade').closest('details').open;
     const reply=await call(action,Object.assign({expectedRevision:action==='saveStudent'?state.editingRevision:state.admin.meta.revision,patch:true,viewTeacher:teacher||''},args),'admin');

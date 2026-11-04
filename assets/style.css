@@ -7,6 +7,56 @@
 .teacher-tools{margin-bottom:16px}.teacher-tools .lookup{max-width:none}#class-swap-pane{max-width:1120px;padding-top:0;margin:0 auto 60px}#class-swap-pane[hidden]{display:none}body[data-loading="true"] #class-swap-pane{pointer-events:none}@media(max-width:740px){#class-swap-pane{padding:0 14px}.tabs{flex-wrap:wrap}}@media print{#class-swap-pane{display:none!important}}
 .allocation-heading{display:flex;flex-wrap:wrap;align-items:start;justify-content:space-between;gap:18px;margin-bottom:24px}.allocation-heading p{margin-top:8px;line-height:1.6}.allocation-heading .toolbar{margin:0;gap:8px}.allocation-status{font-size:12px;color:#555}.allocation-filters{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:20px}.allocation-filters select{width:100%}.allocation-search{flex:1;min-width:170px}.allocation-sheet h3{margin:22px 0 12px}.allocation-scroll{max-width:100%;max-height:65vh;overflow:auto;border:1px solid var(--border);border-radius:8px;background:#fff;scrollbar-color:#999 #eee}.allocation-scroll:focus-visible,button:focus-visible{outline:2px solid #333;outline-offset:2px}.allocation-table{border-collapse:separate;border-spacing:0;font-size:13px;min-width:100%;table-layout:fixed}.allocation-table th,.allocation-table td{min-width:138px;width:138px;padding:12px 10px;text-align:center;vertical-align:middle;border-right:1px solid #e5e5e5;border-bottom:1px solid #e5e5e5;overflow-wrap:anywhere}.allocation-table thead th{position:sticky;top:0;background:#f4f4f4;z-index:2;font-weight:600}.allocation-table tr>th:first-child{position:sticky;left:0;min-width:96px;width:96px;background:#f5f5f5;z-index:1}.allocation-table thead th:first-child{z-index:3}.allocation-table tbody th button{border:0;background:transparent;padding:4px;font-weight:650;width:100%}.allocation-table td{height:90px;padding:0}.allocation-table td>strong{padding:10px 8px 0;display:block}.allocation-table strong{font-weight:550;line-height:1.55}.allocation-table strong span{white-space:nowrap}.allocation-cell{display:block;width:100%;min-height:90px;border:0;border-radius:0;padding:12px 10px;background:transparent}.allocation-cell:hover{background:#f0f0f0}.allocation-times{display:block;font-size:12px;font-weight:450;line-height:1.6;margin-top:6px;white-space:normal}.allocation-teachers{display:block;font-size:12px;font-weight:400;line-height:1.5;color:#626262;margin:7px 8px 10px}.allocation-cell .allocation-teachers{margin:7px 0 0}.allocation-vacant{color:#737373;font-size:12px;display:inline-block;padding:12px}.allocation-note{margin-top:18px;line-height:1.7}.allocation-remove{margin-top:20px}.allocation-dialog textarea{width:100%}.allocation-dialog .modal-head button{border:0;font-size:22px;background:none;padding:2px 8px}.allocation-dialog .field{margin-top:10px}.allocation-table tr:last-child td,.allocation-table tr:last-child th{border-bottom:0}.allocation-table tr>*:last-child{border-right:0}.allocation-view input{caret-color:#222}.allocation-view ::selection{background:#ddd;color:#111}.lookup:has(.allocation-view){max-width:none}.tt .teachers{display:block;font-size:9px;color:#555;margin-top:3px}
 @media(max-width:700px){.allocation-heading{display:block}.allocation-heading .toolbar{margin-top:16px}.allocation-filters{gap:10px}.allocation-filters>.field{flex:1}.allocation-filters .allocation-search{flex-basis:100%}.allocation-table th,.allocation-table td{min-width:142px}.allocation-table tr>th:first-child{min-width:88px}.allocation-heading h2{font-size:18px}.allocation-scroll{max-height:60vh}}
-@media print{body:has(.print-allocation) .print-root{width:100%}.print-allocation>h2{font-size:16px;margin:0 0 5mm}.print-allocation .allocation-sheet{break-after:page}.print-allocation .allocation-sheet:last-child{break-after:auto}.print-allocation .allocation-sheet h3{font-size:13px;margin:0 0 3mm}.print-allocation .allocation-scroll{max-height:none;overflow:visible;border:0}.print-allocation .allocation-table{table-layout:fixed;width:100%;font-size:6.5pt}.print-allocation .allocation-table th,.print-allocation .allocation-table td{min-width:0;width:auto;padding:1mm .5mm;border-color:#aaa;height:14mm}.print-allocation .allocation-table tr>th:first-child{min-width:0;width:14mm}.print-allocation .allocation-table th{position:static}.print-allocation .allocation-teachers{font-size:6pt;margin:1mm 0 0;color:#333}.print-allocation .allocation-times{font-size:6pt;margin-top:1mm}.print-allocation .allocation-vacant{padding:0;font-size:6pt}.print-allocation .allocation-table td>strong{padding:0}.print-allocation tr{break-inside:avoid}.print-allocation .allocation-table thead{display:table-header-group}.print-allocation .allocation-note{display:none}}
+/* The print canvas matches A3; the print action fits it to either landscape sheet. */
+.allocation-print{width:408mm;color:#111;background:#fff}
+.allocation-print>h2{font-size:12pt;text-align:center;margin:0 0 3mm;letter-spacing:0}
+.allocation-print-table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:8pt;line-height:1.12}
+.allocation-print-table th,.allocation-print-table td{border:1px solid #999;text-align:center;vertical-align:middle;padding:1mm .6mm;overflow-wrap:anywhere}
+.allocation-print-table thead th{height:8mm;background:#eee;font-weight:600}
+.allocation-print-table tbody tr:not(.allocation-print-grade){height:13.5mm}
+.allocation-print-grade{height:6mm;background:#f0f0f0}
+.allocation-print-block{width:7mm}.allocation-print-period{width:6mm}
+.allocation-print-table strong{display:block;font-weight:550}
+.allocation-print-teachers{display:block;margin-top:1mm;font-size:7.5pt;word-break:keep-all}
+.allocation-print-time{white-space:nowrap;padding-left:0!important;padding-right:0!important}
+.print-root.allocation-measure{display:block!important;position:fixed;left:-20000px;top:0;width:408mm;visibility:hidden}
+@media print{
+ .print-root.print-allocation{width:100%;margin:0;padding:0}
+ .print-allocation .allocation-print{break-inside:avoid;page-break-inside:avoid}
+ .allocation-print-table th,.allocation-print-table td{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+ .allocation-print-table tr{break-inside:avoid}
+}
+
 .allocation-room-editor{display:grid;gap:14px;margin-top:20px}.allocation-room-row{display:grid;grid-template-columns:2fr 1fr 1.5fr auto;gap:10px;align-items:end;border-bottom:1px solid #eee;padding-bottom:14px}.allocation-room-row .check-label{padding-bottom:12px}.allocation-room-row .field{min-width:0}@media(max-width:600px){.allocation-room-row{grid-template-columns:2fr 1fr}.allocation-room-row .check-label{padding:0 0 10px}}
 .allocation-time{display:inline-block;white-space:nowrap;margin:0 2px}
+
+@media screen and (min-width:1100px){
+ .shell:has(.allocation-view){max-width:none;margin:22px auto 32px;padding:0 20px}
+ .shell:has(.allocation-view)>.view-head,.lookup:has(.allocation-view)>.view-head{margin-bottom:14px}
+ .shell:has(.allocation-view) .admin-layout{display:block}
+ .shell:has(.allocation-view) .admin-nav{flex-direction:row;gap:6px;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+ .shell:has(.allocation-view) .admin-nav button{padding:8px 13px}
+ .allocation-view{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:20px}
+ .allocation-heading,#allocation-grid,.allocation-note{grid-column:1/-1;min-width:0}
+ .allocation-heading{margin-bottom:12px;gap:12px;align-items:center}
+ .allocation-heading h2{font-size:18px}.allocation-heading p{margin-top:5px}
+ .allocation-filters{margin-bottom:8px;gap:10px;max-width:780px}
+ .allocation-view>.toolbar{align-self:end;justify-content:end;margin-bottom:8px}
+ .allocation-view:not(:has(>.toolbar)) .allocation-filters{grid-column:1/-1}
+ .allocation-filters .field input,.allocation-filters .field select{padding:8px 10px}
+ .allocation-sheet h3{margin:8px 0}
+ .allocation-scroll{max-height:none;overflow:auto}
+ .allocation-table{width:100%;min-width:0;font-size:11px}
+ .allocation-table th,.allocation-table td{width:auto;min-width:0;padding:5px 3px}
+ .allocation-table tr>th:first-child{width:64px;min-width:0}
+ .allocation-table thead th{height:52px}
+ .allocation-table tbody th button{padding:3px 0}
+ .allocation-table td{height:62px;padding:0}
+ .allocation-cell{min-height:62px;padding:5px 3px}
+ .allocation-table strong{line-height:1.25;word-break:normal}
+ .allocation-table td>strong{padding:4px 3px 0}
+ .allocation-teachers,.allocation-cell .allocation-teachers{font-size:10px;line-height:1.25;margin:4px 2px;word-break:keep-all}
+ .allocation-times{font-size:10px;line-height:1.4;margin-top:4px}
+ .allocation-vacant{font-size:10px;padding:4px 1px}
+ .allocation-note{margin-top:10px}
+}
