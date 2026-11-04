@@ -1,4 +1,14 @@
 import Core from './core.js';
+let scheduleCache,classCache;
+// One entry per isolate; versions come from D1 on every authenticated request.
+export async function schedule(db,ctx){
+ const key=ctx.term+':'+ctx.schedule_revision;
+ if(scheduleCache?.key!==key){
+  const entry={key,promise:load(db,ctx,['sections','teacherRows','overrides','blocks']).then(store=>({store,rt:Core.runtime(store)}))};scheduleCache=entry;
+  entry.promise.catch(()=>{if(scheduleCache===entry)scheduleCache=null;});
+ }
+ return scheduleCache.promise;
+}
 export function database(DB){
  const stats={ms:0,read:0,written:0};
  const prepare=(sql,...args)=>DB.prepare(sql).bind(...args);
@@ -36,21 +46,31 @@ export function meta(ctx,classes={}){
  revisions:{config:term+':'+ctx.revision,students:term+':'+ctx.students_revision,sections:term+':'+ctx.sections_revision,schedule:term+':'+ctx.schedule_revision}};
 }
 export async function metadata(db,ctx,includeClasses=false){
- const classes={};if(includeClasses)for(const r of await db.all("SELECT DISTINCT grade,class_num FROM students WHERE term_id=? AND status='재학' ORDER BY CAST(grade AS INTEGER),CAST(class_num AS INTEGER)",ctx.term)){(classes[r.grade]??=[]).push(r.class_num);}return meta(ctx,classes);
+ if(!includeClasses)return meta(ctx);
+ const key=ctx.term+':'+ctx.students_revision;
+ if(classCache?.key!==key){
+  const entry={key,promise:db.all("SELECT DISTINCT grade,class_num FROM students WHERE term_id=? AND status='재학' ORDER BY CAST(grade AS INTEGER),CAST(class_num AS INTEGER)",ctx.term).then(rows=>{const classes={};for(const r of rows)(classes[r.grade]??=[]).push(r.class_num);return classes;})};classCache=entry;
+  entry.promise.catch(()=>{if(classCache===entry)classCache=null;});
+ }
+ return meta(ctx,await classCache.promise);
 }
 function jsonInserts(db,table,columns,rows){
  const statements=[];for(let i=0;i<rows.length;i+=100){const chunk=rows.slice(i,i+100);statements.push(db.prepare(`INSERT INTO ${table}(${columns.join(',')}) SELECT ${columns.map((_,n)=>`json_extract(value,'$[${n}]')`).join(',')} FROM json_each(?)`,JSON.stringify(chunk)));}return statements;
 }
-export function writeStudents(db,term,students,sections){
+export function writeStudents(db,term,students,sections,oldStudents=[]){
  const index=new Map(sections.map(s=>[Core.sectionKey(s.grade,s.subject,s.code),s.id]));
+ const previous=new Map(oldStudents.map(s=>[s.id,s]));
  const statements=[];
  for(const s of students){
   statements.push(db.prepare(`INSERT INTO students(term_id,id,source_key,grade,class_num,number,name,status,note,manual_fields,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(term_id,id) DO UPDATE SET source_key=excluded.source_key,grade=excluded.grade,class_num=excluded.class_num,number=excluded.number,name=excluded.name,status=excluded.status,note=excluded.note,manual_fields=excluded.manual_fields,updated_at=excluded.updated_at`,term,s.id,s.sourceKey||Core.key(s),s.grade,s.classNum,s.number,s.name,s.status||'재학',s.note||'',JSON.stringify(s.manualFields||[]),s.updatedAt||''));
-  statements.push(db.prepare('DELETE FROM assignments WHERE term_id=? AND student_id=?',term,s.id));
-  const rows=Object.entries(s.choices||{}).map(([subject,code])=>[term,s.id,subject,code,index.get(Core.sectionKey(s.grade,subject,code))||null]);
+  const old=previous.get(s.id),changed=old?new Set([...Object.keys(old.choices||{}),...Object.keys(s.choices||{})].filter(subject=>old.choices[subject]!==s.choices[subject]||old.grade!==s.grade)):null;
+  if(changed)for(const subject of changed)statements.push(db.prepare('DELETE FROM assignments WHERE term_id=? AND student_id=? AND subject=?',term,s.id,subject));
+  else statements.push(db.prepare('DELETE FROM assignments WHERE term_id=? AND student_id=?',term,s.id));
+  const rows=Object.entries(s.choices||{}).filter(([subject])=>!changed||changed.has(subject)).map(([subject,code])=>[term,s.id,subject,code,index.get(Core.sectionKey(s.grade,subject,code))||null]);
   statements.push(...jsonInserts(db,'assignments',['term_id','student_id','subject','code','section_id'],rows));
  }return statements;
 }
+export function writeSections(db,term,sections){return sections.map(s=>db.prepare(`INSERT INTO sections(term_id,id,grade,subject,code,normalized_key,source_key,room,short_name,manual_fields) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(term_id,id) DO UPDATE SET grade=excluded.grade,subject=excluded.subject,code=excluded.code,normalized_key=excluded.normalized_key,room=excluded.room,short_name=excluded.short_name,manual_fields=excluded.manual_fields`,term,s.id,s.grade,s.subject,s.code,Core.sectionKey(s.grade,s.subject,s.code),s.sourceKey,s.room,s.shortName,JSON.stringify(s.manualFields||[])));}
 export function replaceParts(db,store,parts){
  const t=store.term,statements=[];
  if(parts.includes('allocation')){statements.push(db.prepare('DELETE FROM room_allocations WHERE term_id=?',t));if(store.allocation)statements.push(db.prepare('INSERT INTO room_allocations(term_id,content) VALUES(?,?)',t,JSON.stringify(store.allocation)));}

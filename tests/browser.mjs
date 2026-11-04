@@ -14,9 +14,9 @@ try{
  const button=a=>page.locator('[data-action="'+a+'"]');
  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
  async function login(){await page.goto(url+'/admin.html');await idle();await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('[data-action=new-student]').waitFor();await idle();}
- await step('student/mobile timetable, embedded Pretendard, same-origin requests',async()=>{
+ await step('student/mobile timetable, shared Pretendard, same-origin requests',async()=>{
   await page.goto(url+'/student.html');await idle();await page.locator('#student-number').fill('30101');await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();await idle();
-  await page.setViewportSize({width:390,height:844});assert.equal(await page.locator('.tt tbody tr').count(),7);assert.equal(await page.locator('.tt thead th').count(),6);assert(await page.locator('#embedded-pretendard').count());assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert((await page.locator('.tt').boundingBox()).height<470);await page.screenshot({path:'test-results/mobile.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});assert.equal(await page.locator('.tt tbody tr').count(),7);assert.equal(await page.locator('.tt thead th').count(),6);assert(await page.locator('link[href*="font.css"]').count());assert(await page.evaluate(()=>document.fonts.check('12px "Pretendard Variable"')));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert((await page.locator('.tt').boundingBox()).height<470);await page.screenshot({path:'test-results/mobile.png',fullPage:true});
  });
  await step('PNG output is real PNG and single timetable print has print layout',async()=>{
   const download=page.waitForEvent('download');await button('save-image').click();const f=await download;assert(f.suggestedFilename().endsWith('.png'));await f.saveAs('test-results/timetable.png');const bytes=await readFile('test-results/timetable.png');assert.equal(bytes.subarray(1,4).toString(),'PNG');await idle();

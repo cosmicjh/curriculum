@@ -20,6 +20,7 @@
     "test:all": "pnpm test && pnpm test:browser && pnpm test:pages-browser && pnpm test:worker && pnpm test:teacher-tools && pnpm test:allocation",
     "test:allocation": "node tests/allocation-browser.mjs",
     "benchmark": "node scripts/benchmark.mjs",
+    "benchmark:browser": "node scripts/benchmark-browser.mjs",
     "compare:backups": "node scripts/compare-backups.mjs",
     "test:remote": "node scripts/verify-remote.mjs",
     "build:pages": "node scripts/build-pages.mjs",

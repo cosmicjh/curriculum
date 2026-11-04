@@ -3,8 +3,8 @@ import {C} from '../vendor/class-swap/src/shared/core.js';
 
 // Keep the original name-derived IDs so existing plans survive the shared source.
 export function teacherId(name){name=C.text(name);let hash=2166136261;for(let i=0;i<name.length;i++)hash=Math.imul(hash^name.charCodeAt(i),16777619)>>>0;return 't'+hash.toString(16);}
-export function datasetFromStore(store){
- const rt=Core.runtime(store),settings=store.settings;if(!rt.teachers.length)return null;
+export function datasetFromStore(store,rt=Core.runtime(store)){
+ const settings=store.settings;if(!rt.teachers.length)return null;
  const slots=Core.DAYS.flatMap((day,index)=>Array.from({length:settings.periods[day]},(_,p)=>({day:index,period:p+1}))),teachers=rt.teachers.map(t=>({id:teacherId(t.name),name:t.name})),lessons=[];
  rt.teachers.forEach((teacher,index)=>{
   for(const cell of Core.teacherTimetable(rt,teacher.name).cells){

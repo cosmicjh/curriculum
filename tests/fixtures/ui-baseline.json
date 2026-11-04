@@ -1,7 +1,4 @@
 {
-  "index.html": "18ff61e0abb3daf3de5c5d1950d0e87235d883bf4fb7802c92c26a5b21d9ece5",
-  "student.html": "af3be6e997c03ca3a397befa1f2fce4aefce654aff99dcdb0d44949f8d7cd09b",
-  "teacher.html": "c4f6c7f581e414ea867738f3a109a39dc88740a230b1983d604d5f3157b6d696",
-  "admin.html": "41dda407e19f70fe0e8d7fa4cc62636b0bb2b69605b30bb9b20ee453574af037",
-  "assets/style.css": "04f08f71c60b49439d9d49d45bfa5bcd2f8fd6656abac6f6a60c68fa6e050583"
+  "assets/style.css": "04f08f71c60b49439d9d49d45bfa5bcd2f8fd6656abac6f6a60c68fa6e050583",
+  "assets/pretendard.woff2": "9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4"
 }

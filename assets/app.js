@@ -22,7 +22,7 @@
     let view=allocationViews.get(key);
     if(!view){
       const version=window.TIMETABLE_CONFIG?.assetVersion||'1',module=await import('./allocations.js?v='+version),data=await call('allocation',{},role),host=document.createElement('div');
-      view=module.mountAllocation(host,data,{admin:role==='admin',request:(action,args={})=>call(action,args,role),loadXlsx:()=>TTAssets.load('xlsx'),print:(html,kind,paper)=>print(html,kind,paper),onSaved:reply=>{state.admin=reply.bootstrap;state.teacherBoot=null;state.timetable=null;useMeta(reply.meta);toast('배치표를 저장했습니다.');},onError:error=>run(()=>{throw error;})});
+      view=module.mountAllocation(host,data,{admin:role==='admin',request:(action,args={})=>call(action,args,role),loadXlsx:()=>TTAssets.load('xlsx'),print:(html,kind,paper)=>print(html,kind,paper),onSaved:reply=>{state.admin.loaded.students=false;state.admin.store.sections=reply.allocation.sections;state.admin.sectionsRevision=reply.meta.sectionsRevision;state.admin.loaded.sections=true;state.admin.loaded.links=false;state.admin.loaded.history=false;state.admin.lessonCache={};state.teacherBoot=null;state.timetable=null;useMeta(reply.meta);toast('배치표를 저장했습니다.');},onError:error=>run(()=>{throw error;})});
       view.root=host;allocationViews.set(key,view);
     }
     root.replaceChildren(view.root);if(!view.dirty&&view.revision!==state.meta.revision)await view.refresh();
@@ -80,10 +80,11 @@
   async function run(fn,button,block=true){if(block&&++busyCount===1)setLoading(true);try{return await fn();}catch(e){if(e.code==='TERM_CHANGED'){rememberForms();if(modal.open)modal.close();modal.innerHTML='';state.teacherBoot=null;state.admin=null;state.timetable=null;state.roster=null;await renderRoute();}if(e.code==='AUTH_REQUIRED'){rememberForms();if(modal.open)modal.close();modal.innerHTML='';state.timetable=null;state.roster=null;sessionStorage.removeItem('timetable.admin');sessionStorage.removeItem('timetable.teacher');state.teacherBoot=null;state.admin=null;renderLogin(state.route==='admin'?'admin':'teacher');}toast(e.message||'처리하지 못했습니다.');}finally{if(block){busyCount--;if(!busyCount){setLoading(false);if(state.route!==route())run(renderRoute);}}}}
   function header(){
     const settings=state.meta&&state.meta.settings||{}, school=settings.schoolName||(window.TIMETABLE_CONFIG||{}).schoolName||'개인 시간표';
+    document.body.classList.toggle('workspace',['teacher','admin'].includes(state.route)&&!!token(state.route));
     document.title=(settings.title||'개인 시간표')+' · '+school;
     $('#header').innerHTML='<a class="brand" href="'+href('home')+'">'+esc(school)+'</a><div class="top-actions">'+(state.route!=='home'?'<a class="quiet" href="'+href('home')+'">처음</a>':'')+(['teacher','admin'].includes(state.route)&&token(state.route)?'<button class="quiet" data-action="logout">로그아웃</button>':'')+'</div>';
   }
-  function head(title,actions=''){return '<div class="view-head"><div><h1>'+esc(title)+'</h1>'+(state.meta?'<p class="term-label">'+state.meta.settings.academicYear+'학년도 '+state.meta.settings.semester+'학기'+(state.meta.updatedAt?' · '+date(state.meta.updatedAt):'')+'</p>':'')+'</div>'+actions+'</div>';}
+  function head(title,actions=''){return '<div class="view-head"><div><h1>'+esc(title)+'</h1>'+(state.meta?'<p class="term-label">'+state.meta.settings.academicYear+'학년도 '+state.meta.settings.semester+'학기'+'</p>':'')+'</div>'+actions+'</div>';}
   function renderHome(){
     const studentIcon='<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="10" r="5"/><path d="M5 28v-3a11 11 0 0 1 22 0v3"/></svg>';
     const teacherIcon='<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 5h24v17H15M20 27h8M24 22v5"/><circle cx="8" cy="20" r="4"/><path d="M1 31v-2a7 7 0 0 1 14 0v2"/></svg>';
@@ -109,8 +110,9 @@
     if(state.teacherTab==='timetable')html+='<form class="lookup-form" data-form="teacher">'+field('교사명','teacher-name','<input id="teacher-name" list="teacher-list" value="'+esc(state.teacherName||'')+'" autocomplete="off" required><datalist id="teacher-list">'+boot.teachers.map(n=>'<option value="'+esc(n)+'"></option>').join('')+'</datalist>')+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+(state.timetable&&state.timetable.kind==='teacher'?resultHTML():'')+'</div>';
     if(state.teacherTab==='roster')html+='<form data-form="roster" class="lookup-form">'+field('학년','roster-grade',select('roster-grade',Object.keys(boot.meta.classes),'','선택'))+field('과목','roster-subject',select('roster-subject',[],'','선택'))+field('분반','roster-section',select('roster-section',[],'','선택'))+'<button class="primary" type="submit">조회</button></form><div id="roster-result"></div>';
     if(state.teacherTab==='batch')html+='<form data-form="batch" class="lookup-form">'+field('학년','batch-grade',select('batch-grade',Object.keys(boot.meta.classes),'','선택'))+field('학급','batch-class',select('batch-class',[],'','선택'))+'<button class="primary" type="submit">일괄 인쇄</button></form>';
+    if(state.teacherTab==='classSwap')html+='<div id="teacher-swap"></div>';
     if(state.teacherTab==='allocation')html+='<div id="teacher-allocation"></div>';
-    app.innerHTML=html+'</div>';if(state.teacherTab==='classSwap')showSwap();else hideSwap();if(state.teacherTab==='allocation')run(()=>showAllocation($('#teacher-allocation'),'teacher'));
+    app.innerHTML=html+'</div>';if(state.teacherTab==='classSwap'){$('#teacher-swap').append(swapPane);showSwap();}else hideSwap();if(state.teacherTab==='allocation')run(()=>showAllocation($('#teacher-allocation'),'teacher'));
   }
   function rosterHTML(r){let html='<table class="roster-table"><colgroup>'+Array.from({length:21},()=>'<col>').join('')+'</colgroup><thead><tr>'+['연번','학년','반','번호','이름','비고',...Array(15).fill('')].map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>';r.students.forEach((s,i)=>{html+='<tr>'+[i+1,s.grade,s.classNum,s.number,s.name,s.note,...Array(15).fill('')].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>';});return html+'</tbody></table>';}
   function showRoster(r){state.roster=r;openDialog('<div class="roster-header"><h2>'+esc(r.title)+' <small>'+esc(r.detail)+' · '+r.students.length+'명</small></h2><div><button data-action="print-roster">인쇄</button><button class="modal-close" data-action="close-modal" aria-label="닫기">×</button></div></div><div class="table-scroll">'+rosterHTML(r)+'</div>',true);}

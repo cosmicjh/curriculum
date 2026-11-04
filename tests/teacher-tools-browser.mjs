@@ -83,7 +83,19 @@ try{
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   const design=await page.locator('#class-swap-pane > div').evaluate(async host=>{await document.fonts.ready;return {font:getComputedStyle(host).fontFamily,overflow:host.scrollWidth>host.clientWidth,explanations:['schoolLabel','datasetLabel','electiveSummary','footerText'].filter(id=>host.shadowRoot.getElementById(id))};});
   assert.match(design.font,/Pretendard/);assert.equal(design.overflow,false);assert.deepEqual(design.explanations,[]);
-  await page.screenshot({path:'test-results/teacher-tools-mobile.png',fullPage:true});await page.setViewportSize({width:1440,height:1100});await page.screenshot({path:'test-results/teacher-tools-desktop.png',fullPage:true});
+  await page.waitForFunction(()=>!document.querySelector('#toast').textContent);await swap.locator('#toast').waitFor({state:'hidden'});await page.screenshot({path:'test-results/teacher-tools-mobile.png',fullPage:true});await page.setViewportSize({width:1440,height:1100});await page.screenshot({path:'test-results/teacher-tools-desktop.png',fullPage:true});
+ });
+ await step('teacher menus retain the same FHD frame and native class-swap draft',async()=>{
+  await page.setViewportSize({width:1920,height:1080});let frame;
+  for(const tab of ['timetable','classSwap','allocation','roster','batch']){
+   await page.locator('[data-action=teacher-tab][data-tab='+tab+']').click();await idle();if(tab==='classSwap')await swapIdle();
+   const current=await page.locator('.tabs').evaluate(el=>{const r=el.getBoundingClientRect(),main=document.querySelector('#app').getBoundingClientRect();return [r.x,r.y,r.width,main.x,main.width];});
+   frame??=current;assert.deepEqual(current,frame,tab);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+   if(tab==='timetable'){await page.locator('#teacher-name').fill('가교사');await page.locator('form[data-form=teacher] button').click();await idle();await page.locator('.tt').waitFor();}
+   if(tab==='classSwap')await swap.locator('#toast').waitFor({state:'hidden'});
+   if(['timetable','classSwap'].includes(tab))await page.screenshot({path:'test-results/workspace-teacher-'+tab+'.png',fullPage:true});
+  }
+  await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();assert.equal(await swap.locator('#reason').inputValue(),'이전 학기 초안');
  });
  await step('Explicit logout confirms discard and removes the native view',async()=>{
   page.once('dialog',d=>d.dismiss());await page.locator('[data-action=logout]').click();await idle();assert.equal(await page.locator('#class-swap-pane > div').count(),1);

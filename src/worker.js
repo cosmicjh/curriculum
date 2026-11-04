@@ -23,7 +23,7 @@ async function adminBoot(db,ctx,req={}){
  const counts=new Map(countResult.results.map(r=>[r.student_id,r.choice_count]));
  return {meta:m,store:{term:ctx.term,settings:ctx.settings,students:studentResult.results.map(r=>({...D.studentSummary(S.studentRow(r)),choiceCount:counts.get(r.id)||0})),sections:[],overrides:[],blocks:[]},loaded:{students:true},lessonCache:{},sectionsRevision:''};
 }
-async function links(db,ctx,includeSections=true){const st=await S.load(db,ctx,['sections','teacherRows','overrides','blocks']),rt=Core.runtime(st);return {meta:await S.metadata(db,ctx,true),warnings:rt.warnings,blocks:rt.blocks,teachers:rt.teachers.map(t=>t.name),overrides:st.overrides,manualBlocks:st.blocks,...(includeSections?{sections:st.sections}:{})};}
+async function links(db,ctx,includeSections=true){const {store:st,rt}=await S.schedule(db,ctx);return {meta:await S.metadata(db,ctx,true),warnings:rt.warnings,blocks:rt.blocks,teachers:rt.teachers.map(t=>t.name),overrides:st.overrides,manualBlocks:st.blocks,...(includeSections?{sections:st.sections}:{})};}
 async function read(db,ctx,req){
  const a=req.action;
  if(a==='bootstrap')return S.meta(ctx);
@@ -42,17 +42,17 @@ async function read(db,ctx,req){
  if(a==='downloadBackup')return S.readBackup(db,req.backupId);
  if(a==='student'){
   if(!/^[1-3][0-9]{4}$/.test(String(req.studentNumber||'')))Auth.fail(400,'INVALID_REQUEST','학번 5자리를 입력하세요.');
-  const n=req.studentNumber,st=await S.load(db,ctx,undefined,"AND status='재학' AND grade=? AND class_num=? AND number=?",[n[0],String(Number(n.slice(1,3))),String(Number(n.slice(3)))]);
-  if(!st.students.length)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');const tt=Core.studentTimetable(Core.runtime(st),st.students[0]);delete tt.id;return {...tt,meta:S.meta(ctx)};
+  const n=req.studentNumber,st=await S.load(db,ctx,['students'],"AND status='재학' AND grade=? AND class_num=? AND number=?",[n[0],String(Number(n.slice(1,3))),String(Number(n.slice(3)))]);
+  if(!st.students.length)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');const {rt}=await S.schedule(db,ctx),tt=Core.studentTimetable(rt,st.students[0]);delete tt.id;return {...tt,meta:S.meta(ctx)};
  }
  if(a==='teacher'||a==='adminLessons'){
-  const st=await S.load(db,ctx,['sections','teacherRows','overrides','blocks']),rt=Core.runtime(st);
+  const {rt}=await S.schedule(db,ctx);
   if(a==='teacher')return {...Core.teacherTimetable(rt,req.teacher),meta:await S.metadata(db,ctx,true)};
   return {lessons:Object.values(rt.bindings).filter(l=>l.teacher===req.teacher&&l.rawSubject).map(D.lesson),meta:S.meta(ctx)};
  }
  if(a==='classBatch'){
   if(!['1','2','3'].includes(String(req.grade))||!/^\d{1,2}$/.test(String(req.classNum)))Auth.fail(400,'INVALID_REQUEST','학년과 학급을 확인하세요.');
-  const st=await S.load(db,ctx,undefined,"AND status='재학' AND grade=? AND class_num=?",[String(req.grade),String(Number(req.classNum))]),rt=Core.runtime(st);
+  const st=await S.load(db,ctx,['students'],"AND status='재학' AND grade=? AND class_num=?",[String(req.grade),String(Number(req.classNum))]),{rt}=await S.schedule(db,ctx);
   return {grade:req.grade,classNum:req.classNum,timetables:st.students.sort((a,b)=>a.number-b.number).map(s=>Core.studentTimetable(rt,s))};
  }
  if(a==='roster'){
@@ -70,15 +70,18 @@ async function read(db,ctx,req){
  Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
 }
 async function mutate(db,env,ctx,session,req,headers){
- let result=true,statements=[],parts=[],before=null,after=null,target='',backupId=null,changedStudents=[],changedSection=null,bootstrap=false,activeTerm=ctx.term,historyOnly=false,nextSwapStore=null;
+ let result=true,statements=[],parts=[],before=null,after=null,target='',backupId=null,changedStudents=[],changedSection=null,bootstrap=false,activeTerm=ctx.term,historyOnly=false,nextSwapStore=null,allocationReply=null;
  const action=req.action;
  if(action==='saveAllocation'){
   const st=await S.load(db,ctx),prepared=prepareAllocation(st,req.board);before=st.allocation||null;after=prepared.board;target=ctx.term;parts=['sections','allocation'];
-  const snap=S.snapshot(db,st,'이동수업 배치표 수정 전');backupId=snap.id;statements.push(...snap.statements,...S.replaceParts(db,prepared.store,parts));nextSwapStore=prepared.store;result={warnings:prepared.warnings};bootstrap=true;
+  const previous=new Map(st.sections.map(s=>[s.id,s])),changed=prepared.store.sections.filter(s=>{const old=previous.get(s.id);return !old||old.room!==s.room||JSON.stringify(old.manualFields||[])!==JSON.stringify(s.manualFields||[]);});
+  const snap=S.snapshot(db,st,'이동수업 배치표 수정 전');backupId=snap.id;statements.push(...snap.statements,...S.writeSections(db,ctx.term,changed),...S.replaceParts(db,prepared.store,['allocation']));
+  for(const s of changed)if(!previous.has(s.id))statements.push(db.prepare('UPDATE assignments SET section_id=? WHERE term_id=? AND subject=? AND code=? AND student_id IN (SELECT id FROM students WHERE term_id=? AND grade=?)',s.id,ctx.term,s.subject,s.code,ctx.term,s.grade));
+  nextSwapStore=prepared.store;result={warnings:prepared.warnings};allocationReply={board:prepared.board,sections:prepared.store.sections};bootstrap=req.compact!==true;
  }else if(action==='saveStudent'){
   const st=await S.load(db,ctx,['students','sections'],'AND id=?',[req.student?.id||'']);if(req.student?.id&&!st.students.length)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');
   before=st.students[0]||null;result=D.student(req.student||{},before);after=result;target=Core.sid(result)+' '+result.name;parts=['students'];changedStudents=[result];
-  statements=S.writeStudents(db,ctx.term,[result],st.sections);
+  statements=S.writeStudents(db,ctx.term,[result],st.sections,st.students);
  }else if(action==='saveSection'){
   const sections=(await db.all('SELECT * FROM sections WHERE term_id=?',ctx.term)).map(S.sectionRow),old=sections.find(s=>s.id===req.section?.id);
   if(req.section?.id&&!old)Auth.fail(404,'NOT_FOUND','분반 정보가 없습니다.');const next=D.section(req.section||{},old);before=old||null;after=next;result=next;changedSection=next;target=next.subject+' '+next.code;parts=['sections'];
@@ -90,7 +93,7 @@ async function mutate(db,env,ctx,session,req,headers){
    if(st.students.length&&next.grade!==old.grade)throw Error('수강 학생이 있는 분반의 학년은 변경할 수 없습니다.');
    if(next.subject!==old.subject||next.code!==old.code)for(const s of st.students){if(next.subject!==old.subject&&s.choices[next.subject])throw Error('변경할 과목에 이미 배정되어 있습니다.');delete s.choices[old.subject];s.choices[next.subject]=next.code;s.manualFields=[...new Set([...s.manualFields,'choice:'+old.subject,'choice:'+next.subject])];s.updatedAt=new Date().toISOString();changedStudents.push(s);}
   }
-  statements.push(db.prepare(`INSERT INTO sections(term_id,id,grade,subject,code,normalized_key,source_key,room,short_name,manual_fields) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(term_id,id) DO UPDATE SET grade=excluded.grade,subject=excluded.subject,code=excluded.code,normalized_key=excluded.normalized_key,room=excluded.room,short_name=excluded.short_name,manual_fields=excluded.manual_fields`,ctx.term,next.id,next.grade,next.subject,next.code,Core.sectionKey(next.grade,next.subject,next.code),next.sourceKey,next.room,next.shortName,JSON.stringify(next.manualFields)));
+  statements.push(...S.writeSections(db,ctx.term,[next]));
   if(changedStudents.length){parts.push('students');statements.push(...S.writeStudents(db,ctx.term,changedStudents,[...sections.filter(s=>s.id!==next.id),next]));}
  }else if(action==='saveOverride'){
   const o=req.override;D.slot(o);const k=Core.slotKey(o.teacher,o.day,o.period);if(o.sectionId&&!await db.first('SELECT id FROM sections WHERE term_id=? AND id=?',ctx.term,o.sectionId))throw Error('분반을 선택하세요.');
@@ -109,7 +112,7 @@ async function mutate(db,env,ctx,session,req,headers){
  }else if(action==='commitImport'||action==='restore'){
   const st=await S.load(db,ctx);let next;
   if(action==='commitImport'){const p=D.prepareImport(st,req.payload,req.preserveManual!==false,String(ctx.revision));if(p.summary.errors.length)throw Error(p.summary.errors.join('\n'));next=p.store;parts=p.parts;result=p.summary;}
-  else {const raw=req.backup||await S.readBackup(db,req.backupId);if(raw.format!=='school-timetable-backup'||raw.schemaVersion!==1)throw Error('백업 형식·버전을 확인하세요.');next=structuredClone(raw.store);if(!next?.settings||String(next.settings.academicYear)+'-'+next.settings.semester!==ctx.term||next.term&&next.term!==ctx.term)throw Error('백업과 현재 학기가 다릅니다. 먼저 해당 학기로 전환하세요.');next.term=ctx.term;next.overrides??=[];next.blocks??=[];parts=['students','sections','teacherRows','overrides','blocks','allocation','config'];if(next.allocation)next=prepareAllocation(next,next.allocation).store;}
+  else {const raw=req.backup||await S.readBackup(db,req.backupId);if(raw.format!=='school-timetable-backup'||raw.schemaVersion!==1)throw Error('백업 형식·버전을 확인하세요.');next=structuredClone(raw.store);if(!next?.settings||String(next.settings.academicYear)+'-'+next.settings.semester!==ctx.term||next.term&&next.term!==ctx.term)throw Error('백업과 현재 학기가 다릅니다. 먼저 해당 학기로 전환하세요.');next.term=ctx.term;next.overrides??=[];next.blocks??=[];parts=['students','sections','teacherRows','overrides','blocks','allocation','config'];}
   if(next.allocation)next=prepareAllocation(next,next.allocation).store;
   D.assertStore(next);nextSwapStore=next;const snap=S.snapshot(db,st,action==='restore'?'복원 전':'자료 등록 전');backupId=snap.id;
   statements.push(...snap.statements,...S.replaceParts(db,next,parts));if(parts.includes('config'))statements.push(db.prepare('UPDATE terms SET settings=? WHERE id=?',JSON.stringify(D.settings(next.settings)),ctx.term));bootstrap=true;after=action==='commitImport'?result:{backupId:req.backupId||'파일'};target=ctx.term;
@@ -129,7 +132,7 @@ async function mutate(db,env,ctx,session,req,headers){
    proposed.blocks=proposed.blocks.filter(x=>action==='saveBlocks'?x.grade!==String(req.grade):!blocks.some(b=>String(b.grade)===x.grade&&b.day===x.day&&Number(b.period)===x.period));
    proposed.blocks.push(...blocks.filter(b=>b.block));
   }
-  if(proposed.allocation)prepareAllocation(proposed,proposed.allocation);
+  if(proposed.allocation&&!nextSwapStore)prepareAllocation(proposed,proposed.allocation);
   await validateSchedule(db,proposed);
  }
  await S.commit(db,ctx,session,req,statements,{parts,before,after,target,backupId,activeTerm,historyOnly});
@@ -143,6 +146,7 @@ async function mutate(db,env,ctx,session,req,headers){
  if(changedStudents.length)out.students=changedStudents.map(D.studentSummary);if(changedSection)out.section=changedSection;
  if(['saveOverride','saveBlock','saveBlocks'].includes(action)){out.links=await links(db,updated,false);if(req.viewTeacher){const r=await read(db,updated,{action:'adminLessons',teacher:req.viewTeacher});Object.assign(out.links,{teacher:req.viewTeacher,lessons:r.lessons});}}
  if(bootstrap)out.bootstrap=await adminBoot(db,updated);
+ if(allocationReply)out.allocation=allocationReply;
  if(action==='backup')out.backups=await S.backupList(db,updated.term);
  const final=await db.first('SELECT revision,active_term FROM app_state WHERE id=1');if(final.revision!==committedRevision||final.active_term!==activeTerm)savedRefresh();
  return out;

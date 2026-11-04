@@ -1,10 +1,9 @@
 import {C} from '../vendor/class-swap/src/shared/core.js';
 import {today} from '../vendor/class-swap/src/shared/backup.js';
 import {datasetFromStore} from './class-swap-data.js';
-import {load} from './storage.js';
+import {schedule} from './storage.js';
 import {digest,randomToken} from './crypto.js';
 import {fail} from './auth.js';
-const scheduleParts=['sections','teacherRows','overrides','blocks'];
 const conflict=()=>fail(409,'CONFLICT','자료나 계획서가 변경되었습니다. 작성 내용을 보관하고 새로고침하여 확인하세요.');
 export const readPlans=(db,term)=>db.all('SELECT content FROM swap_plans WHERE term_id=? ORDER BY id',term).then(rows=>rows.map(row=>JSON.parse(row.content)));
 export async function validateSchedule(db,store){
@@ -23,7 +22,9 @@ export async function classSwap(db,ctx,session,request){
  if(!['load','resume','savePlan','cancelPlan'].includes(request.swapAction))fail(403,'FORBIDDEN','이 기능에 접근할 수 없습니다.');
  const payload=request.swapPayload;if(!payload||typeof payload!=='object'||Array.isArray(payload))fail(400,'INVALID_REQUEST','요청을 확인하세요.');
  if(['savePlan','cancelPlan'].includes(request.swapAction)&&payload.term&&payload.term!==ctx.term)fail(409,'TERM_CHANGED','학기가 변경되었습니다. 새로고침하여 현재 학기 자료를 확인하세요. 이전 학기 초안은 유지됩니다.');
- const store=await load(db,ctx,scheduleParts),dataset=datasetFromStore(store),dataRev=ctx.term+':'+await digest(JSON.stringify(dataset)),plans=await readPlans(db,ctx.term);
+ const source=await schedule(db,ctx);
+ source.swap??=(async()=>{const dataset=datasetFromStore(source.store,source.rt);return {dataset,dataRev:ctx.term+':'+await digest(JSON.stringify(dataset))};})();
+ const {dataset,dataRev}=await source.swap,plans=await readPlans(db,ctx.term);
  if(['load','resume'].includes(request.swapAction)){
   const current=await db.first('SELECT revision,active_term FROM app_state WHERE id=1');if(current.revision!==ctx.revision||current.active_term!==ctx.term)fail(409,'READ_CHANGED','자료가 변경되었습니다. 다시 조회하세요.');
   return {role:'teacher',term:ctx.term,dataRev,planRev:String(ctx.revision),hasDataset:!!dataset,dataset:payload.dataRev===dataRev?null:dataset,plans:String(payload.planRev)===String(ctx.revision)?null:plans};

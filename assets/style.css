@@ -37,21 +37,27 @@
 .allocation-room-row{grid-template-columns:minmax(130px,2fr) 70px repeat(2,minmax(100px,1.4fr)) auto}
 .allocation-dialog .allocation-room-row:has([data-homeroom-grade="1"]){grid-template-columns:repeat(2,minmax(120px,1fr))}
 @media(max-width:700px){.allocation-room-row{grid-template-columns:1fr 1fr}.allocation-grade-row th,.allocation-grade-row td{font-size:12px}}
+body.workspace #class-swap-pane{max-width:none;margin:0;padding:0;width:100%}
 @media screen and (min-width:1100px){
- body:has(.allocation-view) .topbar{max-width:none;height:48px;padding:0 20px}
- .shell:has(.allocation-view){max-width:none;height:calc(100dvh - 60px);margin:12px auto 0;padding:0 20px 12px;display:flex;flex-direction:column}
- .shell:has(.allocation-view)>.view-head,.lookup:has(.allocation-view)>.view-head{flex:none;margin-bottom:10px}
- .shell:has(.allocation-view) .view-head>div{display:flex;align-items:baseline;gap:14px}
- .shell:has(.allocation-view) .view-head h1{font-size:17px;letter-spacing:-.02em}
- .shell:has(.allocation-view) .view-head p{margin:0}
- .shell:has(.allocation-view) .admin-layout{display:flex;flex-direction:column;flex:1;min-height:0;gap:0}
- .shell:has(.allocation-view) .admin-nav{flex:none;flex-direction:row;gap:6px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
- .shell:has(.allocation-view) .admin-nav button{padding:7px 13px}
- .shell:has(.allocation-view) .admin-content,.lookup:has(.allocation-view),#teacher-allocation{display:flex;flex-direction:column;flex:1;min-height:0;width:100%}
- .lookup:has(.allocation-view){margin:0}
- .lookup:has(.allocation-view)>.tabs{flex:none;margin-bottom:12px;padding-bottom:8px}
- .lookup:has(.allocation-view)>.tabs button{padding:7px 13px}
- .allocation-view{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto minmax(0,1fr) auto;column-gap:20px;flex:1;min-height:0}
+ body.workspace .topbar{max-width:none;height:48px;padding:0 20px}
+ body.workspace #app.shell{max-width:none;height:calc(100dvh - 60px);margin:12px auto 0;padding:0 20px 12px;display:flex;flex-direction:column}
+ body.workspace #app.shell>.view-head,body.workspace .lookup>.view-head{flex:none;min-height:41px;margin-bottom:10px}
+ body.workspace #app.shell .view-head>div{display:flex;align-items:baseline;gap:14px}
+ body.workspace #app.shell .view-head h1{font-size:17px;letter-spacing:-.02em}
+ body.workspace #app.shell .view-head p{margin:0}
+ body.workspace #app.shell .admin-layout{display:flex;flex-direction:column;flex:1;min-height:0;gap:0}
+ body.workspace #app.shell .admin-nav{flex:none;flex-direction:row;gap:6px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+ body.workspace #app.shell .admin-nav button{padding:7px 13px}
+ body.workspace #app.shell .admin-content,body.workspace .lookup,#teacher-allocation,#teacher-swap{display:flex;flex-direction:column;flex:1;min-height:0;width:100%}
+ body.workspace .lookup{max-width:none;margin:0}
+ body.workspace .lookup>.tabs{flex:none;margin-bottom:12px;padding-bottom:8px}
+ body.workspace .lookup>.tabs button{padding:7px 13px}
+ body.workspace .admin-content{overflow:auto}
+ body.workspace .admin-content:has(>.allocation-view){overflow:hidden}
+ body.workspace .lookup-form,body.workspace #lookup-result,body.workspace #roster-result{max-width:800px;width:100%}
+ body.workspace .admin-content>.panel{max-width:960px;width:100%}
+ body.workspace #class-swap-pane{flex:1;min-height:0;overflow:auto}
+ .allocation-view{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto minmax(0,1fr);column-gap:20px;flex:1;min-height:0}
  .allocation-heading,#allocation-grid,.allocation-note{grid-column:1/-1;min-width:0}
  #allocation-grid{min-height:0}
  .allocation-heading{margin-bottom:10px;gap:12px;align-items:center}

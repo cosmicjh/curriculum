@@ -10,7 +10,7 @@
 
 운영 브랜치는 **main**입니다. 전용 Worker·D1을 그대로 사용하며, 화면은 GitHub Pages에서 직접 표시하고 API·데이터는 기존 Cloudflare를 유지합니다. [main 전환·임시 자원 정리 기록](docs/MAIN_RELEASE_2026-11-02.md)을 확인하세요.
 
-`cosmicjh/timetable`의 기존 HTML·모바일 CSS·HTML 내장 Pretendard·엑셀 등록·PNG·인쇄 화면을 유지하고, Apps Script 브리지를 Workers API와 D1으로 교체했습니다. GitHub Pages 화면은 허용된 출처의 API를 호출하며 주소창은 github.io에 유지됩니다. GitHub는 소스 관리와 화면 자동 게시에 계속 사용합니다.
+`cosmicjh/timetable`의 Pretendard·엑셀 등록·PNG·인쇄 기능을 유지하고, Apps Script 브리지를 Workers API와 D1으로 교체했습니다. 글꼴은 공통 파일로 재사용하고 관리자·교사 메뉴는 공통 화면 틀을 사용합니다. GitHub Pages 화면은 허용된 출처의 API를 호출하며 주소창은 github.io에 유지됩니다. GitHub는 소스 관리와 화면 자동 게시에 계속 사용합니다.
 
 이 프로젝트 루트는 **개인시간표·결보강 통합 저장소의 루트**입니다. 다른 `course-allocation` 프로젝트의 Pages 설정이나 DB를 사용하지 않습니다. 이 작업의 복제본은 `course-allocation/timetable-cloudflare/`, 운영 브랜치는 `main`, 최초 원본 커밋은 `bd6e7db`입니다. GitHub Pages 주소에서 실제 화면을 제공하고 Apps Script·스프레드시트 자료는 삭제하지 않습니다.
 
@@ -42,9 +42,10 @@ pnpm test:pages-browser # 격리된 두 출처에서 쿠키 없는 로그인·�
 pnpm test:worker      # Wrangler D1 마이그레이션·dry-run·실제 dev 라우팅
 pnpm test:all
 pnpm benchmark        # 학생 900명·분반 288개·배정 7,200개·교사 120명
+pnpm benchmark:browser # FHD·통신 속도 제한·화면 표시/메뉴/저장 측정
 ```
 
-이번 main 전환에서는 성능 개선과 벤치마크 실행을 제외했습니다. 향후 작업용 benchmark 스크립트는 보존하며 CI에서 자동 실행하지 않습니다.
+[성능 측정과 개선 결과](docs/PERFORMANCE.md)를 확인하세요. 벤치마크는 가상 자료와 격리된 로컬 D1을 사용하며 운영 자료를 쓰지 않습니다. CI에서는 기능 검증만 실행하고 시간 측정은 수동으로 실행합니다.
 
 Linux/macOS에서 브라우저가 없으면 `pnpm exec playwright install --with-deps chromium`을 먼저 실행합니다. 테스트는 가상 자료와 각각 새 로컬 D1을 사용합니다. 원격 DB를 초기화하지 않습니다. 결과·화면·PNG는 Git 제외 `test-results/`에 생성됩니다.
 
@@ -77,4 +78,4 @@ Linux/macOS에서 브라우저가 없으면 `pnpm exec playwright install --with
 - [기존 백업 / 엑셀 이관과 결과 비교](docs/MIGRATION.md)
 - [실제로 수행한 검증과 남은 원격 작업](docs/VALIDATION.md)
 
-핵심 파일은 `src/worker.js`(API·권한·조회), `src/storage.js`(조건 조회·트랜잭션), `src/domain.js`(수정 보호·검증), `src/core.js`(첨부 Core.gs의 계산), `src/auth.js`(쿠키·인증), `migrations/0001_timetable.sql`, `assets/transport.js`, `assets/app.js`, `wrangler.jsonc`입니다. 기존 네 HTML과 `assets/style.css`는 원본 그대로 유지합니다.
+핵심 파일은 `src/worker.js`(API·권한·조회), `src/storage.js`(조건 조회·트랜잭션·버전별 캐시), `src/domain.js`(수정 보호·검증), `src/core.js`(첨부 Core.gs의 계산), `src/auth.js`(쿠키·인증), `migrations/0001_timetable.sql`, `assets/transport.js`, `assets/app.js`, `assets/font.css`, `wrangler.jsonc`입니다.
