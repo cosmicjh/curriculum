@@ -61,14 +61,20 @@ var TTCore = (function () {
         var p=norm(n)+block(s.code); if(!prefixes[p])prefixes[p]=[]; if(prefixes[p].indexOf(s)<0)prefixes[p].push(s);
       });
     });
-    var parsed=parseTeacherMatrix(store.teacherRows||[]), overrides={}, bindings={}, slots={}, warnings=[], counts={};
+    var parsed=parseTeacherMatrix(store.teacherRows||[]), overrides={}, bindings={}, slots={}, warnings=[], counts={}, allocations={}, allocationBlocks={};
+    (store.allocation&&store.allocation.grades||[]).forEach(function(g){g.blocks.forEach(function(b){b.slots.forEach(function(time){
+      var sp=time.day+'-'+time.period;if(!allocationBlocks[sp])allocationBlocks[sp]={};allocationBlocks[sp][g.grade]=b.code;
+      Object.keys(b.cells).forEach(function(id){var c=b.cells[id],s=sectionById[c.sectionId];if(!s)return;c.teachers.forEach(function(name){var key=slotKey(name,time.day,time.period);if(!allocations[key])allocations[key]=[];allocations[key].push(s);});});
+    });});});
     (store.overrides||[]).forEach(function(o){overrides[slotKey(o.teacher,o.day,o.period)]=o;});
     parsed.teachers.forEach(function(t){t.slots.forEach(function(l){
       var sk=slotKey(t.name,l.day,l.period), label=norm(l.rawSubject), options=exact[label]||[];
       if(!options.length && /^[^0-9]+$/.test(label))options=prefixes[label]||[];
       options=options.slice();
       var chosen=null, override=overrides[sk];
+      var assigned=(allocations[sk]||[]).filter(function(s){return options.indexOf(s)>=0;});
       if(override && sectionById[override.sectionId])chosen=sectionById[override.sectionId];
+      else if(assigned.length===1)chosen=assigned[0];
       else if(options.length===1)chosen=options[0];
       else if(options.length>1) {
         var roomNorm=norm(l.rawRoom), rooms=text(l.rawRoom).split(/[,，]/).map(norm);
@@ -94,6 +100,7 @@ var TTCore = (function () {
       blocks[sp][g]=bs[0]||null;
     });});
     (store.blocks||[]).forEach(function(o){var sp=o.day+'-'+o.period;if(!blocks[sp])blocks[sp]={};blocks[sp][o.grade]=o.block||null;});
+    Object.keys(allocationBlocks).forEach(function(sp){blocks[sp]=Object.assign(blocks[sp]||{},allocationBlocks[sp]);});
     // Resolve shared labels using the independently established block grid, then
     // the same teacher/course/room combination. Retain these in the review list.
     for(var pass=0;pass<3;pass++)Object.keys(bindings).forEach(function(k){
@@ -126,7 +133,9 @@ var TTCore = (function () {
       var empty=blank(day,p); if(p>Number(settings.periods[day]||0)){cells.push(empty);continue;}
       var fixed=(settings.fixedPeriods||[]).find(function(f){return f.day===day&&Number(f.period)===p;});
       if(fixed){empty.subject=fixed.label||'창체';cells.push(empty);continue;}
-      var ls=rt.slots[day+'-'+p]||[], exactOwn=own.filter(function(s){return ls.some(function(l){return l.section&&l.section.id===s.id;});});
+      var ls=rt.slots[day+'-'+p]||[], boardBlock=null;
+      if(rt.store.allocation)(rt.store.allocation.grades||[]).forEach(function(g){if(g.grade===String(student.grade))g.blocks.forEach(function(b){if(b.slots.some(function(t){return t.day===day&&t.period===p;}))boardBlock=b.code;});});
+      var exactOwn=own.filter(function(s){return (!boardBlock||block(s.code)===boardBlock)&&ls.some(function(l){return l.section&&l.section.id===s.id;});});
       if(exactOwn.length===1){cells.push(electiveCell(day,p,exactOwn[0]));continue;}
       if(exactOwn.length>1){empty.subject='배정 확인';empty.warning=true;cells.push(empty);continue;}
       var b=(rt.blocks[day+'-'+p]||{})[student.grade], matched=b?own.filter(function(s){return block(s.code)===b;}):[];
@@ -136,6 +145,11 @@ var TTCore = (function () {
       if(common)empty.subject=common.rawSubject;
       cells.push(empty);
     }});
+    if(rt.store.allocation)cells.forEach(function(c){if(!c.isElective)return;var section=rt.byKey[sectionKey(student.grade,c.subject,c.sectionCode)],names=[];
+      (rt.store.allocation.grades||[]).forEach(function(g){g.blocks.forEach(function(b){Object.keys(b.cells).forEach(function(id){if(b.cells[id].sectionId===section.id)names=names.concat(b.cells[id].teachers);});});});
+      var actual=(rt.slots[c.day+'-'+c.period]||[]).filter(function(l){return l.section&&l.section.id===section.id&&(!names.length||names.some(function(n){return norm(n)===norm(l.teacher);}));}).map(function(l){return l.teacher;});
+      c.teachers=Array.from(new Set(actual.length?actual:names));
+    });
     return {kind:'student',id:student.id,studentNumber:sid(student),name:student.name,grade:student.grade,classNum:student.classNum,number:student.number,cells:cells};
   }
   function teacherTimetable(rt, name) {

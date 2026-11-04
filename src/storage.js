@@ -24,9 +24,10 @@ export async function load(db,ctx,parts=['students','sections','teacherRows','ov
  if(parts.includes('teacherRows'))add('teacherRows','SELECT cells FROM teacher_rows WHERE term_id=? ORDER BY row_number',ctx.term);
  if(parts.includes('overrides'))add('overrides','SELECT teacher,day,period,section_id AS sectionId FROM overrides WHERE term_id=?',ctx.term);
  if(parts.includes('blocks'))add('blocks','SELECT grade,day,period,block FROM blocks WHERE term_id=?',ctx.term);
+ if(parts.some(p=>['sections','teacherRows','blocks','allocation'].includes(p)))add('allocation','SELECT content FROM room_allocations WHERE term_id=?',ctx.term);
  if(!jobs.length)return store;
  const out=await db.batch(jobs.map(j=>j.stmt)),choices=[];
- for(let i=0;i<jobs.length;i++){const k=jobs[i].kind,rows=out[i].results;if(k==='students')store.students=rows.map(studentRow);else if(k==='assignments')choices.push(...rows);else if(k==='sections')store.sections=rows.map(sectionRow);else if(k==='teacherRows')store.teacherRows=rows.map(r=>JSON.parse(r.cells));else store[k]=rows;}
+ for(let i=0;i<jobs.length;i++){const k=jobs[i].kind,rows=out[i].results;if(k==='students')store.students=rows.map(studentRow);else if(k==='assignments')choices.push(...rows);else if(k==='sections')store.sections=rows.map(sectionRow);else if(k==='teacherRows')store.teacherRows=rows.map(r=>JSON.parse(r.cells));else if(k==='allocation'){if(rows[0])store.allocation=JSON.parse(rows[0].content);}else store[k]=rows;}
  const byId=new Map(store.students.map(s=>[s.id,s]));for(const a of choices)if(byId.has(a.student_id))byId.get(a.student_id).choices[a.subject]=a.code;return store;
 }
 export function meta(ctx,classes={}){
@@ -52,6 +53,7 @@ export function writeStudents(db,term,students,sections){
 }
 export function replaceParts(db,store,parts){
  const t=store.term,statements=[];
+ if(parts.includes('allocation')){statements.push(db.prepare('DELETE FROM room_allocations WHERE term_id=?',t));if(store.allocation)statements.push(db.prepare('INSERT INTO room_allocations(term_id,content) VALUES(?,?)',t,JSON.stringify(store.allocation)));}
  if(parts.includes('sections')){
   statements.push(db.prepare('DELETE FROM sections WHERE term_id=?',t));
   statements.push(...jsonInserts(db,'sections',['term_id','id','grade','subject','code','normalized_key','source_key','room','short_name','manual_fields'],store.sections.map(s=>[t,s.id,String(s.grade),s.subject,s.code,Core.sectionKey(s.grade,s.subject,s.code),s.sourceKey||Core.sectionKey(s.grade,s.subject,s.code),s.room||'',s.shortName||'',JSON.stringify(s.manualFields||[])])));

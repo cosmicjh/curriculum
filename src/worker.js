@@ -4,9 +4,10 @@ import * as D from './domain.js';
 import * as S from './storage.js';
 import * as Auth from './auth.js';
 import {allowedRequest,pagesRequest,cors} from './origin.js';
-const reads=new Set(['classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup']);
-const writes=new Set(['commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','backup','restore','changePassword']);
-const teacherActions=new Set(['classSwap','teacherBootstrap','teacher','roster','classBatch']);
+import {prepareAllocation} from './allocations.js';
+const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup']);
+const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','backup','restore','changePassword']);
+const teacherActions=new Set(['allocation','classSwap','teacherBootstrap','teacher','roster','classBatch']);
 async function teacherBoot(db,ctx,req={}){
  const m=await S.metadata(db,ctx,true);if(req.knownRevision===m.revision)return {unchanged:true,revision:m.revision,historyRevision:m.historyRevision,meta:m};
  const teachers=(await db.all('SELECT name FROM teachers WHERE term_id=? ORDER BY name',ctx.term)).map(r=>r.name);
@@ -26,6 +27,7 @@ async function links(db,ctx,includeSections=true){const st=await S.load(db,ctx,[
 async function read(db,ctx,req){
  const a=req.action;
  if(a==='bootstrap')return S.meta(ctx);
+ if(a==='allocation'){const st=await S.load(db,ctx,['sections','allocation']);return {board:st.allocation||null,sections:st.sections,meta:S.meta(ctx)};}
  if(a==='adminBootstrap')return adminBoot(db,ctx,req);
  if(a==='teacherBootstrap')return teacherBoot(db,ctx,req);
  if(a==='adminSettings')return {meta:await S.metadata(db,ctx,true)};
@@ -70,13 +72,19 @@ async function read(db,ctx,req){
 async function mutate(db,env,ctx,session,req,headers){
  let result=true,statements=[],parts=[],before=null,after=null,target='',backupId=null,changedStudents=[],changedSection=null,bootstrap=false,activeTerm=ctx.term,historyOnly=false,nextSwapStore=null;
  const action=req.action;
- if(action==='saveStudent'){
+ if(action==='saveAllocation'){
+  const st=await S.load(db,ctx),prepared=prepareAllocation(st,req.board);before=st.allocation||null;after=prepared.board;target=ctx.term;parts=['sections','allocation'];
+  const snap=S.snapshot(db,st,'이동수업 배치표 수정 전');backupId=snap.id;statements.push(...snap.statements,...S.replaceParts(db,prepared.store,parts));nextSwapStore=prepared.store;result={warnings:prepared.warnings};bootstrap=true;
+ }else if(action==='saveStudent'){
   const st=await S.load(db,ctx,['students','sections'],'AND id=?',[req.student?.id||'']);if(req.student?.id&&!st.students.length)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');
   before=st.students[0]||null;result=D.student(req.student||{},before);after=result;target=Core.sid(result)+' '+result.name;parts=['students'];changedStudents=[result];
   statements=S.writeStudents(db,ctx.term,[result],st.sections);
  }else if(action==='saveSection'){
   const sections=(await db.all('SELECT * FROM sections WHERE term_id=?',ctx.term)).map(S.sectionRow),old=sections.find(s=>s.id===req.section?.id);
   if(req.section?.id&&!old)Auth.fail(404,'NOT_FOUND','분반 정보가 없습니다.');const next=D.section(req.section||{},old);before=old||null;after=next;result=next;changedSection=next;target=next.subject+' '+next.code;parts=['sections'];
+  const allocation=(await S.load(db,ctx,['allocation'])).allocation;
+  if(allocation?.grades.some(g=>g.blocks.some(b=>Object.values(b.cells).some(c=>c.sectionId===old?.id)))&&next.room!==old.room)throw Error('이 분반의 교실은 이동수업 배치표에서 변경하세요.');
+  if(allocation?.grades.some(g=>g.blocks.some(b=>Object.values(b.cells).some(c=>c.sectionId===old?.id)))&&(next.grade!==old.grade||Core.block(next.code)!==Core.block(old.code)))throw Error('배치된 분반의 학년·시간블록은 이동수업 배치를 해제한 뒤 변경하세요.');
   if(old){
    const st=await S.load(db,ctx,['students'],"AND id IN (SELECT student_id FROM assignments WHERE term_id=? AND (section_id=? OR (subject=? AND code=?)))",[ctx.term,old.id,old.subject,old.code]);
    if(st.students.length&&next.grade!==old.grade)throw Error('수강 학생이 있는 분반의 학년은 변경할 수 없습니다.');
@@ -101,7 +109,8 @@ async function mutate(db,env,ctx,session,req,headers){
  }else if(action==='commitImport'||action==='restore'){
   const st=await S.load(db,ctx);let next;
   if(action==='commitImport'){const p=D.prepareImport(st,req.payload,req.preserveManual!==false,String(ctx.revision));if(p.summary.errors.length)throw Error(p.summary.errors.join('\n'));next=p.store;parts=p.parts;result=p.summary;}
-  else {const raw=req.backup||await S.readBackup(db,req.backupId);if(raw.format!=='school-timetable-backup'||raw.schemaVersion!==1)throw Error('백업 형식·버전을 확인하세요.');next=structuredClone(raw.store);if(!next?.settings||String(next.settings.academicYear)+'-'+next.settings.semester!==ctx.term||next.term&&next.term!==ctx.term)throw Error('백업과 현재 학기가 다릅니다. 먼저 해당 학기로 전환하세요.');next.term=ctx.term;next.overrides??=[];next.blocks??=[];parts=['students','sections','teacherRows','overrides','blocks','config'];}
+  else {const raw=req.backup||await S.readBackup(db,req.backupId);if(raw.format!=='school-timetable-backup'||raw.schemaVersion!==1)throw Error('백업 형식·버전을 확인하세요.');next=structuredClone(raw.store);if(!next?.settings||String(next.settings.academicYear)+'-'+next.settings.semester!==ctx.term||next.term&&next.term!==ctx.term)throw Error('백업과 현재 학기가 다릅니다. 먼저 해당 학기로 전환하세요.');next.term=ctx.term;next.overrides??=[];next.blocks??=[];parts=['students','sections','teacherRows','overrides','blocks','allocation','config'];if(next.allocation)next=prepareAllocation(next,next.allocation).store;}
+  if(next.allocation)next=prepareAllocation(next,next.allocation).store;
   D.assertStore(next);nextSwapStore=next;const snap=S.snapshot(db,st,action==='restore'?'복원 전':'자료 등록 전');backupId=snap.id;
   statements.push(...snap.statements,...S.replaceParts(db,next,parts));if(parts.includes('config'))statements.push(db.prepare('UPDATE terms SET settings=? WHERE id=?',JSON.stringify(D.settings(next.settings)),ctx.term));bootstrap=true;after=action==='commitImport'?result:{backupId:req.backupId||'파일'};target=ctx.term;
  }else if(action==='backup'){
@@ -120,6 +129,7 @@ async function mutate(db,env,ctx,session,req,headers){
    proposed.blocks=proposed.blocks.filter(x=>action==='saveBlocks'?x.grade!==String(req.grade):!blocks.some(b=>String(b.grade)===x.grade&&b.day===x.day&&Number(b.period)===x.period));
    proposed.blocks.push(...blocks.filter(b=>b.block));
   }
+  if(proposed.allocation)prepareAllocation(proposed,proposed.allocation);
   await validateSchedule(db,proposed);
  }
  await S.commit(db,ctx,session,req,statements,{parts,before,after,target,backupId,activeTerm,historyOnly});

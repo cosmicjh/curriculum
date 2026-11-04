@@ -2,7 +2,7 @@
  'use strict';
  const api=new URL(global.TIMETABLE_CONFIG?.apiBase||'/api/',location.href),cross=api.origin!==location.origin;
  if(cross&&(api.protocol!=='https:'||api.pathname!=='/api/'||api.search||api.hash||api.username||api.password))throw Error('API 주소를 확인하세요.');
- const reads=new Set(['bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','previewImport','downloadBackup']);
+ const reads=new Set(['allocation','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','previewImport','downloadBackup']);
  let memorySession=null;
  function hasSession(role){return !cross||Boolean(memorySession&&memorySession.expiresAt>Date.now()&&(role==='teacher'||role===memorySession.role));}
  async function request(action,args={}){
