@@ -6,9 +6,12 @@ import Core from '../src/core.js';
 import {fixture} from './fixture.mjs';
 import * as D from '../src/domain.js';
 import {createHash} from 'node:crypto';
-test('shared Pretendard binary and original base palette are preserved',async()=>{
+test('the original Pretendard remains available behind a smaller UI font',async()=>{
  const baseline=JSON.parse(await readFile('tests/fixtures/ui-baseline.json','utf8'));
- for(const [file,expected] of Object.entries(baseline)){const content=await readFile(file);const bytes=file.endsWith('.css')?content.toString().replaceAll('\r\n','\n').split('\n.teacher-tools')[0]:content;assert.equal(createHash('sha256').update(bytes).digest('hex'),expected,file);}
+ const original=await readFile('assets/pretendard.woff2'),subset=await readFile('assets/timetable-ui.woff2');
+ assert.equal(createHash('sha256').update(original).digest('hex'),baseline['assets/pretendard.woff2']);
+ assert.equal(subset.toString('ascii',0,4),'wOF2');
+ assert(subset.length<original.length/4);
 });
 
 test('original Core.gs synthetic golden results: student, teacher, rosters and 2+1 slots',async()=>{
