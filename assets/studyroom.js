@@ -6,6 +6,11 @@ const time=v=>v?timeFormat.format(new Date(v)):'';
 const field=(name,html)=>'<label>'+name+html+'</label>';
 const button=(action,label,attrs='')=>'<button type="button" data-sr="'+action+'" '+attrs+'>'+label+'</button>';
 const toggleGroup=(action,label,choices)=>'<div class="sr-toggle" role="group" aria-label="'+label+'">'+choices.map(([value,text],i)=>button(action,text,'data-value="'+value+'" aria-pressed="'+(!i)+'"')).join('')+'</div>';
+function monthRange(month){
+ const from=month+'-01',first=new Date(from+'T00:00:00Z');
+ const length=new Date(Date.UTC(first.getUTCFullYear(),first.getUTCMonth()+1,0)).getUTCDate();
+ return {from,to:month+'-'+length,length,start:first.getUTCDay()};
+}
 export function mountStudyroom(root,{request,admin=false}){
  const state={view:'current',dashboard:null,query:null,students:[],pending:null},$=s=>root.querySelector(s);
  root.className='studyroom';
@@ -41,8 +46,9 @@ export function mountStudyroom(root,{request,admin=false}){
   if(!rows.length)return '<p class="sr-empty">기록 없음</p>';
   const columns=['학번','이름','좌석','제출','비고'];
   const body=rows.map(r=>{
-   const cells=[r.student_number,r.name,r.seat,time(r.first_at)].map(value=>'<td>'+esc(value)+'</td>').join('');
    const record='data-id="'+esc(r.id)+'"';
+   const name=query&&!state.person?button('studentCalendar',esc(r.name),record+' class="sr-student-link"'):esc(r.name);
+   const cells=[esc(r.student_number),name,esc(r.seat),time(r.first_at)].map(value=>'<td>'+value+'</td>').join('');
    if(query)return '<tr>'+cells+'<td class="sr-note">'+(r.note?button('readNote','읽기',record+' aria-label="'+esc(r.student_number+' '+r.name+' 비고 읽기')+'"'):'')+'</td></tr>';
    const status=r.state==='cancelled'?'<span>취소</span>':'';
    return '<tr>'+cells+'<td class="sr-note">'+esc(r.note)+'<div class="sr-table-actions">'+
@@ -72,35 +78,48 @@ export function mountStudyroom(root,{request,admin=false}){
  }
  function renderQuery(){
   const month=localDate().slice(0,7);
-  content.innerHTML='<div class="sr-toolbar">'+field('월 달력','<input type="month" name="month" value="'+month+'">')+
+  content.innerHTML='<div class="sr-query-person" data-sr-person hidden><h3 tabindex="-1"></h3>'+button('allStudents','전체 학생')+'</div><div class="sr-toolbar">'+field('월 달력','<input type="month" name="month" value="'+month+'">')+
    toggleGroup('session','회차',[['','전체'],['오전','오전'],['오후','오후'],['야간','야간']])+
    '</div><div class="sr-calendar" data-sr-calendar></div><div data-sr-results></div><div class="sr-toolbar" data-sr-pages hidden>'+button('previous','이전')+button('next','다음')+'</div>';
-  state.sessionLabel='';state.queryDay=null;
+  state.sessionLabel='';state.queryDay=null;state.person=null;
   return loadCalendar();
  }
  function pressButton(button){
   for(const other of content.querySelectorAll('[data-sr="'+button.dataset.sr+'"]'))other.setAttribute('aria-pressed',String(other===button));
  }
- async function loadCalendar(){
-  const month=$('[name="month"]').value;
-  if(!month)return;
-  const first=new Date(month+'-01T00:00:00Z'),length=new Date(Date.UTC(first.getUTCFullYear(),first.getUTCMonth()+1,0)).getUTCDate();
-  const {calendar}=await api('query',{from:month+'-01',to:month+'-'+length,sessionLabel:state.sessionLabel,calendarOnly:true});
-  const counts=new Map(calendar.map(x=>[x.date,x.records])),start=first.getUTCDay();
+ async function loadCalendar(person=state.person){
+  const monthInput=$('[name="month"]'),month=monthInput.value,{from,to,length,start}=monthRange(month);
+  monthInput.disabled=true;
+  let q;
+  try{
+   q=await api('query',{from,to,sessionLabel:state.sessionLabel,...(person?{personId:person.person_id}:{calendarOnly:true})});
+  }finally{monthInput.disabled=false;}
+  state.person=person;state.queryMonth=month;
+  const personHeading=$('[data-sr-person]');
+  personHeading.hidden=!person;
+  personHeading.querySelector('h3').textContent=person?person.student_number+' '+person.name:'';
+  const counts=new Map(q.calendar.map(x=>[x.date,x.records]));
   $('[data-sr-calendar]').innerHTML=['일','월','화','수','목','금','토'].map(x=>'<strong>'+x+'</strong>').join('')+
    (start?'<span style="grid-column:span '+start+'"></span>':'')+
    Array.from({length},(_,i)=>{
     const day=month+'-'+String(i+1).padStart(2,'0'),count=counts.get(day);
-    return button('day','<span>'+(i+1)+'</span>'+(count?'<strong data-sr-count-day>'+count+'</strong>':''),
-     'data-day="'+day+'" aria-pressed="'+(state.queryDay===day)+'" aria-label="'+day+(count?' 출석 '+count+'명':' 기록 없음')+'"');
+    const dateLabel='<span>'+(i+1)+'</span>'+(count?'<strong data-sr-count-day>'+count+'</strong>':'');
+    if(person)return '<div class="sr-calendar-day'+(count?' has-record':'')+'" data-day="'+day+'">'+dateLabel+'</div>';
+    return button('day',dateLabel,'class="sr-calendar-day" data-day="'+day+'" aria-pressed="'+(state.queryDay===day)+'" aria-label="'+day+(count?' 출석 '+count+'명':' 기록 없음')+'"');
    }).join('');
-  if(state.queryDay)return loadDay();
+  if(person)return renderRecords(q);
+  if(state.queryDay)return loadRecords();
   $('[data-sr-results]').innerHTML='<p class="sr-empty">날짜를 선택하세요.</p>';
   $('[data-sr-pages]').hidden=true;
  }
- async function loadDay(offset=0){
+ async function loadRecords(offset=0){
   const day=state.queryDay;
-  const q=await api('query',{from:day,to:day,sessionLabel:state.sessionLabel,offset});state.query=q;
+  const scope=state.person?{...monthRange(state.queryMonth),personId:state.person.person_id}:{from:day,to:day};
+  const {from,to,personId}=scope;
+  renderRecords(await api('query',{from,to,personId,sessionLabel:state.sessionLabel,offset}));
+ }
+ function renderRecords(q){
+  state.query=q;
   $('[data-sr-results]').innerHTML=groupedTable(q.rows);
   $('[data-sr-pages]').hidden=!q.offset&&q.next===null;
   $('[data-sr="previous"]').disabled=!q.offset;
@@ -134,9 +153,17 @@ export function mountStudyroom(root,{request,admin=false}){
     return '<li>'+esc(x.at)+' · '+esc(x.action)+' · '+esc(actor)+(detail?'<p>'+esc(detail)+'</p>':'')+'</li>';
    }).join('')+'</ol>'});
   }
-  if(a==='day'){pressButton(b);state.queryDay=b.dataset.day;return loadDay();}
-  if(a==='next')return loadDay(state.query.next);
-  if(a==='previous')return loadDay(Math.max(0,state.query.offset-200));
+  if(a==='day'){pressButton(b);state.queryDay=b.dataset.day;return loadRecords();}
+  if(a==='studentCalendar'){
+   const person=state.query.rows.find(r=>r.id===b.dataset.id);
+   if(person){await loadCalendar(person);$('[data-sr-person] h3').focus();}
+  }
+  if(a==='allStudents'){
+   await loadCalendar(null);
+   ($('[data-sr=day][aria-pressed=true]')||$('[name="month"]')).focus();
+  }
+  if(a==='next')return loadRecords(state.query.next);
+  if(a==='previous')return loadRecords(Math.max(0,state.query.offset-200));
   if(a==='membership'){const s=state.students[Number(b.dataset.index)];await api('setMember',{personId:s.person_id,enabled:!s.eligible,expectedRevision:state.dashboard.revision});await refresh();return searchStudents($('[name="search"]').value);}
   if(a==='link'){state.linkStudent=state.students[Number(b.dataset.index)];return showDialog({title:esc(state.linkStudent.studentNumber+' '+state.linkStudent.name+' · 이전 이력 연결'),body:'<form data-sr-form="linkSearch">'+field('이전 학번·이름','<input name="search" required>')+'<button>찾기</button></form><div data-sr-link-results></div>'});}
   if(a==='linkTarget'){const target=state.linkTargets[Number(b.dataset.index)];if(!confirm(state.linkStudent.name+' 학생을 '+target.studentNumber+' '+target.name+' 이력에 연결할까요?'))return;await api('linkStudent',{studentId:state.linkStudent.id,personId:target.person_id,expectedRevision:state.dashboard.revision});dialog.close();await refresh();return searchStudents($('[name="search"]').value);}
@@ -150,7 +177,7 @@ export function mountStudyroom(root,{request,admin=false}){
    if(state.pending?.signature!==signature)state.pending={signature,id:crypto.randomUUID()};
    await api('change',{...args,requestId:state.pending.id,expectedRevision:state.editRevision,expectedRecordVersion:state.editRecordVersion,expectedSessionId:state.editSessionId});
    state.pending=null;dialog.close();
-   return state.view==='query'?loadDay(state.query.offset):refresh();
+   return state.view==='query'?loadRecords(state.query.offset):refresh();
   }
   if(kind==='search')return searchStudents(f.elements.search.value);
   if(kind==='enabled'){await api('configuration',{enabled:f.elements.enabled.checked,expectedRevision:state.dashboard.revision});return refresh();}

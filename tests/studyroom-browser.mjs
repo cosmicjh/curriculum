@@ -41,7 +41,7 @@ try{
   assert.equal(await sr.locator('[data-seat="98"]').textContent(),'98');
   assert.equal(await sr.locator('[data-seat="99"] > :not([hidden])').count(),2);
   assert(await sr.locator('[data-seat="99"] [data-number]').evaluate(e=>e.scrollWidth<=e.clientWidth),'mobile seat shows all five student-number digits');
-  assert(await sr.locator('button').evaluateAll(buttons=>buttons.every(button=>getComputedStyle(button).borderTopWidth==='0px')));
+  assert(await sr.locator('button').evaluateAll(buttons=>buttons.every(button=>getComputedStyle(button).borderTopWidth===(button.dataset.sr==='seat'?'1px':'0px'))));
   assert(await sr.locator('.sr-seat-scroll').evaluate(e=>e.scrollWidth<=e.clientWidth));
   assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await teacher.screenshot({path:'test-results/studyroom/current-mobile.png',fullPage:true});
@@ -49,13 +49,16 @@ try{
   await sr.locator('[data-sr=display][data-value=seats]').click();await teacher.setViewportSize({width:1440,height:1000});
   await teacher.screenshot({path:'.impeccable/review/desktop.png',fullPage:true});
  });
- await step('calendar selects one day, filters the session, and edits or removes an existing note',async()=>{
+ await step('calendars show date and student attendance, filter by session and month, and allow note edits',async()=>{
+  assert((await api('submit',{studentNumber:'30102',seat:'98',requestId:crypto.randomUUID()})).ok);
   const queryIdle=()=>teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');
   await sr.locator('[data-sr=view][data-view=query]').click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-content]').locator('input[type=search], input[type=date], select, [name=includeCancelled]').count(),0);
   assert.equal(await sr.locator('[data-sr-results] tbody tr').count(),0);
   const day=sr.locator('[data-sr=day][data-day="'+now.date+'"]');
-  assert.equal(await day.locator('[data-sr-count-day]').textContent(),'1');
+  assert.equal(await day.locator('[data-sr-count-day]').textContent(),'2');
+  assert.equal(await day.evaluate(el=>getComputedStyle(el).borderTopWidth),'1px');
+  assert.equal(await sr.locator('.sr-calendar').evaluate(el=>getComputedStyle(el).borderTopWidth),'1px');
   await day.click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-results] h4').textContent(),'오전');
   await sr.locator('[data-sr=session][data-value="야간"]').click();await queryIdle();
@@ -64,6 +67,26 @@ try{
   assert.equal(await day.getAttribute('aria-pressed'),'true');
   await teacher.screenshot({path:'test-results/studyroom/calendar-desktop.png',fullPage:true});await teacher.setViewportSize({width:320,height:760});
   const results=sr.locator('[data-sr-results] .sr-table');
+  assert.equal(await results.locator('tbody tr').count(),2);
+  await results.getByRole('button',{name:'가상학생하나',exact:true}).click();await queryIdle();
+  assert.equal(await sr.locator('[data-sr-person] h3').textContent(),'30101 가상학생하나');
+  const attended=sr.locator('.sr-calendar-day.has-record');
+  assert.equal(await attended.getAttribute('data-day'),now.date);
+  assert.equal(await attended.locator('[data-sr-count-day]').textContent(),'1');
+  assert.equal(await results.locator('tbody tr').count(),1);
+  const month=sr.locator('[name=month]'),currentMonth=await month.inputValue();
+  const previousMonth=new Date(now.date.slice(0,7)+'-01T00:00:00Z');previousMonth.setUTCDate(0);
+  await month.fill(previousMonth.toISOString().slice(0,7));await queryIdle();
+  assert.equal(await attended.count(),0);
+  assert.match(await sr.locator('[data-sr-results]').textContent(),/기록 없음/);
+  await month.fill(currentMonth);await queryIdle();
+  assert.equal(await attended.getAttribute('data-day'),now.date);
+  assert.equal(await results.locator('tbody tr').count(),1);
+  await sr.locator('[data-sr=session][data-value="야간"]').click();await queryIdle();
+  assert.equal(await attended.count(),0);
+  assert.equal(await results.count(),0);
+  await sr.locator('[data-sr=session][data-value=""]').click();await queryIdle();
+  assert.equal(await attended.getAttribute('data-day'),now.date);
   assert.deepEqual(await results.getByRole('columnheader').allTextContents(),['학번','이름','좌석','제출','비고']);
   assert.equal(await results.locator('tbody tr').evaluate(row=>getComputedStyle(row).display),'table-row');
   assert.match(await results.locator('tbody tr').textContent(),/30101.*가상학생하나.*99.*읽기/);
@@ -80,7 +103,11 @@ try{
   await results.locator('[data-sr=readNote]').click();assert.equal(await note.inputValue(),'가상 비고 수정');
   await sr.locator('dialog button[value=delete]').click();await queryIdle();
   assert.equal(await results.locator('[data-sr=readNote]').count(),0);
-  assert.equal((await h.sql('SELECT note FROM sr_attendance')).results[0].note,'');
+  assert.equal((await h.sql("SELECT note FROM sr_attendance WHERE student_number='30101'")).results[0].note,'');
+  await sr.getByRole('button',{name:'전체 학생',exact:true}).click();await queryIdle();
+  assert.equal(await sr.locator('[data-sr-person]').isHidden(),true);
+  await day.click();await queryIdle();
+  assert.equal(await results.locator('tbody tr').count(),2);
  });
  await step('administrator schedule form is functional, preserve shared roster editing',async()=>{
   const manager=await ctx.newPage();await manager.goto(url+'/admin.html');await manager.locator('#password').fill('1234');await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=studyroom]').click();const m=manager.locator('.studyroom');await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');await m.locator('[data-sr=view][data-view=settings]').click();await m.locator('[data-sr-form=schedule]').waitFor();await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal(await m.locator('.sr-rule').count(),1);
@@ -89,7 +116,7 @@ try{
   await manager.screenshot({path:'test-results/studyroom/settings-desktop.png',fullPage:true});await manager.close();
  });
  await step('all browser windows can close before the server-side scheduled archive runs',async()=>{
-  await ctx.close();const worker=await h.mf.getWorker();await worker.scheduled({scheduledTime:new Date(now.date+'T23:59:01+09:00'),cron:'* * * * *'});assert.equal((await h.sql('SELECT count(*) n FROM sr_archives')).results[0].n,1);assert.equal((await h.sql("SELECT count(*) n FROM sr_sessions WHERE status='closed'")).results[0].n,1);assert.equal((await h.sql('SELECT count(*) n FROM sr_attendance')).results[0].n,1);
+  await ctx.close();const worker=await h.mf.getWorker();await worker.scheduled({scheduledTime:new Date(now.date+'T23:59:01+09:00'),cron:'* * * * *'});assert.equal((await h.sql('SELECT count(*) n FROM sr_archives')).results[0].n,1);assert.equal((await h.sql("SELECT count(*) n FROM sr_sessions WHERE status='closed'")).results[0].n,1);assert.equal((await h.sql('SELECT count(*) n FROM sr_attendance')).results[0].n,2);
  });
  assert.deepEqual(errors,[]);await writeFile('test-results/studyroom/browser.json',JSON.stringify({environment:'local Miniflare + real D1 SQLite + headless Edge; synthetic data only',steps,errors},null,2));
 }finally{if(browser)await browser.close();await h.close();}
