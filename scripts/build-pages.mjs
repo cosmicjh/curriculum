@@ -9,7 +9,7 @@ await cp(resolve(root,'dist'),output,{recursive:true});
 await rm(resolve(output,'_headers'),{force:true});
 const apiBase='https://school-timetable.cosmicjh.workers.dev/api/';
 const source=await Promise.all(['studyroom.js','studyroom-layout.js','studyroom-student.js','studyroom.css','font.css','app.js','allocations.js','allocation-import.js','transport.js','assets.js','import.js','password.js','style.css','xlsx.full.min.js','html2canvas.min.js'].map(name=>readFile(resolve(output,'assets',name),'utf8')));
-source.push(createHash('sha256').update(await readFile(resolve(output,'assets/pretendard.woff2'))).digest('hex'));
+for(const name of ['timetable-ui.woff2','pretendard.woff2'])source.push(createHash('sha256').update(await readFile(resolve(output,'assets',name))).digest('hex'));
 source.push(...await Promise.all(['app.js','view.html'].map(name=>readFile(resolve(output,'class-swap',name),'utf8'))));
 const version=createHash('sha256').update(source.map(s=>s.replaceAll('\r\n','\n')).join('\n')+apiBase).digest('hex').slice(0,12);
 await writeFile(resolve(output,'config.js'),"window.TIMETABLE_CONFIG="+JSON.stringify({schoolName:'첨단고등학교',apiBase,assetVersion:version})+';\n');

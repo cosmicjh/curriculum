@@ -1,1 +1,4 @@
 @font-face{font-family:"Pretendard Variable";font-weight:45 920;font-style:normal;font-display:swap;src:url("pretendard.woff2") format("woff2")}
+/* Common Hangul (KS X 1001), Latin and punctuation from Pretendard. The original covers other glyphs. */
+@font-face{font-family:"Timetable UI";font-weight:45 920;font-style:normal;font-display:swap;src:url("timetable-ui.woff2") format("woff2")}
+:root{--ui-font:"Timetable UI","Pretendard Variable","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif}

@@ -16,7 +16,7 @@
    }catch(e){if(e.name==='AbortError')throw Error('응답을 확인하지 못했습니다. 입력값을 보관하고 새로고침하여 저장 결과를 확인하세요.');if(e instanceof TypeError&&/fetch|network|load failed/i.test(e.message)){const error=Error('서버에 연결하지 못했습니다. 입력 자료는 유지됩니다. 재시도 전에 자료 목록에서 저장 여부를 확인하세요.');error.code='NETWORK_ERROR';throw error;}throw e;}finally{clearTimeout(timer);}
   }
   if(action==='login'||action==='changePassword'){
-   const {stretchPassword,newSalt}=await import('./password.js'),p=await send('passwordParameters',{role:action==='login'?payload.role:'admin'});
+   const [{stretchPassword,newSalt},p]=await Promise.all([import('./password.js'),send('passwordParameters',{role:action==='login'?payload.role:'admin'})]);
    if(action==='login'){payload.password=await stretchPassword(payload.password,p);payload.credentialEpoch=p.epoch;}
    else {const password=payload.newPassword;if(typeof password!=='string'||password.length<4||password.length>128)throw Error('새 비밀번호는 4–128자로 입력하세요.');payload.currentPassword=await stretchPassword(payload.currentPassword,p);payload.currentEpoch=p.epoch;payload.passwordSalt=newSalt();payload.passwordProof=await stretchPassword(password,{salt:payload.passwordSalt});payload.passwordLength=password.length;delete payload.newPassword;}
   }
