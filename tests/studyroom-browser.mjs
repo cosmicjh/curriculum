@@ -29,6 +29,7 @@ try{
  await step('common teacher login can add a note and all 99 seats fit without horizontal scrolling',async()=>{
   await teacher.goto(url+'/teacher.html');await teacher.locator('#password').fill('1234');await teacher.locator('form[data-form=login] button').click();await teacher.locator('[data-action=teacher-tab][data-tab=studyroom]').click();await idle();assert.equal(await sr.locator('[data-sr=seat]').count(),99);assert.match(await sr.locator('[data-seat="99"]').textContent(),/30101.*가상학생하나/);
   assert.equal(await sr.locator('[data-sr-identity]').count(),0);
+  assert.equal(await sr.locator('input[type=search], [data-sr-view]').count(),0);
   await sr.locator('[data-seat="99"]').click();await sr.locator('textarea[name=note]').fill('가상 특이사항');await sr.locator('dialog [data-sr-form=change] button').click();await idle();
   assert.equal((await h.sql('SELECT note FROM sr_attendance')).results[0].note,'가상 특이사항');
   await teacher.setViewportSize({width:320,height:760});
@@ -37,28 +38,49 @@ try{
    return [button.dataset.seat,Number(style.gridRowStart)+6,Number(style.gridColumnStart)];
   }));
   assert.deepEqual(positions,seats,'mobile seats follow the original layout coordinates');
+  assert.equal(await sr.locator('[data-seat="98"]').textContent(),'98');
+  assert.equal(await sr.locator('[data-seat="99"] > :not([hidden])').count(),2);
+  assert(await sr.locator('[data-seat="99"] [data-number]').evaluate(e=>e.scrollWidth<=e.clientWidth),'mobile seat shows all five student-number digits');
+  assert(await sr.locator('button').evaluateAll(buttons=>buttons.every(button=>getComputedStyle(button).borderTopWidth==='0px')));
   assert(await sr.locator('.sr-seat-scroll').evaluate(e=>e.scrollWidth<=e.clientWidth));
   assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await teacher.screenshot({path:'test-results/studyroom/current-mobile.png',fullPage:true});
-  await sr.locator('[data-sr-view]').selectOption('list');assert(await sr.locator('[data-sr-list]').evaluate(e=>e.scrollWidth<=e.clientWidth));
-  await sr.locator('[data-sr-view]').selectOption('seats');await teacher.setViewportSize({width:1440,height:1000});
+  await sr.locator('[data-sr=display][data-value=list]').click();assert(await sr.locator('[data-sr-list]').evaluate(e=>!e.hidden&&e.scrollWidth<=e.clientWidth));
+  await sr.locator('[data-sr=display][data-value=seats]').click();await teacher.setViewportSize({width:1440,height:1000});
   await teacher.screenshot({path:'.impeccable/review/desktop.png',fullPage:true});
  });
- await step('student month calendar, day records, filters and history are connected to D1',async()=>{
-  await sr.locator('[data-sr=view][data-view=query]').click();await teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');
-  await sr.locator('[data-sr-form=search] [name=search]').fill('30101');await sr.locator('[data-sr-form=search] button:not([type=button])').click();await teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');await sr.locator('[data-sr=person]').first().click();await teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');
-  assert.match(await sr.locator('[data-sr-day], [data-sr=day][data-day="'+now.date+'"]').textContent(),/출석 1/);assert.equal(await sr.locator('[data-sr-results] tbody tr').count(),1);assert.equal(await sr.locator('[data-sr-results] h4').textContent(),'오전');
-  await sr.locator('[name=sessionLabel]').selectOption('야간');await sr.locator('[data-sr-form=query] button').click();await teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal(await sr.locator('[data-sr-results] tbody tr').count(),0);
-  await sr.locator('[name=sessionLabel]').selectOption('오전');await sr.locator('[data-sr-form=query] button').click();await teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');
-  await sr.locator('[data-sr=day][data-day="'+now.date+'"]').click();await teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');await sr.locator('[data-sr=history]').first().click();await sr.locator('dialog').waitFor({state:'visible'});assert.match(await sr.locator('.sr-audit').textContent(),/note.*교사/);await sr.locator('[data-sr=closeDialog]').click();
+ await step('calendar selects one day, filters the session, and edits or removes an existing note',async()=>{
+  const queryIdle=()=>teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');
+  await sr.locator('[data-sr=view][data-view=query]').click();await queryIdle();
+  assert.equal(await sr.locator('[data-sr-content]').locator('input[type=search], input[type=date], select, [name=includeCancelled]').count(),0);
+  assert.equal(await sr.locator('[data-sr-results] tbody tr').count(),0);
+  const day=sr.locator('[data-sr=day][data-day="'+now.date+'"]');
+  assert.equal(await day.locator('[data-sr-count-day]').textContent(),'1');
+  await day.click();await queryIdle();
+  assert.equal(await sr.locator('[data-sr-results] h4').textContent(),'오전');
+  await sr.locator('[data-sr=session][data-value="야간"]').click();await queryIdle();
+  assert.equal(await sr.locator('[data-sr-results] tbody tr').count(),0);
+  await sr.locator('[data-sr=session][data-value="오전"]').click();await queryIdle();
+  assert.equal(await day.getAttribute('aria-pressed'),'true');
   await teacher.screenshot({path:'test-results/studyroom/calendar-desktop.png',fullPage:true});await teacher.setViewportSize({width:320,height:760});
   const results=sr.locator('[data-sr-results] .sr-table');
   assert.deepEqual(await results.getByRole('columnheader').allTextContents(),['학번','이름','좌석','제출','비고']);
   assert.equal(await results.locator('tbody tr').evaluate(row=>getComputedStyle(row).display),'table-row');
-  assert.match(await results.locator('tbody tr').textContent(),/30101.*가상학생하나.*99.*가상 특이사항/);
+  assert.match(await results.locator('tbody tr').textContent(),/30101.*가상학생하나.*99.*읽기/);
+  assert.match(await results.locator('tbody td').nth(3).textContent(),/^\d{2}:\d{2}$/);
+  assert.equal(await results.locator('[data-sr=edit], [data-sr=history]').count(),0);
   assert(await results.evaluate(e=>e.scrollWidth<=e.clientWidth));
   assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await teacher.screenshot({path:'.impeccable/review/mobile.png',fullPage:true});
+  await results.locator('[data-sr=readNote]').click();
+  const note=sr.locator('dialog textarea[name=note]');
+  assert.equal(await note.inputValue(),'가상 특이사항');
+  assert.equal(await sr.locator('dialog [name=change]').count(),0);
+  await note.fill('가상 비고 수정');await sr.locator('dialog button.primary').click();await queryIdle();
+  await results.locator('[data-sr=readNote]').click();assert.equal(await note.inputValue(),'가상 비고 수정');
+  await sr.locator('dialog button[value=delete]').click();await queryIdle();
+  assert.equal(await results.locator('[data-sr=readNote]').count(),0);
+  assert.equal((await h.sql('SELECT note FROM sr_attendance')).results[0].note,'');
  });
  await step('administrator schedule form is functional, preserve shared roster editing',async()=>{
   const manager=await ctx.newPage();await manager.goto(url+'/admin.html');await manager.locator('#password').fill('1234');await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=studyroom]').click();const m=manager.locator('.studyroom');await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');await m.locator('[data-sr=view][data-view=settings]').click();await m.locator('[data-sr-form=schedule]').waitFor();await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal(await m.locator('.sr-rule').count(),1);

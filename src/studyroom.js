@@ -71,9 +71,11 @@ async function query(db,req){
  }
  if(!req.includeCancelled)conditions.push("a.state='active'");
  const where=conditions.join(' AND '),base=' FROM sr_attendance a JOIN sr_sessions s ON s.id=a.session_id WHERE '+where;
+ const calendar="SELECT s.date,count(*) AS records,count(DISTINCT a.person_id) AS students"+base+' GROUP BY s.date ORDER BY s.date';
+ if(req.calendarOnly===true)return {calendar:await db.all(calendar,...args)};
  const [rows,days,totals]=await db.batch([
   db.prepare('SELECT a.*,s.date,'+label+' AS label,s.academic_year'+base+' ORDER BY s.date DESC,s.starts_at,s.id,a.student_number LIMIT 200 OFFSET ?',...args,offset),
-  db.prepare("SELECT s.date,count(*) AS records,count(DISTINCT a.person_id) AS students"+base+' GROUP BY s.date ORDER BY s.date',...args),
+  db.prepare(calendar,...args),
   db.prepare('SELECT count(*) AS records,count(DISTINCT s.date) AS days,count(DISTINCT a.person_id) AS students'+base,...args)
  ]);
  return {rows:rows.results,calendar:days.results,totals:totals.results[0],offset,next:offset+rows.results.length<totals.results[0].records?offset+rows.results.length:null};
