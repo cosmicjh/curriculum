@@ -1,5 +1,7 @@
 # 개인 시간표 · 결보강 도구 · GitHub Pages + Workers API + D1
 
+스터디룸은 개인 시간표와 같은 Worker·D1의 학생 명부를 사용합니다. 기존 좌석 QR로 출석하고, 교사와 관리자는 로그인 후 **스터디룸**에서 조회합니다. [운영·검증 안내](docs/STUDYROOM_INTEGRATION.md)
+
 접속 주소: [cosmicjh.github.io/timetable](https://cosmicjh.github.io/timetable/) · [관리자](https://cosmicjh.github.io/timetable/admin.html)
 
 두 도구의 소스와 빌드를 `cosmicjh/timetable` 저장소에서 관리합니다. 교사 로그인 후 **개인 시간표 · 결보강 · 이동수업 배치표 · 교과 명렬표 · 학급 인쇄** 탭을 전환하며, 결보강에 다시 로그인할 필요가 없습니다. **관리자에서 한 번 등록·수정한 교사·시간표·선택분반·수업 연결·요일별 교시를 두 기능이 함께 사용합니다.** 저장은 기존 `school-timetable-db` 하나로 통합하고, 결보강 계획서와 예약도 이 DB에 보존합니다. [통합 구조와 배포 안내](docs/teacher-tools.md) · [이동수업 배치표 사용 안내](docs/room-allocations.md)

@@ -28,7 +28,12 @@
   "account_id": "965071bae1ca798003675034b0ce7ce5",
   "workers_dev": true,
   "preview_urls": false,
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "vars": {
-    "FRONTEND_ORIGIN": "https://cosmicjh.github.io"
+    "FRONTEND_ORIGIN": "https://cosmicjh.github.io",
+    "STUDYROOM_ENABLED": "true",
+    "STUDYROOM_CRON_ENABLED": "true"
   }
 }

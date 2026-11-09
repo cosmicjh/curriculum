@@ -5,6 +5,7 @@ import * as S from './storage.js';
 import * as Auth from './auth.js';
 import {allowedRequest,pagesRequest,cors} from './origin.js';
 import {prepareAllocation} from './allocations.js';
+import {studyroom,runStudyroomSchedule} from './studyroom.js';
 const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup']);
 const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','backup','restore','changePassword']);
 const teacherActions=new Set(['allocation','classSwap','teacherBootstrap','teacher','roster','classBatch']);
@@ -162,12 +163,12 @@ async function api(request,env){
    headers.set('Access-Control-Allow-Methods','POST');headers.set('Access-Control-Allow-Headers','Content-Type, Authorization');return new Response(null,{status:204,headers});
   }
   if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1',sharedTimetable:true}},{headers});}
-  const action=path.slice(5);if(!reads.has(action)&&!writes.has(action)&&!['login','logout','passwordParameters'].includes(action))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
+  const action=path.slice(5);if(!reads.has(action)&&!writes.has(action)&&!['login','logout','passwordParameters'].includes(action)&&!(action==='studyroom'&&env.STUDYROOM_ENABLED==='true'))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
   if(request.method!=='POST')Auth.fail(405,'METHOD_NOT_ALLOWED','POST 요청을 사용하세요.');
   if(!allowedRequest(request,env))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
   if(!request.headers.get('Content-Type')?.startsWith('application/json'))Auth.fail(415,'INVALID_REQUEST','JSON 요청을 사용하세요.');
   if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');
-  const maxBody=action==='classSwap'?256*1024:10*1024*1024;
+  const maxBody=['classSwap','studyroom'].includes(action)?256*1024:10*1024*1024;
   const length=Number(request.headers.get('Content-Length')||0);if(length>maxBody)Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');
   const reader=request.body?.getReader(),chunks=[];let size=0;if(reader){while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>maxBody){await reader.cancel();Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');}chunks.push(value);}}
   const bytes=new Uint8Array(size);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.length;}
@@ -177,7 +178,8 @@ async function api(request,env){
   else if(action==='logout'){await Auth.revoke(db,request,env);if(!pagesRequest(request,env)){headers.append('Set-Cookie',Auth.cookie('teacher'));headers.append('Set-Cookie',Auth.cookie('admin'));}data=true;}
   else if(action==='login'){
    data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx):await teacherBoot(db,ctx);}
-  }else{
+  }else if(action==='studyroom')data=await studyroom(db,await S.context(db),env,req,request);
+  else{
    const session=action==='bootstrap'||action==='student'?null:await Auth.authenticate(db,request,teacherActions.has(action)?'teacher':'admin',env);
    if(action==='student')await Auth.rateLimit(db,request,'student',60);
    const ctx=await S.context(db);
@@ -189,10 +191,16 @@ async function api(request,env){
    else if(writes.has(action)){if(req.expectedTerm!==ctx.term||req.expectedRevision!==String(ctx.revision))Auth.fail(409,'CONFLICT','자료 또는 학기가 변경되었습니다. 입력값을 복사한 뒤 새로고침하여 다시 저장하세요.');data=await mutate(db,{...env,request},ctx,session,req,headers);}
    else {data=await read(db,ctx,req);const check=await db.first('SELECT revision,active_term FROM app_state WHERE id=1');if(check.revision!==ctx.revision||check.active_term!==ctx.term)Auth.fail(409,'READ_CHANGED','자료가 변경되었습니다. 다시 조회하세요.');}
   }
+  for(const result of [data,data?.initial,data?.bootstrap,data?.teacherBootstrap])if(result?.meta)result.meta.features={studyroom:env.STUDYROOM_ENABLED==='true'};
+  if(action==='bootstrap')data.features={studyroom:env.STUDYROOM_ENABLED==='true'};
   payload={ok:true,data};
  }catch(e){
   if(String(e.message).includes('revision_conflict')){e.status=409;e.code='CONFLICT';}
   if(String(e.message).includes('auth_required')){e.status=401;e.code='AUTH_REQUIRED';}
+  if(String(e.message).includes('sr_revision_conflict')){e.status=409;e.code='SR_CONFLICT';e.message='자료가 변경되었습니다. 새로고침한 뒤 다시 시도하세요.';}
+  if(String(e.message).includes('sr_record_conflict')){e.status=409;e.code='SR_CONFLICT';e.message='같은 학생의 출석이 변경되었습니다. 다시 제출하세요.';}
+  if(String(e.message).includes('sr_session_closed')){e.status=409;e.code='CLOSED';e.message='회차가 마감되었습니다. 현재 회차를 확인하세요.';}
+  if(String(e.message).includes('sr_staff_required')){e.status=401;e.code='STAFF_REQUIRED';e.message='출석 확인자 계정으로 다시 로그인하세요.';}
   if(String(e.message).includes('shared_migration_in_progress')){e.status=503;e.code='MIGRATING';e.message='자료 통합 중입니다. 잠시 후 다시 저장하세요. 입력 내용은 유지됩니다.';}
   if(/UNIQUE constraint failed/.test(e.message)){e.status=409;e.code='CONFLICT';}
   status=e.status||400;payload={ok:false,code:e.code||'REQUEST_ERROR',error:status>=500&&e.code!=='MIGRATING'?'서버 설정 또는 처리를 확인하세요.':e.message};if(status===429)headers.set('Retry-After','60');
@@ -200,4 +208,7 @@ async function api(request,env){
  headers.set('Server-Timing',`app;dur=${(performance.now()-start).toFixed(2)}, db;dur=${(db?.stats.ms||0).toFixed(2)}`);headers.set('X-D1-Rows-Read',String(db?.stats.read||0));headers.set('X-D1-Rows-Written',String(db?.stats.written||0));
  return Response.json(payload,{status,headers});
 }
-export default {async fetch(request,env){const url=new URL(request.url);if(url.pathname==='/api'||url.pathname.startsWith('/api/'))return api(request,env);return env.ASSETS.fetch(request);}};
+export default {
+ async fetch(request,env){const url=new URL(request.url);if(url.pathname==='/api'||url.pathname.startsWith('/api/'))return api(request,env);return env.ASSETS.fetch(request);},
+ async scheduled(event,env){if(env.STUDYROOM_ENABLED==='true'&&env.STUDYROOM_CRON_ENABLED==='true')await runStudyroomSchedule(S.database(env.DB),new Date(event.scheduledTime).toISOString());}
+};

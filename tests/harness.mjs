@@ -6,10 +6,10 @@ import {resolve,sep,extname} from 'node:path';
 import {provisionCredential,randomToken} from '../src/crypto.js';
 import {stretchPassword,newSalt} from '../src/password.js';
 let bundle,bindings;
-export async function harness({frontendOrigin='https://cosmicjh.github.io'}={}){
+export async function harness({frontendOrigin='https://cosmicjh.github.io',studyroom=false}={}){
  bundle??=(await build({entryPoints:['tests/worker.mjs'],bundle:true,write:false,format:'esm',platform:'browser'})).outputFiles[0].text;
  if(!bindings){const pepper=randomToken();bindings={PASSWORD_PEPPER:pepper,BOOTSTRAP_TEACHER_HASH:await provisionCredential('1234',pepper,'teacher'),BOOTSTRAP_ADMIN_HASH:await provisionCredential('1234',pepper,'admin')};}
- const mf=new Miniflare({modules:true,script:bundle,compatibilityDate:'2026-07-30',d1Databases:{DB:'timetable-test-'+crypto.randomUUID()},bindings:{...bindings,FRONTEND_ORIGIN:frontendOrigin},host:'127.0.0.1',port:0,log:new Log(LogLevel.ERROR)});
+ const mf=new Miniflare({modules:true,script:bundle,compatibilityDate:'2026-07-30',d1Databases:{DB:'timetable-test-'+crypto.randomUUID()},bindings:{...bindings,FRONTEND_ORIGIN:frontendOrigin,STUDYROOM_ENABLED:studyroom?'true':'false',STUDYROOM_CRON_ENABLED:studyroom?'true':'false',STUDYROOM_TEST_MODE:studyroom?'true':'false'},host:'127.0.0.1',port:0,log:new Log(LogLevel.ERROR)});
  async function sql(sql,...args){const r=await mf.dispatchFetch('http://localhost/__fixture_sql',{method:'POST',body:JSON.stringify({sql,args})});if(!r.ok)throw Error(await r.text());return r.json();}
  try{for(const name of (await readdir('migrations')).filter(n=>n.endsWith('.sql')).sort()){
   let schema=(await readFile('migrations/'+name,'utf8')).replace(/^--.*$/gm,'');const triggers=[];
