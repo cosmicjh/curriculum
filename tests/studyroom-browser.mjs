@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {harness} from './harness.mjs';
 import {backup} from './fixture.mjs';
+import {seats} from '../assets/studyroom-layout.js';
 import {localTime} from '../src/studyroom-domain.js';
 import '../scripts/build.mjs';
 const h=await harness({studyroom:true}),steps=[],errors=[];let browser;
@@ -31,6 +32,11 @@ try{
   await sr.locator('[data-seat="99"]').click();await sr.locator('textarea[name=note]').fill('가상 특이사항');await sr.locator('dialog [data-sr-form=change] button').click();await idle();
   assert.equal((await h.sql('SELECT note FROM sr_attendance')).results[0].note,'가상 특이사항');
   await teacher.setViewportSize({width:320,height:760});
+  const positions=await sr.locator('[data-sr="seat"]').evaluateAll(buttons=>buttons.map(button=>{
+   const style=getComputedStyle(button);
+   return [button.dataset.seat,Number(style.gridRowStart)+6,Number(style.gridColumnStart)];
+  }));
+  assert.deepEqual(positions,seats,'mobile seats follow the original layout coordinates');
   assert(await sr.locator('.sr-seat-scroll').evaluate(e=>e.scrollWidth<=e.clientWidth));
   assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await teacher.screenshot({path:'test-results/studyroom/current-mobile.png',fullPage:true});
@@ -45,7 +51,14 @@ try{
   await sr.locator('[name=sessionLabel]').selectOption('야간');await sr.locator('[data-sr-form=query] button').click();await teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal(await sr.locator('[data-sr-results] tbody tr').count(),0);
   await sr.locator('[name=sessionLabel]').selectOption('오전');await sr.locator('[data-sr-form=query] button').click();await teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');
   await sr.locator('[data-sr=day][data-day="'+now.date+'"]').click();await teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');await sr.locator('[data-sr=history]').first().click();await sr.locator('dialog').waitFor({state:'visible'});assert.match(await sr.locator('.sr-audit').textContent(),/note.*교사/);await sr.locator('[data-sr=closeDialog]').click();
-  await teacher.screenshot({path:'test-results/studyroom/calendar-desktop.png',fullPage:true});await teacher.setViewportSize({width:390,height:844});assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await teacher.screenshot({path:'.impeccable/review/mobile.png',fullPage:true});
+  await teacher.screenshot({path:'test-results/studyroom/calendar-desktop.png',fullPage:true});await teacher.setViewportSize({width:320,height:760});
+  const results=sr.locator('[data-sr-results] .sr-table');
+  assert.deepEqual(await results.getByRole('columnheader').allTextContents(),['학번','이름','좌석','제출','비고']);
+  assert.equal(await results.locator('tbody tr').evaluate(row=>getComputedStyle(row).display),'table-row');
+  assert.match(await results.locator('tbody tr').textContent(),/30101.*가상학생하나.*99.*가상 특이사항/);
+  assert(await results.evaluate(e=>e.scrollWidth<=e.clientWidth));
+  assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await teacher.screenshot({path:'.impeccable/review/mobile.png',fullPage:true});
  });
  await step('administrator schedule form is functional, preserve shared roster editing',async()=>{
   const manager=await ctx.newPage();await manager.goto(url+'/admin.html');await manager.locator('#password').fill('1234');await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=studyroom]').click();const m=manager.locator('.studyroom');await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');await m.locator('[data-sr=view][data-view=settings]').click();await m.locator('[data-sr-form=schedule]').waitFor();await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal(await m.locator('.sr-rule').count(),1);

@@ -1,5 +1,4 @@
 import {seats} from './studyroom-layout.js';
-const orderedSeats=[...seats].sort(([a],[b])=>a.localeCompare(b));
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const localDate=()=>new Date(Date.now()+9*3600000).toISOString().slice(0,10);
 const timeFormat=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'});
@@ -16,7 +15,7 @@ export function mountStudyroom(root,{request,admin=false}){
  function renderCurrent(){
   content.innerHTML='<div class="sr-toolbar"><strong data-sr-session></strong>'+button('refresh','새로고침')+button('manual','수동 등록')+field('보기','<select data-sr-view><option value="seats">좌석</option><option value="list">목록</option></select>')+field('검색','<input type="search" data-sr-filter placeholder="학번·이름">')+'</div><p class="sr-count" data-sr-count></p><div class="sr-seat-scroll" tabindex="0" aria-label="99석 배치표"><div class="sr-seat-grid"></div></div><div class="sr-table" data-sr-list hidden></div>';
   const grid=$('.sr-seat-grid');
-  for(const [code,row,column] of orderedSeats){const b=document.createElement('button');b.type='button';b.dataset.sr='seat';b.dataset.seat=code;b.style.gridRow=(row-6)+' / span 4';b.style.gridColumn=column;b.innerHTML='<strong>'+code+'번</strong><span data-number></span><span data-name></span>';grid.append(b);}
+  for(const [code,row,column] of seats){const b=document.createElement('button');b.type='button';b.dataset.sr='seat';b.dataset.seat=code;b.style.gridRow=(row-6)+' / span 4';b.style.gridColumn=column;b.innerHTML='<strong>'+code+'번</strong><span data-number></span><span data-name></span>';grid.append(b);}
   paintCurrent();
  }
  function paintCurrent(){
@@ -33,11 +32,16 @@ export function mountStudyroom(root,{request,admin=false}){
   const list=$('[data-sr-list]');if(!list.hidden)list.innerHTML=table(d.rows.filter(matches));
  }
  function table(rows){
-  const columns=['좌석','학번','이름','제출','비고'];
-  return rows.length?'<table><thead><tr>'+[...columns,'관리'].map(label=>'<th scope="col">'+label+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>{
-   const values=[r.seat,r.student_number,r.name,time(r.first_at),r.note];
-   return '<tr>'+values.map((value,i)=>'<td data-label="'+columns[i]+'">'+esc(value)+'</td>').join('')+'<td>'+button('edit','변경','data-id="'+esc(r.id)+'"')+button('history','이력','data-id="'+esc(r.id)+'"')+(r.state==='cancelled'?' <span>취소</span>':'')+'</td></tr>';
-  }).join('')+'</tbody></table>':'<p class="sr-empty">기록 없음</p>';
+  if(!rows.length)return '<p class="sr-empty">기록 없음</p>';
+  const columns=['학번','이름','좌석','제출','비고'];
+  const body=rows.map(r=>{
+   const cells=[r.student_number,r.name,r.seat,time(r.first_at)].map(value=>'<td>'+esc(value)+'</td>').join('');
+   const record='data-id="'+esc(r.id)+'"';
+   const status=r.state==='cancelled'?'<span>취소</span>':'';
+   return '<tr>'+cells+'<td class="sr-note">'+esc(r.note)+'<div class="sr-table-actions">'+
+    button('edit','변경',record)+button('history','이력',record)+status+'</div></td></tr>';
+  }).join('');
+  return '<table><thead><tr>'+columns.map(label=>'<th scope="col">'+label+'</th>').join('')+'</tr></thead><tbody>'+body+'</tbody></table>';
  }
  function groupedTable(rows){
   const dates=new Map();
