@@ -14,14 +14,14 @@ test('99 different seats submit concurrently behind one school NAT without a glo
  const ms=results.map(r=>r.elapsed).sort((a,b)=>a-b),report={environment:'local Miniflare synthetic-only; not production latency or CPU',concurrentStudents:99,success:results.filter(r=>r.ok).length,totalMs:Math.round(performance.now()-start),p50Ms:Math.round(ms[49]),p95Ms:Math.round(ms[94]),rowsRead:results.reduce((n,r)=>n+Number(r.headers.get('x-d1-rows-read')),0),rowsWritten:results.reduce((n,r)=>n+Number(r.headers.get('x-d1-rows-written')),0)};
  await mkdir('test-results/studyroom',{recursive:true});await writeFile('test-results/studyroom/load.json',JSON.stringify(report,null,2));
 });
-test('Pages authentication and an individual staff token are bound to the exact origin',async t=>{
+test('Pages authentication for attendance notes is bound to the exact origin',async t=>{
  const h=await harness({studyroom:true});t.after(()=>h.close());await setupStudyroom(h);
  const origin='https://cosmicjh.github.io',head=token=>({Origin:origin,...(token?{Authorization:'Bearer '+token}:{})});
  const p=(await h.api('passwordParameters',{role:'teacher'},'',head())).data;
  const logged=await h.api('login',{role:'teacher',password:await stretchPassword('1234',p),credentialEpoch:p.epoch},'',head());assert(logged.ok);
  const bearer=logged.data.token,api=(op,data={})=>h.api('studyroom',{op,...data},'',head(bearer));
- assert((await api('dashboard')).ok);const parameters=(await api('staffParameters',{username:'test.teacher'})).data;
- const staff=await api('staffLogin',{username:'test.teacher',epoch:parameters.epoch,passwordProof:await stretchPassword('가상교사1234',parameters)});assert(staff.ok);
- assert.equal((await api('dashboard',{staffToken:staff.data.token})).data.staff.name,'가상확인교사');
- const native=await h.login('teacher');assert.equal((await h.api('studyroom',{op:'dashboard',staffToken:staff.data.token},native.cookie)).data.staff,null);
+ const submitted=await h.api('studyroom',{op:'submit',studentNumber:'30101',seat:'01',requestId:crypto.randomUUID()});assert(submitted.ok);
+ const row=(await api('dashboard')).data.rows[0],body={op:'change',change:'note',note:'가상 기록',recordId:row.id,expectedRecordVersion:row.version,requestId:crypto.randomUUID()};
+ assert.equal((await h.api('studyroom',body,'',{...head(bearer),Origin:'https://example.org'})).status,403);
+ assert((await api('change',body)).ok);
 });

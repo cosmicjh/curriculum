@@ -152,13 +152,17 @@ var TTCore = (function () {
     });
     return {kind:'student',id:student.id,studentNumber:sid(student),name:student.name,grade:student.grade,classNum:student.classNum,number:student.number,cells:cells};
   }
+  function teacherLesson(binding) {
+    var s=binding.section;
+    return {subject:s?s.subject:binding.rawSubject,room:(s&&s.room)||binding.rawRoom};
+  }
   function teacherTimetable(rt, name) {
     var teacher=rt.teachers.find(function(t){return norm(t.name)===norm(name);});
     if(!teacher)throw Error('교사 정보를 찾을 수 없습니다.');
     return {kind:'teacher',name:teacher.name,cells:teacher.slots.map(function(l){
       var binding=rt.bindings[slotKey(teacher.name,l.day,l.period)], s=binding.section, cell=blank(l.day,l.period);
       if(l.period>Number((rt.store.settings||defaultSettings()).periods[l.day]||0))return cell;
-      cell.subject=s?s.subject:l.rawSubject;cell.sectionCode=s?s.code:'';cell.room=s?(s.room||l.rawRoom):l.rawRoom;cell.isElective=!!s;
+      Object.assign(cell,teacherLesson(binding));cell.sectionCode=s?s.code:'';cell.isElective=!!s;
       if(s)cell.roster={kind:'elective',sectionId:s.id};
       else if(binding.candidates.length>1)cell.roster={kind:'choose',sectionIds:binding.candidates.map(function(c){return c.id;})};
       else if(binding.classKeys.length&&l.rawSubject)cell.roster={kind:'common',classes:binding.classKeys,subject:l.rawSubject,detail:l.rawRoom};
@@ -191,7 +195,7 @@ var TTCore = (function () {
     try{parseTeacherMatrix(store.teacherRows||[]);}catch(e){errors.push(e.message);}
     return {errors:Array.from(new Set(errors)),warnings:warnings};
   }
-  return {DAYS:DAYS,text:text,norm:norm,code:code,block:block,number:number,key:key,sid:sid,active:active,sectionKey:sectionKey,slotKey:slotKey,classes:classes,defaultSettings:defaultSettings,parseTeacherMatrix:parseTeacherMatrix,runtime:runtime,packRuntime:packRuntime,unpackRuntime:unpackRuntime,studentTimetable:studentTimetable,teacherTimetable:teacherTimetable,roster:roster,validate:validate};
+  return {DAYS:DAYS,text:text,norm:norm,code:code,block:block,number:number,key:key,sid:sid,active:active,sectionKey:sectionKey,slotKey:slotKey,classes:classes,defaultSettings:defaultSettings,parseTeacherMatrix:parseTeacherMatrix,runtime:runtime,packRuntime:packRuntime,unpackRuntime:unpackRuntime,studentTimetable:studentTimetable,teacherTimetable:teacherTimetable,teacherLesson:teacherLesson,roster:roster,validate:validate};
 })();
 
 

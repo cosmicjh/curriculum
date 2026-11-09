@@ -8,13 +8,15 @@
   function draftKey(form){return form.dataset.draftKey||(form.dataset.draftKey=[state.meta?.term||'',form.dataset.form,form.dataset.form==='save-student'?(state.editingStudent?.id||'new'):form.dataset.form==='save-section'?(state.editingSection?.id||'new'):''].join('|'));}
   function controlKey(el){return el.dataset.subject?'choice:'+el.dataset.subject:el.id||el.dataset.fixedDay&&('fixed:'+el.dataset.fixedDay+el.dataset.fixedPeriod)||el.dataset.blockDay&&('block:'+el.dataset.blockDay+el.dataset.blockPeriod);}
   function rememberForms(){document.querySelectorAll('form[data-form]').forEach(form=>{if(['login','password'].includes(form.dataset.form)||form.dataset.skipDraft)return;const values={};form.querySelectorAll('input,select,textarea').forEach(el=>{const k=controlKey(el);if(k&&el.type!=='password')values[k]=el.type==='file'?{files:Array.from(el.files)}:el.type==='checkbox'?{checked:el.checked}:{value:el.value};});formDrafts.set(draftKey(form),values);});}
-  function restoreForms(){document.querySelectorAll('form[data-form]').forEach(form=>{const values=formDrafts.get(draftKey(form));if(!values||form.dataset.skipDraft)return;if(form.dataset.form==='roster'&&state.teacherBoot){const g=values['roster-grade']?.value,subject=values['roster-subject']?.value;if(g){$('#roster-subject').innerHTML=options(Array.from(new Set(state.teacherBoot.sections.filter(s=>s.grade===g).map(s=>s.subject))).sort((a,b)=>a.localeCompare(b,'ko')),subject,'선택');$('#roster-section').innerHTML=options(state.teacherBoot.sections.filter(s=>s.grade===g&&s.subject===subject).map(s=>({value:s.id,label:s.code})),values['roster-section']?.value,'선택');}}if(form.dataset.form==='batch'&&state.teacherBoot){const g=values['batch-grade']?.value;if(g)$('#batch-class').innerHTML=options(state.teacherBoot.meta.classes[g]||[],values['batch-class']?.value,'선택');}form.querySelectorAll('input,select,textarea').forEach(el=>{const v=values[controlKey(el)];if(!v)return;if(v.files){const dt=new DataTransfer();v.files.forEach(f=>dt.items.add(f));el.files=dt.files;}else if('checked' in v)el.checked=v.checked;else if(el.tagName!=='SELECT'||Array.from(el.options).some(o=>o.value===v.value))el.value=v.value;});});}
+  function restoreForms(){document.querySelectorAll('form[data-form]').forEach(form=>{const values=formDrafts.get(draftKey(form));if(!values||form.dataset.skipDraft)return;if(form.dataset.form==='roster'&&state.teacherBoot){const g=values['roster-grade']?.value,subject=values['roster-subject']?.value;if(g)setRosterOptions(g,subject,values['roster-section']?.value);}if(form.dataset.form==='batch'&&state.teacherBoot){const g=values['batch-grade']?.value;if(g)$('#batch-class').innerHTML=options(state.teacherBoot.meta.classes[g]||[],values['batch-class']?.value,'선택');}form.querySelectorAll('input,select,textarea').forEach(el=>{const v=values[controlKey(el)];if(!v)return;if(v.files){const dt=new DataTransfer();v.files.forEach(f=>dt.items.add(f));el.files=dt.files;}else if('checked' in v)el.checked=v.checked;else if(el.tagName!=='SELECT'||Array.from(el.options).some(o=>o.value===v.value))el.value=v.value;});});}
   function forgetDraft(name){document.querySelectorAll('form[data-form]').forEach(form=>{if(!name||form.dataset.form===name){formDrafts.delete(draftKey(form));form.dataset.skipDraft='true';}});if(!name)formDrafts.clear();}
   function withDrafts(render){return function(...args){rememberForms();const result=render(...args);restoreForms();return result;};}
   let busyCount=0,toastTimer;
   const app=$('#app'),modal=$('#modal');
   const swapPane=document.createElement('section');swapPane.id='class-swap-pane';swapPane.className='shell';swapPane.hidden=true;swapPane.setAttribute('aria-label','결보강');app.after(swapPane);
-  let swapView=null;
+  const swapViews=new Map();
+  const swapCachePrefix="timetable.swap-drafts.";
+  let firstGradeCatalog=null;
   const allocationViews=new Map();
   const studyroomViews=new Map();
   async function showStudyroom(root,role){
@@ -29,31 +31,34 @@
     const term=role==='admin'?state.admin.store.term:state.teacherBoot.meta.term,key=role+'|'+term;
     let view=allocationViews.get(key);
     if(!view){
-      const version=window.TIMETABLE_CONFIG?.assetVersion||'1',module=await import('./allocations.js?v='+version),data=await call('allocation',{},role),host=document.createElement('div');
+      const version=window.TIMETABLE_CONFIG?.assetVersion||'1',host=document.createElement('div');
+      const [module,data]=await Promise.all([import('./allocations.js?v='+version),call('allocation',{},role)]);
       view=module.mountAllocation(host,data,{admin:role==='admin',request:(action,args={})=>call(action,args,role),loadXlsx:()=>TTAssets.load('xlsx'),print:(html,kind,paper)=>print(html,kind,paper),onSaved:reply=>{state.admin.loaded.students=false;state.admin.store.sections=reply.allocation.sections;state.admin.sectionsRevision=reply.meta.sectionsRevision;state.admin.loaded.sections=true;state.admin.loaded.links=false;state.admin.loaded.history=false;state.admin.lessonCache={};state.teacherBoot=null;state.timetable=null;useMeta(reply.meta);toast('배치표를 저장했습니다.');},onError:error=>run(()=>{throw error;})});
       view.root=host;allocationViews.set(key,view);
     }
     root.replaceChildren(view.root);if(!view.dirty&&view.revision!==state.meta.revision)await view.refresh();
   }
-  function swapDirty(){return Boolean(swapView?.dirty);}
+  function swapDirty(){return Boolean(swapViews.get("teacher")?.view.dirty);}
   function hideSwap(){swapPane.hidden=true;app.classList.remove("teacher-tools");}
-  function showSwap(){
-    if(!token('teacher')||state.route!=='teacher'){hideSwap();return;}
-    swapPane.hidden=false;app.classList.add("teacher-tools");
-    run(async()=>{
-      if(swapView){await swapView.resume();return;}
-      const base=new URL('class-swap/',location.href),version=window.TIMETABLE_CONFIG?.assetVersion||'1';
-      const [module,response,initial]=await Promise.all([import(new URL('app.js?v='+version,base)),fetch(new URL('view.html?v='+version,base)),requestSwap('resume')]);
-      if(!response.ok)throw Error('결보강 화면을 불러오지 못했습니다. 다시 선택해 주세요.');
-      const html=await response.text(),host=document.createElement('div'),root=host.attachShadow({mode:'open'});root.innerHTML=html;
-      swapView=module.mountClassSwap(root,initial,{request:requestSwap,selectedTeacher:()=>state.teacherName||'',print:(html,css,page)=>run(()=>printClassSwap(html,css,page),null,false)});
-      swapPane.replaceChildren(host);
-    });
+  async function showSwap(role,target){
+    if(!token(role))return;
+    const cached=swapViews.get(role);
+    if(cached){target.replaceChildren(cached.host);await cached.view.resume();return;}
+    const base=new URL('class-swap/',location.href),version=window.TIMETABLE_CONFIG?.assetVersion||'1';
+    const request=(action,payload)=>requestSwap(role,action,payload);
+    const [module,response,initial]=await Promise.all([import(new URL('app.js?v='+version,base)),fetch(new URL('view.html?v='+version,base)),request('resume')]);
+    if(!response.ok)throw Error('결보강 화면을 불러오지 못했습니다. 다시 선택해 주세요.');
+    const html=await response.text(),host=document.createElement('div'),root=host.attachShadow({mode:'open'});root.innerHTML=html;
+    const view=module.mountClassSwap(root,initial,{request,admin:role==='admin',cachePrefix:swapCachePrefix,selectedTeacher:()=>state.teacherName||'',print:(html,css,page)=>run(()=>printClassSwap(html,css,page),null,false)});
+    swapViews.set(role,{view,host});target.replaceChildren(host);
   }
-  function discardSwap(){swapView?.destroy();swapView=null;swapPane.replaceChildren();hideSwap();}
-  async function requestSwap(action,payload={}){
-    try{const result=await TTApi.request('classSwap',{swapAction:action,swapPayload:payload});if(result.teacherBootstrap){state.teacherBoot=result.teacherBootstrap;state.timetable=null;state.roster=null;useMeta(state.teacherBoot.meta);renderTeacher();}return result;}
-    catch(error){if(error.code==='AUTH_REQUIRED'){rememberForms();sessionStorage.removeItem('timetable.teacher');sessionStorage.removeItem('timetable.admin');state.teacherBoot=null;state.timetable=null;if(state.route==='teacher')renderLogin('teacher');}throw error;}
+  function discardSwap(){
+    for(const {view} of swapViews.values())view.destroy();swapViews.clear();swapPane.replaceChildren();hideSwap();
+    for(const key of Object.keys(sessionStorage))if(key.startsWith(swapCachePrefix))sessionStorage.removeItem(key);
+  }
+  async function requestSwap(role,action,payload={}){
+    try{const result=await TTApi.request('classSwap',{swapAction:action,swapPayload:payload,swapScope:role});if(role==='admin'&&action==='cancelPlan'&&state.admin)state.admin.reloadAfterSwap=true;if(result.teacherBootstrap){state.teacherBoot=result.teacherBootstrap;state.timetable=null;state.roster=null;useMeta(state.teacherBoot.meta);renderTeacher();}return result;}
+    catch(error){if(error.code==='AUTH_REQUIRED'){rememberForms();sessionStorage.removeItem('timetable.'+role);if(role==='admin'){swapViews.get(role)?.view.destroy();swapViews.delete(role);state.admin=null;}else{state.teacherBoot=null;state.timetable=null;}if(state.route===role)renderLogin(role);}throw error;}
   }
   async function printClassSwap(html,css,page){
     const target=$('#print-root'),host=document.createElement('div'),style=document.createElement('style');
@@ -68,7 +73,7 @@
   function lockControls(){surfaces.forEach(root=>root.querySelectorAll('input,select,textarea,button').forEach(el=>{if(!lockedControls.has(el))lockedControls.set(el,el.disabled);el.disabled=true;}));}
   const loadingObserver=new MutationObserver(()=>{if(busyCount)lockControls();});
   function setLoading(loading){
-    document.body.dataset.loading=String(loading);$('#busy').hidden=!loading;
+    document.body.dataset.loading=String(loading);
     if(loading){loadingFocus=document.activeElement;surfaces.forEach(root=>{root.inert=true;root.setAttribute('aria-busy','true');loadingObserver.observe(root,{childList:true,subtree:true});});lockControls();}
     else{loadingObserver.disconnect();lockedControls.forEach((disabled,el)=>{el.disabled=disabled;});lockedControls.clear();surfaces.forEach(root=>{root.inert=false;root.setAttribute('aria-busy','false');});const root=modal.open?modal:app;const focus=loadingFocus&&loadingFocus.isConnected&&!loadingFocus.disabled&&(!modal.open||modal.contains(loadingFocus))?loadingFocus:root.querySelector('[autofocus]:not(:disabled)')||(modal.open?root.querySelector('button:not(:disabled),input:not(:disabled),select:not(:disabled)'):null);loadingFocus=null;if(focus&&focus!==document.body)focus.focus({preventScroll:true});}
   }
@@ -109,6 +114,7 @@
   async function loadTeacher(force=false){
     const cached=state.teacherBoot,data=await call('teacherBootstrap',cached&&!force?{knownRevision:cached.meta.revision,sectionsRevision:cached.meta.sectionsRevision}:{},'teacher');
     if(!data.unchanged){if(state.timetable?.meta?.revision!==data.meta.revision){state.timetable=null;state.roster=null;}if(!data.sections&&cached&&cached.meta.term===data.meta.term)data.sections=cached.sections;state.teacherBoot=data;}
+    if(state.teacherTab==='roster')await ensureFirstGradeCatalog();
     useMeta(state.teacherBoot.meta);renderTeacher();
   }
   function renderTeacher(){
@@ -121,7 +127,20 @@
     if(state.teacherTab==='classSwap')html+='<div id="teacher-swap"></div>';
     if(state.teacherTab==='allocation')html+='<div id="teacher-allocation"></div>';
     if(state.teacherTab==='studyroom')html+='<div id="teacher-studyroom"></div>';
-    app.innerHTML=html+'</div>';if(state.teacherTab==='classSwap'){$('#teacher-swap').append(swapPane);showSwap();}else hideSwap();if(state.teacherTab==='allocation')run(()=>showAllocation($('#teacher-allocation'),'teacher'));if(state.teacherTab==='studyroom')run(()=>showStudyroom($('#teacher-studyroom'),'teacher'));
+    app.innerHTML=html+'</div>';if(state.teacherTab==='classSwap'){$('#teacher-swap').append(swapPane);swapPane.hidden=false;app.classList.add('teacher-tools');run(()=>showSwap('teacher',swapPane));}else hideSwap();if(state.teacherTab==='allocation')run(()=>showAllocation($('#teacher-allocation'),'teacher'));if(state.teacherTab==='studyroom')run(()=>showStudyroom($('#teacher-studyroom'),'teacher'));
+  }
+  async function ensureFirstGradeCatalog(){
+    const {meta}=state.teacherBoot,key=meta.revisions.schedule;
+    if(meta.classes['1']&&firstGradeCatalog?.key!==key)firstGradeCatalog={key,subjects:await call('roster',{query:{kind:'firstGradeSubjects'}},'teacher')};
+  }
+  function setRosterOptions(grade,subject='',section=''){
+    const boot=state.teacherBoot,sections=boot.sections.filter(s=>s.grade===grade);
+    const catalog=grade==='1'&&firstGradeCatalog?.key===boot.meta.revisions.schedule?firstGradeCatalog.subjects:[];
+    const subjects=grade==='1'?catalog.map(s=>s.subject):[...new Set(sections.map(s=>s.subject))].sort((a,b)=>a.localeCompare(b,'ko'));
+    const choices=grade==='1'?(catalog.find(s=>s.subject===subject)?.classes||[]).filter(n=>boot.meta.classes['1']?.includes(n)).map(n=>({value:n,label:n+'반'})):sections.filter(s=>s.subject===subject).map(s=>({value:s.id,label:s.code}));
+    $('label[for="roster-section"]').textContent=grade==='1'?'학급':'분반';
+    $('#roster-subject').innerHTML=options(subjects,subject,'선택');
+    $('#roster-section').innerHTML=options(choices,section,'선택');
   }
   function rosterHTML(r){let html='<table class="roster-table"><colgroup>'+Array.from({length:21},()=>'<col>').join('')+'</colgroup><thead><tr>'+['연번','학년','반','번호','이름','비고',...Array(15).fill('')].map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>';r.students.forEach((s,i)=>{html+='<tr>'+[i+1,s.grade,s.classNum,s.number,s.name,s.note,...Array(15).fill('')].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>';});return html+'</tbody></table>';}
   function showRoster(r){state.roster=r;openDialog('<div class="roster-header"><h2>'+esc(r.title)+' <small>'+esc(r.detail)+' · '+r.students.length+'명</small></h2><div><button data-action="print-roster">인쇄</button><button class="modal-close" data-action="close-modal" aria-label="닫기">×</button></div></div><div class="table-scroll">'+rosterHTML(r)+'</div>',true);}
@@ -152,8 +171,8 @@
     }
     useMeta(state.admin.meta);await ensureAdminTab(state.adminTab);renderAdmin();
   }
-  function renderAdmin(){if(!token('admin')){renderLogin('admin');return;}const tabs=[['students','학생'],['sections','선택분반'],['allocation','이동수업 배치표'],['imports','자료 등록'],['links','수업 연결'],['settings','설정'],['history','변경 이력'],...(state.admin.meta.features?.studyroom?[['studyroom','스터디룸']]:[])];app.innerHTML=head('관리자',state.adminTab==='allocation'?'':'<button data-action="refresh-admin">새로고침</button>')+'<div class="admin-layout"><nav class="admin-nav" aria-label="관리 메뉴">'+tabs.map(([v,l])=>'<button data-action="admin-tab" data-tab="'+v+'" class="'+(state.adminTab===v?'active':'')+'">'+l+'</button>').join('')+'</nav><div id="admin-content" class="admin-content"></div></div>';renderAdminContent();}
-  function renderAdminContent(){const root=$('#admin-content');if(!root||!state.admin)return;if(state.adminTab==='allocation')run(()=>showAllocation(root,'admin'));if(state.adminTab==='studyroom')run(()=>showStudyroom(root,'admin'));if(state.adminTab==='students')renderStudents(root);if(state.adminTab==='sections')renderSections(root);if(state.adminTab==='imports')renderImports(root);if(state.adminTab==='links')renderLinks(root);if(state.adminTab==='settings')renderSettings(root);if(state.adminTab==='history')renderHistory(root);}
+  function renderAdmin(){if(!token('admin')){renderLogin('admin');return;}const tabs=[['students','학생'],['sections','선택분반'],['allocation','이동수업 배치표'],['imports','자료 등록'],['links','수업 연결'],['settings','설정'],['history','변경 이력'],['classSwap','제출된 결보강'],...(state.admin.meta.features?.studyroom?[['studyroom','스터디룸']]:[])];app.innerHTML=head('관리자',state.adminTab==='allocation'?'':'<button data-action="refresh-admin">새로고침</button>')+'<div class="admin-layout"><nav class="admin-nav" aria-label="관리 메뉴">'+tabs.map(([v,l])=>'<button data-action="admin-tab" data-tab="'+v+'" class="'+(state.adminTab===v?'active':'')+'">'+l+'</button>').join('')+'</nav><div id="admin-content" class="admin-content"></div></div>';renderAdminContent();}
+  function renderAdminContent(){const root=$('#admin-content');if(!root||!state.admin)return;if(state.adminTab==='allocation')run(()=>showAllocation(root,'admin'));if(state.adminTab==='classSwap')run(()=>showSwap('admin',root));if(state.adminTab==='studyroom')run(()=>showStudyroom(root,'admin'));if(state.adminTab==='students')renderStudents(root);if(state.adminTab==='sections')renderSections(root);if(state.adminTab==='imports')renderImports(root);if(state.adminTab==='links')renderLinks(root);if(state.adminTab==='settings')renderSettings(root);if(state.adminTab==='history')renderHistory(root);}
   function renderStudents(root){const f=state.filters;root.innerHTML='<div class="filters">'+select('filter-grade',['1','2','3'],f.grade,'학년')+select('filter-class',Array.from(new Set(state.admin.store.students.filter(s=>!f.grade||s.grade===f.grade).map(s=>s.classNum))).sort((a,b)=>a-b),f.classNum,'학급')+select('filter-status',['재학','전출','자퇴','휴학','졸업'],f.status,'학적')+input('filter-search',f.search,'placeholder="이름·학번 검색" aria-label="학생 검색"')+'<button class="primary" data-action="new-student">추가</button></div><div id="student-table"></div>';renderStudentTable();}
   function renderStudentTable(){const f=state.filters,rows=state.admin.store.students.filter(s=>(!f.grade||s.grade===f.grade)&&(!f.classNum||s.classNum===f.classNum)&&(!f.status||s.status===f.status)&&(!f.search||s.name.includes(f.search)||studentNo(s).includes(f.search))).sort((a,b)=>Number(a.grade)-Number(b.grade)||Number(a.classNum)-Number(b.classNum)||Number(a.number)-Number(b.number));const max=Math.max(0,Math.ceil(rows.length/50)-1);state.page=Math.min(state.page,max);$('#student-table').innerHTML='<div class="table-scroll"><table class="data-table"><thead><tr><th>학번</th><th>이름</th><th>학적</th><th>수강</th><th>비고</th></tr></thead><tbody>'+rows.slice(state.page*50,state.page*50+50).map(s=>'<tr class="clickable" data-action="edit-student" data-id="'+esc(s.id)+'"><td>'+studentNo(s)+'</td><td>'+esc(s.name)+'</td><td>'+esc(s.status)+'</td><td>'+(s.choiceCount==null?Object.values(s.choices||{}).filter(Boolean).length:s.choiceCount)+'</td><td>'+esc(s.note)+'</td></tr>').join('')+'</tbody></table></div><div class="pager"><small>'+rows.length+'명</small><div><button class="quiet" data-action="student-page" data-delta="-1" '+(!state.page?'disabled':'')+'>이전</button><small>'+(state.page+1)+' / '+(max+1)+'</small><button class="quiet" data-action="student-page" data-delta="1" '+(state.page>=max?'disabled':'')+'>다음</button></div></div>';}
   function studentNo(s){return s.grade+String(s.classNum).padStart(2,'0')+String(s.number).padStart(2,'0');}
@@ -212,14 +231,14 @@
   }
   document.addEventListener('submit',e=>{const form=e.target.closest('form[data-form]');if(!form)return;e.preventDefault();const button=e.submitter||form.querySelector('button[type=submit],button.primary');run(async()=>{
     switch(form.dataset.form){
-      case 'login':{const role=form.dataset.role;try{const result=await call('login',{role,password:$('#password').value,initialize:true});sessionStorage.setItem('timetable.'+role,JSON.stringify({token:result.token,role:result.role,expiresAt:result.expiresAt}));if(role==='admin'){state.admin=result.initial;useMeta(state.admin.meta);await ensureAdminTab(state.adminTab);renderAdmin();}else{state.teacherBoot=result.initial;useMeta(state.teacherBoot.meta);renderTeacher();}}catch(err){if($('#login-error'))$('#login-error').textContent=err.message;throw err;}break;}
+      case 'login':{const role=form.dataset.role;try{const result=await call('login',{role,password:$('#password').value,initialize:true});sessionStorage.setItem('timetable.'+role,JSON.stringify({token:result.token,role:result.role,expiresAt:result.expiresAt}));if(role==='admin'){state.admin=result.initial;useMeta(state.admin.meta);await ensureAdminTab(state.adminTab);renderAdmin();}else{state.teacherBoot=result.initial;useMeta(state.teacherBoot.meta);if(state.teacherTab==='roster')await ensureFirstGradeCatalog();renderTeacher();}}catch(err){if($('#login-error'))$('#login-error').textContent=err.message;throw err;}break;}
       case 'student':state.timetable=await call('student',{studentNumber:$('#student-number').value.trim()});useMeta(state.timetable.meta);$('#lookup-result').innerHTML=resultHTML();break;
       case 'teacher':state.teacherName=$('#teacher-name').value.trim();state.timetable=await call('teacher',{teacher:state.teacherName},'teacher');useMeta(state.timetable.meta);$('#lookup-result').innerHTML=resultHTML();break;
-      case 'roster':if(!$('#roster-section').value)throw Error('학년·과목·분반을 선택하세요.');showRoster(await call('roster',{query:{kind:'elective',sectionId:$('#roster-section').value}},'teacher'));break;
+      case 'roster':{const section=$('#roster-section').value,firstGrade=$('#roster-grade').value==='1';if(!section)throw Error('학년·과목·'+(firstGrade?'학급':'분반')+'을 선택하세요.');const query=firstGrade?{kind:'firstGrade',subject:$('#roster-subject').value,classNum:section}:{kind:'elective',sectionId:section};showRoster(await call('roster',{query},'teacher'));break;}
       case 'batch':{const grade=$('#batch-grade').value,classNum=$('#batch-class').value;if(!grade||!classNum)throw Error('학년과 학급을 선택하세요.');const r=await call('classBatch',{grade,classNum},'teacher');if(!r.timetables.length)throw Error('해당 학급에 학생이 없습니다.');let html='';for(let i=0;i<r.timetables.length;i+=4)html+='<div class="batch-page">'+r.timetables.slice(i,i+4).map(t=>'<div class="batch-item">'+timetableHTML(t)+'</div>').join('')+'</div>';await print(html,'batch');break;}
       case 'save-student':{const old=state.editingStudent,choices=Object.assign({},old.choices);$('#student-choices').querySelectorAll('select').forEach(el=>choices[el.dataset.subject]=el.value);await mutation('saveStudent',{student:Object.assign({},old,{grade:$('#edit-grade').value,classNum:$('#edit-class').value,number:$('#edit-number').value,name:$('#edit-name').value,status:$('#edit-status').value,note:$('#edit-note').value,choices})});modal.close();toast('저장했습니다.');break;}
       case 'save-section':await mutation('saveSection',{section:Object.assign({},state.editingSection,{grade:$('#sec-grade').value,subject:$('#sec-subject').value,code:$('#sec-code').value,shortName:$('#sec-short').value,room:$('#sec-room').value})});modal.close();toast('저장했습니다.');break;
-      case 'preview-import':{await TTAssets.load('xlsx');const loaded=await TTImport.files($('#import-teacher').files[0],$('#import-elective').files[0],$('#import-students').files);state.importPayload=loaded.payload;state.preserveManual=$('#preserve-manual').checked;state.importPreview=await call('previewImport',{payload:loaded.payload,preserveManual:state.preserveManual},'admin');state.importPreview.warnings.push(...loaded.warnings);renderImportPreview(state.importPreview);break;}
+      case 'preview-import':{const version=window.TIMETABLE_CONFIG?.assetVersion||'1';await Promise.all([TTAssets.load('xlsx'),import('./import.js?v='+version)]);const loaded=await TTImport.files($('#import-teacher').files[0],$('#import-elective').files[0],$('#import-students').files);state.importPayload=loaded.payload;state.preserveManual=$('#preserve-manual').checked;state.importPreview=await call('previewImport',{payload:loaded.payload,preserveManual:state.preserveManual},'admin');state.importPreview.warnings.push(...loaded.warnings);renderImportPreview(state.importPreview);break;}
       case 'settings':{const settings={schoolName:$('#set-school').value,title:$('#set-title').value,academicYear:Number($('#set-year').value),semester:Number($('#set-semester').value),periods:{},fixedPeriods:[]};days.forEach(d=>settings.periods[d]=Number($('#period-'+d).value));document.querySelectorAll('[data-fixed-day]:checked').forEach(el=>settings.fixedPeriods.push({day:el.dataset.fixedDay,period:Number(el.dataset.fixedPeriod),label:'창체'}));await mutation('saveSettings',{settings});toast('저장했습니다.');break;}
       case 'password':{const role=form.dataset.role;if($('#password-new').value!==$('#password-confirm').value)throw Error('새 비밀번호 확인이 다릅니다.');await call('changePassword',{role,currentPassword:$('#password-current').value,newPassword:$('#password-new').value},'admin');modal.close();modal.innerHTML='';sessionStorage.removeItem('timetable.'+role);state.admin.loaded.history=false;state.teacherBoot=null;if(role==='admin')await renderRoute();else renderSettings($('#admin-content'));toast('비밀번호를 변경했습니다.');break;}
       case 'save-blocks':{const grade=$('#block-grade').value,blocks=[];document.querySelectorAll('[data-block-day]').forEach(el=>{if(el.value)blocks.push({grade,day:el.dataset.blockDay,period:Number(el.dataset.blockPeriod),block:el.value});});await mutation('saveBlocks',{grade,blocks});toast('저장했습니다.');break;}
@@ -229,9 +248,9 @@
     switch(action){
       case 'close-modal':modal.close();break;
       case 'password-dialog':passwordDialog(el.dataset.role);break;
-      case 'logout':{if((swapDirty()||allocationDirty())&&!confirm('저장하지 않은 내용을 버리고 로그아웃할까요?'))return;allocationViews.forEach(v=>v.destroy());allocationViews.clear();studyroomViews.forEach(v=>v.dispose());studyroomViews.clear();const role=state.route==='admin'?'admin':'teacher';await call('logout',{},role);discardSwap();forgetDraft();state.timetable=null;state.roster=null;state.editingStudent=null;state.editingSection=null;if(modal.open)modal.close();modal.innerHTML='';sessionStorage.removeItem('timetable.admin');sessionStorage.removeItem('timetable.teacher');if(role==='teacher'&&session('admin'))sessionStorage.removeItem('timetable.admin');state.teacherBoot=null;state.admin=null;state.adminTab='students';await renderRoute();break;}
-      case 'teacher-tab':state.teacherTab=el.dataset.tab;renderTeacher();break;
-      case 'admin-tab':state.adminTab=el.dataset.tab;await ensureAdminTab(state.adminTab);renderAdmin();break;
+      case 'logout':{const savedDrafts=Object.keys(sessionStorage).some(key=>key.startsWith(swapCachePrefix));if((savedDrafts||swapDirty()||allocationDirty())&&!confirm(savedDrafts?'이 탭의 결보강 임시저장본과 작성 중인 내용을 지우고 로그아웃할까요?':'저장하지 않은 내용을 버리고 로그아웃할까요?'))return;allocationViews.forEach(v=>v.destroy());allocationViews.clear();studyroomViews.forEach(v=>v.dispose());studyroomViews.clear();const role=state.route==='admin'?'admin':'teacher';await call('logout',{},role);discardSwap();forgetDraft();state.timetable=null;state.roster=null;state.editingStudent=null;state.editingSection=null;if(modal.open)modal.close();modal.innerHTML='';sessionStorage.removeItem('timetable.admin');sessionStorage.removeItem('timetable.teacher');if(role==='teacher'&&session('admin'))sessionStorage.removeItem('timetable.admin');state.teacherBoot=null;state.admin=null;state.adminTab='students';await renderRoute();break;}
+      case 'teacher-tab':if(el.dataset.tab==='roster')await ensureFirstGradeCatalog();state.teacherTab=el.dataset.tab;renderTeacher();break;
+      case 'admin-tab':state.adminTab=el.dataset.tab;if(state.admin.reloadAfterSwap){await loadAdmin();delete state.admin.reloadAfterSwap;}else{await ensureAdminTab(state.adminTab);renderAdmin();}break;
       case 'refresh-admin':await loadAdmin(true);toast('새로고침했습니다.');break;
       case 'new-student':await editStudent();break;
       case 'edit-student':await editStudent(el.dataset.id);break;
@@ -256,8 +275,8 @@
     if(['filter-grade','filter-class','filter-status'].includes(el.id)){const k={'filter-grade':'grade','filter-class':'classNum','filter-status':'status'}[el.id];state.filters[k]=el.value;state.page=0;if(k==='grade'){state.filters.classNum='';renderStudents($('#admin-content'));}else renderStudentTable();}
     if(el.id==='section-grade')renderSectionTable();
     if(el.id==='edit-grade'){const choices={};$('#student-choices').querySelectorAll('select').forEach(s=>choices[s.dataset.subject]=s.value);renderStudentChoices(el.value,choices);}
-    if(el.id==='roster-grade'){const g=el.value;$('#roster-subject').innerHTML=options(Array.from(new Set(state.teacherBoot.sections.filter(s=>s.grade===g).map(s=>s.subject))).sort((a,b)=>a.localeCompare(b,'ko')),'','선택');$('#roster-section').innerHTML=options([],'','선택');}
-    if(el.id==='roster-subject')$('#roster-section').innerHTML=options(state.teacherBoot.sections.filter(s=>s.grade===$('#roster-grade').value&&s.subject===el.value).map(s=>({value:s.id,label:s.code})),'','선택');
+    if(el.id==='roster-grade')setRosterOptions(el.value);
+    if(el.id==='roster-subject')setRosterOptions($('#roster-grade').value,el.value);
     if(el.id==='batch-grade')$('#batch-class').innerHTML=options(state.teacherBoot.meta.classes[el.value]||[],'','선택');
     if(el.id==='link-teacher'){await teacherLessons(el.value);renderLinkTable();}
     if(el.id==='block-grade')renderBlocks();

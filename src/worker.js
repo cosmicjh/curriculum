@@ -11,9 +11,10 @@ const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection
 const teacherActions=new Set(['allocation','classSwap','teacherBootstrap','teacher','roster','classBatch']);
 async function teacherBoot(db,ctx,req={}){
  const m=await S.metadata(db,ctx,true);if(req.knownRevision===m.revision)return {unchanged:true,revision:m.revision,historyRevision:m.historyRevision,meta:m};
- const teachers=(await db.all('SELECT name FROM teachers WHERE term_id=? ORDER BY name',ctx.term)).map(r=>r.name);
- const result={meta:m,teachers,sectionsRevision:m.sectionsRevision};
- if(req.sectionsRevision!==m.sectionsRevision)result.sections=(await db.all('SELECT * FROM sections WHERE term_id=? ORDER BY grade,subject,code',ctx.term)).map(S.sectionRow);return result;
+ const jobs=[db.prepare('SELECT name FROM teachers WHERE term_id=? ORDER BY name',ctx.term)];
+ if(req.sectionsRevision!==m.sectionsRevision)jobs.push(db.prepare('SELECT * FROM sections WHERE term_id=? ORDER BY grade,subject,code',ctx.term));
+ const [teachers,sections]=await db.batch(jobs);
+ return {meta:m,teachers:teachers.results.map(r=>r.name),sectionsRevision:m.sectionsRevision,...(sections?{sections:sections.results.map(S.sectionRow)}:{})};
 }
 async function adminBoot(db,ctx,req={}){
  const m=await S.metadata(db,ctx,true);if(req.knownRevision===m.revision)return {unchanged:true,revision:m.revision,historyRevision:m.historyRevision,meta:m};
@@ -58,6 +59,24 @@ async function read(db,ctx,req){
  }
  if(a==='roster'){
   const q=req.query||{};
+  if(q.kind==='firstGradeSubjects'||q.kind==='firstGrade'){
+   const source=await S.schedule(db,ctx);
+   if(!source.firstGradeSubjects){
+    const subjects=new Map();
+    for(const lesson of Object.values(source.rt.bindings)){
+     if(!lesson.rawSubject)continue;
+     for(const key of lesson.classKeys)if(/^1-[1-9]\d?$/.test(key)){
+      if(!subjects.has(lesson.rawSubject))subjects.set(lesson.rawSubject,new Set());
+      subjects.get(lesson.rawSubject).add(key.slice(2));
+     }
+    }
+    source.firstGradeSubjects=[...subjects].map(([subject,classes])=>({subject,classes:[...classes].sort((a,b)=>a-b)})).sort((a,b)=>a.subject.localeCompare(b.subject,'ko'));
+   }
+   if(q.kind==='firstGradeSubjects')return source.firstGradeSubjects;
+   if(!source.firstGradeSubjects.some(s=>s.subject===q.subject&&s.classes.includes(q.classNum)))Auth.fail(400,'INVALID_REQUEST','1학년 과목과 학급을 확인하세요.');
+   const students=await db.all("SELECT grade,class_num AS classNum,number,name,note FROM students WHERE term_id=? AND status='재학' AND grade='1' AND class_num=? ORDER BY CAST(number AS INTEGER)",ctx.term,q.classNum);
+   return {title:q.subject,detail:'1학년 '+q.classNum+'반',students};
+  }
   if(q.kind==='elective'){
    const c=await db.first('SELECT * FROM sections WHERE term_id=? AND id=?',ctx.term,q.sectionId||'');if(!c)Auth.fail(404,'NOT_FOUND','분반 정보를 찾을 수 없습니다.');
    const rows=await db.all("SELECT s.grade,s.class_num AS classNum,s.number,s.name,s.note FROM assignments a JOIN students s ON s.term_id=a.term_id AND s.id=a.student_id WHERE a.term_id=? AND a.section_id=? AND s.status='재학' ORDER BY CAST(s.grade AS INTEGER),CAST(s.class_num AS INTEGER),CAST(s.number AS INTEGER)",ctx.term,c.id);
@@ -180,13 +199,14 @@ async function api(request,env){
    data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx):await teacherBoot(db,ctx);}
   }else if(action==='studyroom')data=await studyroom(db,await S.context(db),env,req,request);
   else{
-   const session=action==='bootstrap'||action==='student'?null:await Auth.authenticate(db,request,teacherActions.has(action)?'teacher':'admin',env);
+   const requiresAdmin=!teacherActions.has(action)||action==='classSwap'&&req.swapScope==='admin';
+   const session=action==='bootstrap'||action==='student'?null:await Auth.authenticate(db,request,requiresAdmin?'admin':'teacher',env);
    if(action==='student')await Auth.rateLimit(db,request,'student',60);
    const ctx=await S.context(db);
    if(req.viewTerm&&req.viewTerm!==ctx.term)Auth.fail(409,'TERM_CHANGED','활성 학기가 변경되어 해당 학기 자료를 다시 불러옵니다. 이전 입력값은 이전 학기의 초안으로 보관합니다.');
    if(action==='classSwap'){
     data=await classSwap(db,ctx,session,req);
-    if(['load','resume'].includes(req.swapAction)&&req.swapPayload.term&&req.swapPayload.term!==ctx.term){data.teacherBootstrap=await teacherBoot(db,ctx);const current=await db.first('SELECT revision,active_term FROM app_state WHERE id=1');if(current.revision!==ctx.revision||current.active_term!==ctx.term)Auth.fail(409,'READ_CHANGED','자료가 변경되었습니다. 다시 조회하세요.');}
+    if(data.role==='teacher'&&req.swapPayload.term&&req.swapPayload.term!==ctx.term){data.teacherBootstrap=await teacherBoot(db,ctx);const current=await db.first('SELECT revision,active_term FROM app_state WHERE id=1');if(current.revision!==ctx.revision||current.active_term!==ctx.term)Auth.fail(409,'READ_CHANGED','자료가 변경되었습니다. 다시 조회하세요.');}
    }
    else if(writes.has(action)){if(req.expectedTerm!==ctx.term||req.expectedRevision!==String(ctx.revision))Auth.fail(409,'CONFLICT','자료 또는 학기가 변경되었습니다. 입력값을 복사한 뒤 새로고침하여 다시 저장하세요.');data=await mutate(db,{...env,request},ctx,session,req,headers);}
    else {data=await read(db,ctx,req);const check=await db.first('SELECT revision,active_term FROM app_state WHERE id=1');if(check.revision!==ctx.revision||check.active_term!==ctx.term)Auth.fail(409,'READ_CHANGED','자료가 변경되었습니다. 다시 조회하세요.');}

@@ -7,10 +7,11 @@ export function datasetFromStore(store,rt=Core.runtime(store)){
  const settings=store.settings;if(!rt.teachers.length)return null;
  const slots=Core.DAYS.flatMap((day,index)=>Array.from({length:settings.periods[day]},(_,p)=>({day:index,period:p+1}))),teachers=rt.teachers.map(t=>({id:teacherId(t.name),name:t.name})),lessons=[];
  rt.teachers.forEach((teacher,index)=>{
-  for(const cell of Core.teacherTimetable(rt,teacher.name).cells){
-   if(!cell.subject||cell.period>settings.periods[cell.day])continue;
-   const source=teacher.slots.find(s=>s.day===cell.day&&s.period===cell.period);
-   lessons.push({teacherId:teachers[index].id,day:Core.DAYS.indexOf(cell.day),period:cell.period,subject:cell.subject,room:cell.room,...(source?.blockId?{blockId:source.blockId}:{})});
+  for(const slot of teacher.slots){
+   if(slot.period>settings.periods[slot.day])continue;
+   const binding=rt.bindings[Core.slotKey(teacher.name,slot.day,slot.period)],lesson=Core.teacherLesson(binding);
+   if(!lesson.subject)continue;
+   lessons.push({teacherId:teachers[index].id,day:Core.DAYS.indexOf(slot.day),period:slot.period,...lesson,...(slot.blockId?{blockId:slot.blockId}:{})});
   }
  });
  return C.validateDataset({schema:1,meta:{school:settings.schoolName,label:settings.academicYear+'학년도 '+settings.semester+'학기',sourceYear:String(settings.academicYear)},slots,teachers,lessons,electives:store.sections.map(s=>({grade:Number(s.grade),subject:s.subject,abbr:s.shortName||s.subject}))});

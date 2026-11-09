@@ -12,7 +12,7 @@ if(command==='prepare'){
  const id=process.argv[3];if(!/^[a-f0-9-]{36}$/.test(id||'')||production.d1_databases.some(d=>d.database_id===id))throw Error('A NEW test DB ID is required');
  try{await readFile(configFile);throw Error('Test configuration already exists; preserve it');}catch(e){if(e.code!=='ENOENT')throw e;}
  await writeFile(configFile,JSON.stringify({name:target,main:resolve(root,'src/worker.js'),compatibility_date:production.compatibility_date,account_id:production.account_id,workers_dev:true,preview_urls:false,assets:{directory:resolve(root,'dist'),binding:'ASSETS',run_worker_first:['/api','/api/*']},d1_databases:[{binding:'DB',database_name:target,database_id:id,migrations_dir:resolve(root,'migrations')}],vars:{STUDYROOM_ENABLED:'true',STUDYROOM_TEST_MODE:'true',STUDYROOM_CRON_ENABLED:'false'},observability:{enabled:false}},null,2));
- const credentials={adminPassword:randomToken(),teacherPassword:randomToken(),staffUsername:'test.teacher',staffPassword:randomToken()};
+ const credentials={adminPassword:randomToken(),teacherPassword:randomToken()};
  await writeFile(resolve(privateDir,'studyroom-test-credentials.local.json'),JSON.stringify(credentials,null,2),{flag:'wx'});
  const pepper=randomToken(),secrets={PASSWORD_PEPPER:pepper,BOOTSTRAP_ADMIN_HASH:await provisionCredential(credentials.adminPassword,pepper,'admin'),BOOTSTRAP_TEACHER_HASH:await provisionCredential(credentials.teacherPassword,pepper,'teacher')};
  await writeFile(resolve(privateDir,'studyroom-test-secrets.local.json'),JSON.stringify(secrets,null,2),{flag:'wx'});console.log('Separate synthetic-only test configuration prepared.');process.exit(0);

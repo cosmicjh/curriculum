@@ -43,22 +43,38 @@ try{
   assert.equal(await page.locator('input[type=password]').count(),0);assert.equal(await page.locator('iframe').count(),0);
   release();swapGate=null;await swap.locator('#appView').waitFor({state:'visible'});await idle();await swapIdle();
   assert.equal(await swap.locator('input[type=password],#loginView,.topbar,.footbar').count(),0);
-  assert.equal(await swap.locator('#saveBtn').evaluate(button=>getComputedStyle(button).backgroundColor),'rgb(40, 40, 40)');
+  assert.equal(await page.locator('#busy').count(),0);assert.equal(await swap.locator('#progress').count(),0);
   assert.equal(new URL(page.url()).origin,pages);assert.equal(page.frames().length,1);assert.equal(requests.filter(r=>r.action==='login').length,1);assert.equal(requests.filter(r=>r.action==='classSwap').length,1);
  });
  const plan=rawPlan();
- await step('The native view preserves drafts, saves and cancels in D1, and uses the shared print area',async()=>{
+ await step('Private draft, explicit submission, print and admin-only review',async()=>{
   await swap.locator('#teacherA').selectOption(ids.a);await swap.locator('#reason').fill('통합 검증');
   await swap.locator('#dateA').fill(plan.items[0].dateA);await swap.locator('#dateA').dispatchEvent('change');
   await swap.locator('#weekB').fill(plan.items[0].dateA);await swap.locator('#weekB').dispatchEvent('change');
   await swap.locator('[data-action=cellA][data-day="0"][data-period="1"]').click();await swap.locator('#teacherB').selectOption(ids.b);await swap.locator('[data-action=cellB][data-day="1"][data-period="2"]').click();await swap.locator('[data-action=add]').click();
   assert.equal(await swap.locator('#itemCount').textContent(),'1건');
   await page.locator('[data-tab=timetable]').click();assert.equal(await page.locator('#app .tt').count(),1);await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();assert.equal(await swap.locator('#reason').inputValue(),'통합 검증');assert.equal(await swap.locator('#itemCount').textContent(),'1건');
-  await swap.locator('[data-action=save]').click();await swapIdle();assert.equal((await h.sql('SELECT count(*) n FROM swap_reservations')).results[0].n,4);
-  await page.evaluate(()=>{window.print=()=>{window.printCalled=true;};});await swap.locator('[data-action=printDraft]').click();await page.waitForFunction(()=>window.printCalled);assert.equal(await page.locator('#print-root .print-page').count(),1);assert.match(await page.locator('#print-root > style').textContent(),/A4 portrait/);
+  assert(!(await swap.locator('[data-action=printReceipt]').isVisible()));
+  await swap.locator('[data-action=save]').click();
+  assert.equal((await h.sql('SELECT count(*) n FROM swap_reservations')).results[0].n,0);
+  assert.equal((await h.sql('SELECT count(*) n FROM swap_plans')).results[0].n,0);
+  await page.reload();await idle();await login();await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();
+  await swap.locator('[data-action=nav][data-view=history]').click();
+  assert.match(await swap.locator('#historyList').textContent(),/통합 검증/);await swap.locator('[data-action=openPlan]').click();
+  page.once('dialog',d=>d.accept());await swap.locator('[data-action=submit]').click();await swapIdle();
+  await swap.locator('#receipt').waitFor({state:'visible'});
+  assert.equal((await h.sql('SELECT count(*) n FROM swap_reservations')).results[0].n,4);
+  await page.evaluate(()=>{window.print=()=>{window.printCalled=true;};});await swap.locator('[data-action=printReceipt]').click();await page.waitForFunction(()=>window.printCalled);assert.equal(await page.locator('#print-root .print-page').count(),1);assert.match(await page.locator('#print-root > style').textContent(),/A4 portrait/);
   await page.setViewportSize({width:794,height:1123});await page.emulateMedia({media:'print'});assert(await page.locator('#print-root .print-page').isVisible());await page.screenshot({path:'test-results/class-swap-print.png',fullPage:true});await page.emulateMedia({media:'screen'});await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
-  await swap.locator('[data-action=noticeDraft]').click();await page.waitForFunction(()=>document.querySelector('#print-root > style')?.textContent.includes('landscape'));assert.equal(await page.locator('#print-root .notice-page').count(),1);await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
-  await swap.locator('[data-action=nav]').filter({hasText:'저장된 계획서'}).click();page.once('dialog',d=>d.accept());await swap.locator('[data-action=cancelPlan]').first().click();await swapIdle();assert.equal((await h.sql('SELECT count(*) n FROM swap_reservations')).results[0].n,0);
+  await swap.locator('[data-action=noticeReceipt]').click();await page.waitForFunction(()=>document.querySelector('#print-root > style')?.textContent.includes('landscape'));assert.equal(await page.locator('#print-root .notice-page').count(),1);await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
+  await swap.locator('[data-action=nav][data-view=history]').click();assert.doesNotMatch(await swap.locator('#historyList').textContent(),/통합 검증/);
+  const manager=await context.newPage();await manager.goto(pages+'/timetable/admin.html');await manager.locator('#password').fill('1234');
+  await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=classSwap]').click();
+  const history=manager.locator('#admin-content');await history.locator('[data-action=openPlan]').first().click();
+  assert.match(await history.locator('#detailContent').textContent(),/통합 검증/);await history.locator('#planDetail button').click();
+  manager.once('dialog',d=>d.accept());await history.locator('[data-action=cancelPlan]').first().click();
+  await history.locator('#historyStatus').selectOption('cancelled');await history.locator('#historyList .type').filter({hasText:'취소됨'}).waitFor();
+  assert.equal((await h.sql('SELECT count(*) n FROM swap_reservations')).results[0].n,0);await manager.close();
   await swap.locator('[data-action=nav]').filter({hasText:'계획서 작성'}).click();
  });
  await step('Session expiry uses only the shared login and retains the native draft through reauthentication',async()=>{
@@ -96,6 +112,16 @@ try{
    if(['timetable','classSwap'].includes(tab))await page.screenshot({path:'test-results/workspace-teacher-'+tab+'.png',fullPage:true});
   }
   await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();assert.equal(await swap.locator('#reason').inputValue(),'이전 학기 초안');
+ });
+ await step('First-grade subject roster selects a homeroom and prints its students',async()=>{
+  await page.locator('[data-tab=roster]').click();await idle();
+  await page.locator('#roster-grade').selectOption('1');await page.locator('#roster-subject').selectOption('공통 수정 과학');
+  assert.equal(await page.locator('label[for=roster-section]').textContent(),'학급');
+  await page.locator('#roster-section').selectOption('1');await page.locator('form[data-form=roster] button').click();await idle();
+  assert.match(await page.locator('#modal').textContent(),/공통 수정 과학.*1학년 1반.*가상학생하나/);
+  await page.locator('[data-action=print-roster]').click();await idle();
+  assert.match(await page.locator('#print-root').textContent(),/1학년 1반/);await page.locator('[data-action=close-modal]').click();
+  await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();
  });
  await step('Explicit logout confirms discard and removes the native view',async()=>{
   page.once('dialog',d=>d.dismiss());await page.locator('[data-action=logout]').click();await idle();assert.equal(await page.locator('#class-swap-pane > div').count(),1);

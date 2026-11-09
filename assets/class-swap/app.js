@@ -1,31 +1,31 @@
 import {C} from '../../vendor/class-swap/src/shared/core.js';
 
-export function mountClassSwap(root,initial,{request,selectedTeacher,print}){
+export function mountClassSwap(root,initial,{request,selectedTeacher,print,admin=false,cachePrefix}){
 const $=id=>root.getElementById(id);
 const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const uid=()=>{const a=new Uint32Array(4);crypto.getRandomValues(a);return Array.from(a,x=>x.toString(16).padStart(8,'0')).join('');};
 let busy=false,toastTimer=0;
-const S={term:'',dataset:null,plans:[],dataRev:'0',planRev:'0',view:'write',dirty:false,draft:null,sel:null,editIndex:-1,candidates:[]},termDrafts=new Map();
-function resetDraft(){S.draft={id:'p_'+uid(),version:0,teacherA:'',reason:'',submitDate:today(),submitter:'',items:[]};S.dirty=false;resetSelection(false);}
+const S={term:'',dataset:null,plans:[],reservedSlots:[],dataRev:'0',planRev:'0',view:admin?'history':'write',receipt:null,dirty:false,draft:null,sel:null,editIndex:-1,candidates:[]},termDrafts=new Map();
+function resetDraft(){S.receipt=null;S.draft={id:'p_'+uid(),version:0,teacherA:'',reason:'',submitDate:today(),submitter:'',items:[]};S.dirty=false;resetSelection(false);}
 function resetSelection(preserveDates=true){const d=preserveDates&&S.sel?S.sel.dateA:today(),week=preserveDates&&S.sel?S.sel.weekB:C.monday(d);S.sel={mode:S.sel?S.sel.mode:'swap',dateA:d,periodA:0,weekB:week,teacherB:'',dateB:'',periodB:0,roomA:''};S.editIndex=-1;}
 function notify(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>{$('toast').hidden=true;},4500);}
 function showError(error){$('appError').textContent=error.message||String(error);$('appError').hidden=false;}
-function setBusy(value){busy=value;root.querySelectorAll('fieldset[data-lock]').forEach(e=>{e.disabled=value;});$('progress').hidden=!value;}
+function setBusy(value){busy=value;root.querySelectorAll('fieldset[data-lock]').forEach(e=>{e.disabled=value;});$('appView').setAttribute('aria-busy',String(value));}
 async function work(fn){if(busy)return;setBusy(true);$('appError').hidden=true;try{return await fn();}catch(e){showError(e);}finally{setBusy(false);}}
 const api=(action,payload={})=>request(action,{term:S.term,...payload});
-function mergeSnapshot(v){if(v.dataset)S.dataset=v.dataset;else if(v.hasDataset===false)S.dataset=null;if(v.plans)S.plans=v.plans;S.term=v.term||S.term;S.dataRev=v.dataRev;S.planRev=v.planRev;}
+function mergeSnapshot(v){if(v.dataset)S.dataset=v.dataset;else if(v.hasDataset===false)S.dataset=null;if(v.plans)S.plans=v.plans;if(v.reservedSlots)S.reservedSlots=v.reservedSlots;S.term=v.term||S.term;S.dataRev=v.dataRev;S.planRev=v.planRev;}
 function showSnapshot(v){
  const switched=!!S.term&&v.term!==S.term;
- if(switched)termDrafts.set(S.term,{draft:S.draft,sel:S.sel,dirty:S.dirty,editIndex:S.editIndex,view:S.view});
+ if(switched)termDrafts.set(S.term,{draft:S.draft,sel:S.sel,dirty:S.dirty,editIndex:S.editIndex,view:S.view,receipt:S.receipt});
  mergeSnapshot(v);
- if(switched){const previous=termDrafts.get(S.term);if(previous){Object.assign(S,previous);termDrafts.delete(S.term);}else{resetDraft();S.view='write';}}
+ if(switched){const previous=termDrafts.get(S.term);if(previous){Object.assign(S,previous);termDrafts.delete(S.term);}else{resetDraft();S.view=admin?'history':'write';}}
  if(!S.dirty&&!S.draft.teacherA){const teacher=S.dataset?.teachers.find(t=>t.name===selectedTeacher());if(teacher){S.draft.teacherA=teacher.id;S.draft.submitter=teacher.name;}}renderAll();
 }
 function markDirty(){S.dirty=true;$('dirtyLabel').hidden=false;}
 function teacherOptions(value,empty=true){return(empty?'<option value="">교사 선택</option>':'')+(S.dataset?S.dataset.teachers.slice().sort((a,b)=>a.name.localeCompare(b.name,'ko')).map(t=>'<option value="'+esc(t.id)+'"'+(t.id===value?' selected':'')+'>'+esc(t.name)+'</option>').join(''):'');}
 function currentItems(){return S.draft.items.filter((_,i)=>i!==S.editIndex);}
-function usedSlots(){return C.reservations(S.plans,S.draft.id,{teacherA:S.draft.teacherA,items:currentItems()});}
+function usedSlots(){return C.reservations(S.reservedSlots,S.draft.id,{teacherA:S.draft.teacherA,items:currentItems()});}
 function prettyDate(d,year=false){if(!d)return '';return(year?d.replaceAll('-','.') : Number(d.slice(5,7))+'/'+Number(d.slice(8,10)))+'('+['월','화','수','목','금','토','일'][C.dayOf(d)]+')';}
 function timeText(d,p){return prettyDate(d)+' '+p+'교시';}
 function kindLabel(k){return{elective:'선택',review:'확인',duty:'배정',activity:'창체',block:'연속',blocked:'제한'}[k]||'';}
@@ -49,7 +49,7 @@ function timetableHtml(id,week,side){
  }h+='</tr>';}return h+'</tbody></table>';
 }
 function recomputeCandidates(){
- S.candidates=[];if(S.dataset&&S.draft.teacherA&&S.sel.periodA){S.candidates=C.findCandidates(S.dataset,S.plans,{teacherA:S.draft.teacherA,dateA:S.sel.dateA,periodA:S.sel.periodA,mode:S.sel.mode,weekB:S.sel.weekB,exceptId:S.draft.id,items:currentItems()});}
+ S.candidates=[];if(S.dataset&&S.draft.teacherA&&S.sel.periodA){S.candidates=C.findCandidates(S.dataset,S.reservedSlots,{teacherA:S.draft.teacherA,dateA:S.sel.dateA,periodA:S.sel.periodA,mode:S.sel.mode,weekB:S.sel.weekB,exceptId:S.draft.id,items:currentItems()});}
  if(!S.candidates.some(c=>c.teacherId===S.sel.teacherB)){S.sel.teacherB='';S.sel.dateB='';S.sel.periodB=0;}
 }
 function renderSelection(){
@@ -70,36 +70,72 @@ function renderItems(){
  $('items').innerHTML='<table class="list-table"><thead><tr><th>유형</th><th>결강 수업</th><th>학급·대상</th><th>담당 교사 / 교체 수업</th><th></th></tr></thead><tbody>'+items.map((i,n)=>'<tr><td><span class="type">'+(i.mode==='swap'?'교체':'보강')+'</span></td><td>'+esc(timeText(i.dateA,i.periodA))+'<br><small>'+esc(i.subjectA)+'</small></td><td>'+esc(i.roomA)+'</td><td>'+esc(i.teacherBName)+(i.mode==='swap'?'<br><small>'+esc(timeText(i.dateB,i.periodB))+' · '+esc(i.subjectB)+'</small>':'')+'</td><td class="right"><button class="text-btn" data-action="moveItem" data-index="'+n+'" data-direction="-1" aria-label="위로 이동"'+(n===0?' disabled':'')+'>↑</button><button class="text-btn" data-action="moveItem" data-index="'+n+'" data-direction="1" aria-label="아래로 이동"'+(n===items.length-1?' disabled':'')+'>↓</button><button class="text-btn" data-action="editItem" data-index="'+n+'">수정</button><button class="text-btn" data-action="removeItem" data-index="'+n+'">삭제</button></td></tr>').join('')+'</tbody></table>';
 }
 function renderWrite(){
- $('documentTitle').innerHTML=(S.draft.version?'계획서 수정':'새 계획서')+'<span id="dirtyLabel" class="dirty"'+(!S.dirty?' hidden':'')+'>저장 전</span>';
+ $('documentTitle').innerHTML=(localDrafts().some(p=>p.id===S.draft.id)?'저장한 초안':'새 계획서')+'<span id="dirtyLabel" class="dirty"'+(!S.dirty?' hidden':'')+'>저장 전</span>';
  $('noDataset').hidden=!!S.dataset;
+ $('receipt').hidden=!S.receipt;
  $('teacherA').innerHTML=teacherOptions(S.draft.teacherA);$('reason').value=S.draft.reason;$('submitDate').value=S.draft.submitDate;$('submitter').value=S.draft.submitter;
  renderSelection();renderItems();
 }
+function localDrafts(){
+ if(admin)return [];
+ try{return JSON.parse(sessionStorage.getItem(cachePrefix+S.term)||'[]');}catch{return [];}
+}
+function updateDrafts(drafts){sessionStorage.setItem(cachePrefix+S.term,JSON.stringify(drafts));}
 function renderHistory(){
  const q=$('historySearch').value.trim(),status=$('historyStatus').value;
- const plans=S.plans.filter(p=>(status==='all'||p.status===status)&&(!q||(p.teacherAName+' '+p.reason).includes(q))).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
- if(!plans.length){$('historyList').innerHTML='<div class="empty-state"><p>해당하는 계획서가 없습니다.</p></div>';return;}
- $('historyList').innerHTML='<table class="list-table"><thead><tr><th>결강 교사</th><th>결강일</th><th>사유</th><th>수업</th><th>상태</th><th></th></tr></thead><tbody>'+plans.map(p=>'<tr><td><b>'+esc(p.teacherAName)+'</b></td><td>'+esc(Array.from(new Set(p.items.map(i=>i.dateA))).sort().map(d=>prettyDate(d)).join(', '))+'</td><td>'+esc(p.reason)+'</td><td>'+p.items.length+'건</td><td><span class="type">'+(p.status==='active'?'저장됨':'취소됨')+'</span></td><td class="right">'+(p.status==='active'?'<button class="text-btn" data-action="openPlan" data-id="'+esc(p.id)+'">열기</button><button class="text-btn" data-action="printPlan" data-id="'+esc(p.id)+'">인쇄</button><button class="text-btn" data-action="noticePlan" data-id="'+esc(p.id)+'">학급 공지</button><button class="text-btn" data-action="cancelPlan" data-id="'+esc(p.id)+'">취소</button>':'<button class="text-btn" data-action="copyPlan" data-id="'+esc(p.id)+'">새 계획으로 복사</button>')+'</td></tr>').join('')+'</tbody></table>';
+ const plans=(admin?S.plans:localDrafts()).filter(p=>(!admin||status==='all'||p.status===status)&&(!q||((p.teacherAName||'')+' '+p.reason).includes(q)));
+ if(admin)plans.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
+ $('historyList').innerHTML=plans.length?'<table class="list-table"><thead><tr><th>결강 교사</th><th>결강일</th><th>사유</th><th>수업</th><th>상태</th><th></th></tr></thead><tbody>'+plans.map(p=>
+  '<tr><td><b>'+esc(p.teacherAName||'미지정')+'</b></td><td>'+esc([...new Set(p.items.map(i=>i.dateA))].sort().map(d=>prettyDate(d)).join(', '))+'</td><td>'+esc(p.reason)+'</td><td>'+p.items.length+'건</td><td><span class="type">'+(admin?(p.status==='active'?'제출됨':'취소됨'):'임시저장')+'</span></td><td class="right">'+
+  '<button class="text-btn" data-action="openPlan" data-id="'+esc(p.id)+'">열기</button>'+(admin?
+   '<button class="text-btn" data-action="printPlan" data-id="'+esc(p.id)+'">인쇄</button><button class="text-btn" data-action="noticePlan" data-id="'+esc(p.id)+'">학급 공지</button>'+(p.status==='active'?'<button class="text-btn" data-action="cancelPlan" data-id="'+esc(p.id)+'">취소</button>':''):
+   '<button class="text-btn" data-action="deleteDraft" data-id="'+esc(p.id)+'">삭제</button>')+'</td></tr>').join('')+'</tbody></table>':'<div class="empty-state"><p>해당하는 계획서가 없습니다.</p></div>';
 }
 function renderAll(){
- $('historyCount').textContent=S.plans.filter(p=>p.status==='active').length||'';
+ $('historyCount').textContent=localDrafts().length||'';
  ['write','history'].forEach(v=>{$(v+'View').hidden=S.view!==v;});root.querySelectorAll('[data-action=nav]').forEach(b=>b.classList.toggle('active',b.dataset.view===S.view));
- renderWrite();renderHistory();
+ if(S.view==='write')renderWrite();else renderHistory();
 }
 function draftForSave(){return Object.assign({},S.draft,{reason:$('reason').value.trim(),submitter:$('submitter').value.trim(),submitDate:$('submitDate').value});}
 function addItem(){
  if(!S.dataset||!S.sel.teacherB||!S.sel.periodA||!S.sel.periodB)throw new Error('결강 수업과 대상 교사를 선택해 주세요.');
  const i={mode:S.sel.mode,dateA:S.sel.dateA,periodA:S.sel.periodA,teacherB:S.sel.teacherB,dateB:S.sel.dateB,periodB:S.sel.periodB,roomA:$('roomOverride').value.trim()};
  const raw=draftForSave(),items=raw.items.slice();if(S.editIndex>=0)items[S.editIndex]=i;else items.push(i);
- const v=C.validatePlan(S.dataset,S.plans,Object.assign({},raw,{items}));S.draft=Object.assign({},raw,v);markDirty();resetSelection();renderWrite();
+ const v=C.validatePlan(S.dataset,S.reservedSlots,Object.assign({},raw,{items}));S.draft=Object.assign({},raw,v);markDirty();resetSelection();renderWrite();
 }
-function saveDraft(){return work(async()=>{if(S.editIndex>=0)throw new Error('수정 중인 수업을 먼저 적용하거나 선택 취소해 주세요.');if(!S.dataset)throw new Error('등록된 시간표가 없습니다.');const raw=draftForSave();C.validatePlan(S.dataset,S.plans,raw);const r=await api('savePlan',{plan:raw,dataRev:S.dataRev});upsert(r.plan,r.planRev);S.draft=C.clone(r.plan);S.dirty=false;resetSelection();renderAll();notify('계획서를 저장했습니다.');});}
+function saveDraft(){
+ if(S.editIndex>=0)throw Error('수정 중인 수업을 먼저 적용하거나 선택 취소해 주세요.');
+ const draft={...draftForSave(),teacherAName:S.dataset?C.teacher(S.dataset,S.draft.teacherA)?.name||'':''};
+ updateDrafts([draft,...localDrafts().filter(p=>p.id!==draft.id)]);S.draft=draft;S.dirty=false;renderWrite();notify('이 탭에 임시저장했습니다.');
+}
+function submitDraft(){return work(async()=>{
+ if(S.editIndex>=0)throw Error('수정 중인 수업을 먼저 적용하거나 선택 취소해 주세요.');
+ if(!S.dataset)throw Error('등록된 시간표가 없습니다.');
+ const raw=draftForSave(),clean=C.validatePlan(S.dataset,[],raw);
+ if(!confirm('계획서를 제출할까요? 제출 후 계획서와 학급 공지를 인쇄할 수 있습니다.'))return;
+ const result=await api('submitPlan',{plan:raw,dataRev:S.dataRev});
+ if(!result.submitted)throw Error('제출을 확인하지 못했습니다. 다시 시도하세요.');
+ const drafts=localDrafts(),remaining=drafts.filter(p=>p.id!==raw.id);
+ if(remaining.length!==drafts.length)updateDrafts(remaining);
+ S.planRev='0';S.reservedSlots.push({status:'active',teacherA:clean.teacherA,items:clean.items});
+ resetDraft();S.receipt=clean;renderWrite();notify('계획서를 제출했습니다.');
+});}
 function upsert(plan,rev){const i=S.plans.findIndex(p=>p.id===plan.id);if(i>=0)S.plans[i]=plan;else S.plans.push(plan);S.planRev=rev;}
 function switchView(view){S.view=view;renderAll();}
 async function refresh(){showSnapshot(await api('load',{dataRev:S.dataRev,planRev:S.planRev}));notify('최신 자료를 불러왔습니다. 작성 중인 내용은 학기별로 유지됩니다.');}
-function openPlan(id,copy){const p=S.plans.find(p=>p.id===id);if(!p)return;if(S.dirty&&!confirm('작성 중인 내용을 닫고 다른 계획서를 열겠습니까?'))return;S.draft=C.clone(p);if(copy){S.draft.id='p_'+uid();S.draft.version=0;S.draft.submitDate=today();delete S.draft.status;}S.dirty=!!copy;resetSelection();S.view='write';renderAll();window.scrollTo({top:0,behavior:'smooth'});}
+function openPlan(id){
+ const p=(admin?S.plans:localDrafts()).find(p=>p.id===id);if(!p)return;
+ if(admin){
+  const detail=$('planDetail');
+  $('detailTitle').textContent=p.teacherAName+' 결보강 계획서';
+  $('detailContent').innerHTML='<p>'+esc(p.submitDate)+' · 제출자 '+esc(p.submitter)+'</p><p>'+esc(p.reason)+'</p><ul>'+p.items.map(i=>
+   '<li>'+esc(timeText(i.dateA,i.periodA)+' · '+i.subjectA+' · '+i.roomA+' · '+i.teacherBName+(i.mode==='swap'?' · '+timeText(i.dateB,i.periodB)+' '+i.subjectB:' · 보강'))+'</li>').join('')+'</ul>';
+  detail.showModal();return;
+ }
+ if(S.dirty&&!confirm('작성 중인 내용을 닫고 임시저장한 초안을 열겠습니까?'))return;
+ S.draft=C.clone(p);S.receipt=null;S.dirty=false;resetSelection();switchView('write');
+}
 function editItem(index){const i=S.draft.items[index];if(!i)return;S.editIndex=index;S.sel={mode:i.mode,dateA:i.dateA,periodA:i.periodA,weekB:C.monday(i.dateB),teacherB:i.teacherB,dateB:i.dateB,periodB:i.periodB,roomA:i.roomA};renderSelection();$('tableA').scrollIntoView({behavior:'smooth',block:'center'});}
-function printableDraft(){if(!S.dataset)throw new Error('시간표를 먼저 등록해 주세요.');if(S.editIndex>=0)throw new Error('수정 중인 수업을 먼저 적용해 주세요.');const raw=draftForSave();return Object.assign({},raw,C.validatePlan(S.dataset,S.plans,raw));}
 function printPlan(plan,notice){
  const items=plan.items;if(!items.length)throw new Error('출력할 수업이 없습니다.');let html='';
  if(notice){html=items.map(i=>{const line=(d,p,sa,ta,sb,tb)=>'<div class="notice-time">'+esc(timeText(d,p))+'</div><div class="notice-change"><div><b>'+esc(sa)+'</b><small>'+esc(ta)+'</small></div><span>→</span><div><b>'+esc(sb)+'</b><small>'+esc(tb)+'</small></div></div>';
@@ -117,14 +153,16 @@ root.addEventListener('click',event=>{const b=event.target.closest('[data-action
  else if(a==='add')addItem();
  else if(a==='clearSelection'){resetSelection();renderSelection();}
  else if(a==='save')saveDraft();
+ else if(a==='submit')submitDraft();
  else if(a==='refresh')work(refresh);
  else if(a==='new'){if(!S.dirty||confirm('작성 중인 내용을 닫고 새 계획서를 작성하겠습니까?')){resetDraft();renderWrite();}}
  else if(a==='removeItem'){S.draft.items.splice(Number(b.dataset.index),1);markDirty();resetSelection();renderWrite();}
  else if(a==='moveItem'){const n=Number(b.dataset.index),m=n+Number(b.dataset.direction);if(m>=0&&m<S.draft.items.length){[S.draft.items[n],S.draft.items[m]]=[S.draft.items[m],S.draft.items[n]];markDirty();resetSelection();renderWrite();}}
  else if(a==='editItem')editItem(Number(b.dataset.index));
- else if(a==='openPlan'||a==='copyPlan')openPlan(b.dataset.id,a==='copyPlan');
+ else if(a==='openPlan')openPlan(b.dataset.id);
+ else if(a==='deleteDraft'){if(confirm('이 탭의 임시저장본을 삭제할까요?')){updateDrafts(localDrafts().filter(p=>p.id!==b.dataset.id));renderAll();}}
  else if(a==='cancelPlan'){const p=S.plans.find(p=>p.id===b.dataset.id);if(p&&confirm('이 계획서를 취소하겠습니까? 예약된 시간은 해제되며 취소 이력은 남습니다.'))work(async()=>{const r=await api('cancelPlan',{id:p.id,version:p.version});upsert(r.plan,r.planRev);if(S.draft.id===p.id)resetDraft();renderAll();notify('계획서를 취소했습니다.');});}
- else if(a==='printDraft'||a==='noticeDraft')printPlan(printableDraft(),a==='noticeDraft');
+ else if((a==='printReceipt'||a==='noticeReceipt')&&S.receipt)printPlan(S.receipt,a==='noticeReceipt');
  else if(a==='printPlan'||a==='noticePlan'){const p=S.plans.find(p=>p.id===b.dataset.id);if(p)printPlan(p,a==='noticePlan');}
  }catch(e){showError(e);}
 });
@@ -135,6 +173,9 @@ $('weekB').addEventListener('change',()=>{try{S.sel.weekB=C.monday($('weekB').va
 $('teacherB').addEventListener('change',()=>{S.sel.teacherB=$('teacherB').value;S.sel.dateB='';S.sel.periodB=0;if(S.sel.mode==='cover'&&S.sel.teacherB){S.sel.dateB=S.sel.dateA;S.sel.periodB=S.sel.periodA;}renderSelection();});
 $('roomOverride').addEventListener('input',()=>{S.sel.roomA=$('roomOverride').value;});
 ['historySearch','historyStatus'].forEach(id=>$(id).addEventListener(id==='historySearch'?'input':'change',renderHistory));
+$('swapNav').hidden=admin;
+$('historyTitle').textContent=admin?'제출된 결보강 계획서':'내 임시저장 계획서';
+$('historyStatus').hidden=!admin;
 resetDraft();showSnapshot(initial);
 return Object.freeze({get dirty(){return S.dirty||S.editIndex>=0||Array.from(termDrafts.values()).some(d=>d.dirty||d.editIndex>=0);},resume(){return work(async()=>showSnapshot(await api('resume',{dataRev:S.dataRev,planRev:S.planRev})));},destroy(){clearTimeout(toastTimer);termDrafts.clear();root.replaceChildren();}});
 }

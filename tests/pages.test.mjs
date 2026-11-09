@@ -6,8 +6,10 @@ test('Pages serves the app and shared Pretendard font without redirects, private
  const files=await readdir('.cache/pages-site',{recursive:true});
  assert(!files.some(f=>/private|\.dev|migrations|fixture|server|^src/.test(f)));
  for(const name of ['index.html','student.html','teacher.html','admin.html']){
-  const original=await readFile(name,'utf8'),built=await readFile('.cache/pages-site/'+name,'utf8'),normalize=s=>s.replace(/(\b(?:src|href)="(?:\.\/)?(?:config\.js|assets\/[^"?]+\.(?:js|css)))(?:\?[^"#]*)?(?=")/g,'$1');assert.equal(normalize(built),normalize(original));assert(!built.includes('location.replace'));assert(built.includes('assets/font.css'));assert(built.includes('assets/pretendard.woff2'));assert(!built.includes('data:font'));assert.match(built,/config\.js\?v=[a-f0-9]{12}/);
+  const original=await readFile(name,'utf8'),built=await readFile('.cache/pages-site/'+name,'utf8'),normalize=s=>s.replace(/(\b(?:src|href)="(?:\.\/)?(?:config\.js|assets\/[^"?]+\.(?:js|css)))(?:\?[^"#]*)?(?=")/g,'$1');assert.equal(normalize(built),normalize(original));assert(!built.includes('location.replace'));assert(built.includes('assets/font.css'));assert(!built.includes('rel="preload" href="assets/pretendard.woff2"'));assert(!built.includes('data:font'));assert.match(built,/config\.js\?v=[a-f0-9]{12}/);
  }
+ assert(files.some(f=>f.replaceAll('\\','/')==='assets/pretendard.woff2'));
+ assert.match(await readFile('.cache/pages-site/assets/font.css','utf8'),/font-display:swap;src:url\("pretendard\.woff2"\)/);
  const config=await readFile('.cache/pages-site/config.js','utf8');assert(config.includes('https://school-timetable.cosmicjh.workers.dev/api/'));assert(!config.includes('PASSWORD_'));
  assert(!files.includes('_headers'));assert(!files.includes('scripts/build-pages.mjs'));
  assert.deepEqual(files.filter(f=>f.replaceAll('\\','/').startsWith('class-swap/')).map(f=>f.replaceAll('\\','/').slice('class-swap/'.length)).sort(),['app.js','view.html']);

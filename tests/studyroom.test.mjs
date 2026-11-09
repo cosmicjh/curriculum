@@ -3,17 +3,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {harness} from './harness.mjs';
 import {backup} from './fixture.mjs';
-import {stretchPassword,newSalt} from '../src/password.js';
 import {localTime,schedule,currentSession} from '../src/studyroom-domain.js';
 import {createHash} from 'node:crypto';
 const today=()=>localTime(new Date()).date;
-test('D1 studyroom: shared roster, durable identity, individual confirmation, archive and concurrency',async t=>{
- const h=await harness({studyroom:true});t.after(()=>h.close());const {admin,teacher,staffToken,api,revision}=await setupStudyroom(h);
+test('D1 studyroom: shared roster, durable identity, teacher notes, archive and concurrency',async t=>{
+ const h=await harness({studyroom:true});t.after(()=>h.close());const {admin,teacher,api,revision}=await setupStudyroom(h);
  let first,second;const submit=(studentNumber,seat,requestId=crypto.randomUUID())=>api('submit',{studentNumber,seat,requestId},'');
- await t.test('anonymous API cannot enumerate students or invoke staff/admin actions; common password cannot confirm',async()=>{
-  for(const op of ['dashboard','students','query','configuration','saveStaff','export','closeDue'])assert.equal((await api(op,{},'')).status,401);
+ await t.test('anonymous API cannot enumerate students or edit attendance; teacher access is separate from admin configuration',async()=>{
+  for(const op of ['dashboard','students','query','configuration','change','export','closeDue'])assert.equal((await api(op,{},'')).status,401);
   assert.equal((await api('configuration',{},teacher.cookie)).status,401);
-  assert.equal((await api('change',{change:'confirm',requestId:crypto.randomUUID()},teacher.cookie)).code,'STAFF_REQUIRED');
+  assert.equal((await api('change',{change:'confirm',requestId:crypto.randomUUID()},teacher.cookie)).code,'INVALID_REQUEST');
   assert.equal((await api('dashboard',{},admin.cookie,{Origin:'https://evil.example'})).status,403);
   for(const seat of ['1','00','100','<script>'])assert.equal((await api('studentInfo',{studentNumber:'30101',seat},'')).status,400);
   const info=await api('studentInfo',{studentNumber:'30101',seat:'01'},'');assert.equal(info.data.name,'가상학생하나');assert.equal(info.data.person_id,undefined);
@@ -27,15 +26,17 @@ test('D1 studyroom: shared roster, durable identity, individual confirmation, ar
   assert.equal((await h.sql("SELECT count(*) n FROM sr_attendance WHERE state='active' AND seat='07'")).results[0].n,1);
   assert((await submit('30101','09')).ok);second=(await submit('30102','99')).data;assert(second);
  });
- await t.test('staff identity is server-derived; confirmation, cancellation, restore and audit are retained',async()=>{
-  const change=async(change,recordId=first.recordId,extra={})=>api('change',{change,recordId,reason:'가상 정정',requestId:crypto.randomUUID(),staffToken,expectedRevision:await revision(),expectedRecordVersion:(await h.sql('SELECT version FROM sr_attendance WHERE id=?',recordId)).results[0].version,...extra},teacher.cookie);
-  const confirmed=await change('confirm',first.recordId,{confirmed_name:'위조교사'});assert(confirmed.ok,JSON.stringify(confirmed));assert.equal(confirmed.data.confirmed_name,'가상확인교사');
-  assert((await change('cancel')).ok);assert((await change('restore')).ok);assert((await change('confirm')).ok);
+ await t.test('teacher notes, cancellation, restore and audit are retained',async()=>{
+  const change=async(change,recordId=first.recordId,extra={})=>api('change',{change,recordId,reason:'가상 정정',requestId:crypto.randomUUID(),expectedRevision:await revision(),expectedRecordVersion:(await h.sql('SELECT version FROM sr_attendance WHERE id=?',recordId)).results[0].version,...extra},teacher.cookie);
+  const noted=await change('note',first.recordId,{note:'가상 특이사항',actor:'위조교사'});assert(noted.ok,JSON.stringify(noted));assert.equal(noted.data.note,'가상 특이사항');
+  assert((await change('cancel')).ok);assert((await change('restore')).ok);
   const hist=await api('history',{recordId:first.recordId},teacher.cookie);assert(hist.data.events.some(e=>e.action==='cancel'));assert(hist.data.events.some(e=>e.action==='restore'));
-  assert.equal(JSON.parse(hist.data.events.find(e=>e.action==='cancel').record).actorName,'가상확인교사');
-  const q=await api('query',{from:today(),to:today()},teacher.cookie);assert.equal(q.data.totals.records,2);assert.equal(q.data.calendar[0].confirmed,1);
+  assert.equal(hist.data.events.find(e=>e.action==='note').actor,'role:teacher');
+  await h.sql("UPDATE sr_sessions SET label='아침' WHERE id=?",noted.data.session_id);
+  const q=await api('query',{from:today(),to:today()},teacher.cookie);assert.equal(q.data.totals.records,2);assert(q.data.rows.every(r=>r.label==='오전'));assert.equal(q.data.rows.find(r=>r.id===first.recordId).note,'가상 특이사항');
   const st=(await api('students',{search:'30101'},teacher.cookie)).data.students[0];assert(st.person_id);
-  const only=await api('query',{personId:st.person_id,from:today(),to:today(),confirmedOnly:true},teacher.cookie);assert.equal(only.data.totals.days,1);
+  const only=await api('query',{personId:st.person_id,from:today(),to:today(),sessionLabel:'오전'},teacher.cookie);assert.equal(only.data.totals.days,1);
+  assert.equal((await api('query',{from:today(),to:today(),sessionLabel:'야간'},teacher.cookie)).data.totals.records,0);
   assert.equal((await h.sql('SELECT revision FROM app_state WHERE id=1')).results[0].revision,2,'attendance never increments timetable revision');
  });
  await t.test('stopping reception retains the current teacher seat display and its history',async()=>{
@@ -43,17 +44,17 @@ test('D1 studyroom: shared roster, durable identity, individual confirmation, ar
   assert.equal((await api('dashboard')).data.rows.length,2);assert.equal((await submit('30101','09')).code,'CLOSED');
   assert((await api('configuration',{enabled:true,expectedRevision:await revision()})).ok);
  });
- await t.test('unrelated arrivals do not block confirmation, but a stale target record does',async()=>{
+ await t.test('unrelated arrivals do not block note edits, but a stale target record does',async()=>{
   const d=(await api('dashboard')).data,r=d.rows.find(r=>r.id===first.recordId);
   assert((await submit('30102','99')).ok);
-  const saved=await api('change',{change:'confirm',recordId:r.id,requestId:crypto.randomUUID(),staffToken,expectedRevision:d.revision,expectedRecordVersion:r.version},teacher.cookie);assert(saved.ok,JSON.stringify(saved));
-  const stale=await api('change',{change:'unconfirm',recordId:r.id,requestId:crypto.randomUUID(),staffToken,expectedRecordVersion:r.version},teacher.cookie);assert.equal(stale.code,'SR_RECORD_CHANGED');
-  assert((await h.sql('SELECT confirmed_at FROM sr_attendance WHERE id=?',r.id)).results[0].confirmed_at);
+  const saved=await api('change',{change:'note',note:'갱신한 비고',recordId:r.id,requestId:crypto.randomUUID(),expectedRevision:d.revision,expectedRecordVersion:r.version},teacher.cookie);assert(saved.ok,JSON.stringify(saved));
+  const stale=await api('change',{change:'note',note:'오래된 비고',recordId:r.id,requestId:crypto.randomUUID(),expectedRecordVersion:r.version},teacher.cookie);assert.equal(stale.code,'SR_RECORD_CHANGED');
+  assert.equal((await h.sql('SELECT note FROM sr_attendance WHERE id=?',r.id)).results[0].note,'갱신한 비고');
  });
  await t.test('manual registration preserves the original first time and refuses a stale session',async()=>{
   const d=(await api('dashboard')).data,r=d.rows.find(r=>r.id===second.recordId);
-  assert((await api('change',{change:'cancel',recordId:r.id,requestId:crypto.randomUUID(),staffToken,reason:'가상 수동 복원 검증',expectedRecordVersion:r.version},teacher.cookie)).ok);
-  const body={change:'manual',studentNumber:'30102',seat:'99',staffToken,reason:'가상 수동 복원 검증'};
+  assert((await api('change',{change:'cancel',recordId:r.id,requestId:crypto.randomUUID(),reason:'가상 수동 복원 검증',expectedRecordVersion:r.version},teacher.cookie)).ok);
+  const body={change:'manual',studentNumber:'30102',seat:'99',reason:'가상 수동 복원 검증'};
   assert.equal((await api('change',{...body,requestId:crypto.randomUUID(),expectedSessionId:'old-session'},teacher.cookie)).code,'SESSION_CHANGED');
   const restored=await api('change',{...body,requestId:crypto.randomUUID(),expectedSessionId:d.current.id},teacher.cookie);assert(restored.ok,JSON.stringify(restored));assert.equal(restored.data.first_at,r.first_at);assert.equal(restored.data.id,r.id);
  });
@@ -90,8 +91,9 @@ test('D1 studyroom: shared roster, durable identity, individual confirmation, ar
   // Successful request replay still works after reception and the roster change.
   const exported=await api('export');assert(exported.ok);assert.equal(createHash('sha256').update(JSON.stringify(exported.data.data)).digest('hex'),exported.data.sha256);
  });
- await t.test('individual session revocation blocks another confirmation',async()=>{
-  await h.sql('UPDATE sr_staff SET enabled=0,epoch=epoch+1');assert.equal((await api('change',{change:'confirm',recordId:second.recordId,requestId:crypto.randomUUID(),staffToken,expectedRevision:await revision()},teacher.cookie)).code,'STAFF_REQUIRED');
+ await t.test('revoked teacher session cannot change a note',async()=>{
+  await h.sql("DELETE FROM sessions WHERE role='teacher'");
+  assert.equal((await api('change',{change:'note',recordId:second.recordId,requestId:crypto.randomUUID()},teacher.cookie)).status,401);
  });
 });
 test('new term links require an explicit identity decision; historical month remains queryable',async t=>{

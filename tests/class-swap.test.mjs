@@ -32,21 +32,35 @@ test('one admin source feeds both tools, protects active plans, and isolates ter
  const count=async table=>(await h.sql('SELECT count(*) n FROM '+table)).results[0].n;
  assert.equal((await swap('resume',{},'')).status,401);const initial=await swap('resume');assert.equal(initial.status,200);assert.equal(initial.data.dataset.teachers.length,3);
  assert.deepEqual(initial.data.dataset.teachers.map(t=>t.name).sort(),(await h.api('teacherBootstrap',{},teacher.cookie)).data.teachers.sort());
+ const roster=(await h.api('roster',{query:{kind:'firstGradeSubjects'}},teacher.cookie)).data;
+ assert(roster.some(s=>s.subject==='과학'&&s.classes.includes('1')));
+ const firstGrade=await h.api('roster',{query:{kind:'firstGrade',subject:'과학',classNum:'1'}},teacher.cookie);
+ assert(firstGrade.ok);assert.equal(firstGrade.data.detail,'1학년 1반');assert(firstGrade.data.students.length>0);assert(firstGrade.data.students.every(s=>s.grade==='1'&&s.classNum==='1'));
+ assert.equal((await h.api('roster',{query:{kind:'firstGrade',subject:'과학',classNum:'99'}},teacher.cookie)).status,400);
  const sessions=await count('sessions');for(const cookie of [teacher.cookie,admin.cookie])for(const action of ['login','replaceData','restoreBackup','setPassword','exportBackup'])assert.equal((await swap(action,{},cookie)).status,403);assert.equal(await count('sessions'),sessions);
- const payload={dataRev:initial.data.dataRev,plan:rawPlan()},saved=await swap('savePlan',payload);assert(saved.ok,JSON.stringify(saved));assert.equal(await count('swap_reservations'),4);assert((await swap('savePlan',payload)).ok);assert.equal(await count('swap_plans'),1);
- assert.equal((await swap('savePlan',{...payload,plan:rawPlan('second0123456789')})).status,409);
+ const payload={dataRev:initial.data.dataRev,plan:rawPlan()},saved=await swap('submitPlan',payload);assert(saved.ok,JSON.stringify(saved));assert.equal(await count('swap_reservations'),4);assert((await swap('submitPlan',payload)).ok);assert.equal(await count('swap_plans'),1);
+ assert.equal((await swap('submitPlan',{...payload,plan:rawPlan('second0123456789')})).status,409);
  const conflicting=sharedStore();conflicting.teacherRows[2][2]='수정 과목';const rejected=await h.mutation('commitImport',{payload:{format:'timetable-import',teacherRows:conflicting.teacherRows}},admin.cookie);assert.equal(rejected.ok,false);assert.match(rejected.error,/계획서|충돌/);assert.equal((await swap('resume')).data.dataRev,initial.data.dataRev);
- const cancelled=await swap('cancelPlan',{id:saved.data.plan.id,version:1});assert(cancelled.ok);assert.equal(await count('swap_reservations'),0);
+ assert.deepEqual(saved.data,{submitted:true});
+ const teacherSnapshot=(await swap('resume')).data;
+ assert.equal(teacherSnapshot.plans,undefined);assert.equal(C.reservations(teacherSnapshot.reservedSlots).size,4);
+ assert(!JSON.stringify(teacherSnapshot.reservedSlots).includes(rawPlan().reason));
+ const adminSwap=(action,payload={})=>swap(action,payload,admin.cookie,{swapScope:'admin'});
+ assert.equal((await swap('load',{},teacher.cookie,{swapScope:'admin'})).status,401);
+ assert.equal((await swap('cancelPlan',{id:rawPlan().id,version:1})).status,403);
+ assert.equal((await adminSwap('load')).data.plans[0].reason,rawPlan().reason);
+ assert.equal((await swap('resume',{planRev:teacherSnapshot.planRev})).data.reservedSlots,null);
+ const cancelled=await adminSwap('cancelPlan',{id:rawPlan().id,version:1});assert(cancelled.ok);assert.equal(await count('swap_reservations'),0);
  assert((await h.mutation('commitImport',{payload:{format:'timetable-import',teacherRows:conflicting.teacherRows}},admin.cookie)).ok);
  const changed=(await swap('resume')).data,main=(await h.api('teacher',{teacher:'가교사'},teacher.cookie)).data;assert.notEqual(changed.dataRev,initial.data.dataRev);assert.equal(changed.dataset.lessons.find(l=>l.teacherId===ids.a&&l.day===0&&l.period===1).subject,main.cells.find(c=>c.day==='월'&&c.period===1).subject);
- assert.equal((await swap('savePlan',payload)).status,409);
+ assert.equal((await swap('submitPlan',payload)).status,409);
  const section=(await h.mutation('saveSection',{section:{grade:'1',subject:'공통 수정',code:'X1',shortName:'공통',room:'수정 교실'}},admin.cookie)).data.result;
  assert((await h.mutation('saveOverride',{override:{teacher:'가교사',day:'월',period:1,sectionId:section.id}},admin.cookie)).ok);
  const linked=(await swap('resume')).data.dataset.lessons.find(l=>l.teacherId===ids.a&&l.day===0&&l.period===1);assert.equal(linked.subject,'공통 수정');assert.equal(linked.room,'수정 교실');
- const settings={...sharedStore().settings,academicYear:2027,semester:1};assert((await h.mutation('saveSettings',{settings},admin.cookie)).ok);assert.equal((await swap('resume',{},teacher.cookie,{viewTerm:'2026-2'})).code,'TERM_CHANGED');assert.equal((await swap('resume')).data.hasDataset,false);assert.deepEqual((await swap('resume')).data.plans,[]);
+ const settings={...sharedStore().settings,academicYear:2027,semester:1};assert((await h.mutation('saveSettings',{settings},admin.cookie)).ok);assert.equal((await swap('resume',{},teacher.cookie,{viewTerm:'2026-2'})).code,'TERM_CHANGED');assert.equal((await swap('resume')).data.hasDataset,false);assert.deepEqual((await swap('resume')).data.reservedSlots,[]);
  const fresh=sharedBackup();fresh.store.term='2027-1';fresh.store.settings=settings;assert((await h.mutation('restore',{backup:fresh},admin.cookie)).ok);const term=(await swap('resume')).data;
- assert.equal((await swap('savePlan',{dataRev:term.dataRev,plan:rawPlan()})).status,409);assert.equal(await count('swap_plans'),1);
- assert((await h.mutation('switchTerm',{term:'2026-2'},admin.cookie)).ok);assert.equal((await swap('resume')).data.plans[0].status,'cancelled');
+ assert.equal((await swap('submitPlan',{dataRev:term.dataRev,plan:rawPlan()})).status,409);assert.equal(await count('swap_plans'),1);
+ assert((await h.mutation('switchTerm',{term:'2026-2'},admin.cookie)).ok);assert.equal((await adminSwap('resume')).data.plans[0].status,'cancelled');
  await h.api('logout',{},teacher.cookie);assert.equal((await swap('resume')).status,401);
 });
 
@@ -54,12 +68,13 @@ test('schedule editing and plan creation cannot commit over each other',async t=
  const h=await harness();t.after(()=>h.close());const admin=await h.login(),teacher=await h.login('teacher');assert((await h.mutation('restore',{backup:sharedBackup()},admin.cookie)).ok);
  const snapshot=(await h.api('classSwap',{swapAction:'resume',swapPayload:{}},teacher.cookie)).data,meta=(await h.api('bootstrap')).data,store=sharedStore();store.teacherRows[2][2]='다른 수업';
  const [plan,edit]=await Promise.all([
-  h.api('classSwap',{swapAction:'savePlan',swapPayload:{dataRev:snapshot.dataRev,plan:rawPlan()}},teacher.cookie),
+  h.api('classSwap',{swapAction:'submitPlan',swapPayload:{dataRev:snapshot.dataRev,plan:rawPlan()}},teacher.cookie),
   h.api('commitImport',{expectedTerm:meta.term,expectedRevision:meta.revision,payload:{format:'timetable-import',teacherRows:store.teacherRows}},admin.cookie)
  ]);
  assert.equal([plan,edit].filter(r=>r.ok).length,1,JSON.stringify([plan,edit]));
  const after=(await h.api('classSwap',{swapAction:'resume',swapPayload:{}},teacher.cookie)).data;
- if(after.plans.length)C.validateExisting(after.dataset,after.plans);
+ const history=(await h.api('classSwap',{swapAction:'load',swapScope:'admin',swapPayload:{}},admin.cookie)).data;
+ if(history.plans.length)C.validateExisting(after.dataset,history.plans);
 });
 
 test('the cutover pause blocks admin writes without changing source data',async t=>{

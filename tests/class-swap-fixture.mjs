@@ -11,6 +11,7 @@ export function sharedStore(){
  for(const day of C.DAYS)for(let p=1;p<=7;p++){header.push(p===1?day:'');period.push(p);}
  store.teacherRows=[header,period];store.settings.periods=Object.fromEntries(C.DAYS.map(day=>[day,3]));store.settings.fixedPeriods=[];
  ds.teachers.forEach((teacher,index)=>{const row=[String(index+1),teacher.name],rooms=['',''];for(let day=0;day<5;day++)for(let p=1;p<=7;p++){const lesson=ds.lessons.find(l=>l.teacherId===teacher.id&&l.day===day&&l.period===p);row.push(lesson?.subject||'');rooms.push(lesson?.room||'');}store.teacherRows.push(row,rooms);});
- store.sections=ds.electives.map((e,index)=>({id:'shared-section-'+index,grade:String(e.grade),subject:e.subject,code:'A'+(index+1),shortName:e.abbr,room:'선택실',manualFields:[]}));store.students=[];return store;
+ store.sections=ds.electives.map((e,index)=>({id:'shared-section-'+index,grade:String(e.grade),subject:e.subject,code:'A'+(index+1),shortName:e.abbr,room:'선택실',manualFields:[]}));
+ store.students=[{...store.students[0],id:'first-grade',sourceKey:'1-1-1',grade:'1',choices:{}}];return store;
 }
 export const sharedBackup=()=>({format:'school-timetable-backup',schemaVersion:1,exportedAt:new Date().toISOString(),store:sharedStore()});
