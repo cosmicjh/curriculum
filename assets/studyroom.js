@@ -19,7 +19,7 @@ export function mountStudyroom(root,{request,admin=false}){
  async function api(op,args={}){return request('studyroom',{op,...args});}
  async function run(fn){if(busy)return;busy=true;root.setAttribute('aria-busy','true');$('[data-sr-error]').textContent='';try{await fn();}catch(e){$('[data-sr-error]').textContent=e.message;}finally{busy=false;root.setAttribute('aria-busy','false');}}
  function renderCurrent(){
-  content.innerHTML='<div class="sr-toolbar"><strong data-sr-session></strong>'+button('refresh','새로고침')+button('manual','수동 등록')+toggleGroup('display','보기',[['seats','좌석'],['list','목록']])+'</div><p class="sr-count" data-sr-count></p><div class="sr-seat-scroll" tabindex="0" aria-label="99석 배치표"><div class="sr-seat-grid"></div></div><div class="sr-table" data-sr-list hidden></div>';
+  content.innerHTML='<div class="sr-toolbar sr-attendance-toolbar"><div class="sr-current-status"><strong data-sr-session></strong>'+button('refresh','새로고침')+'</div>'+toggleGroup('display','보기',[['seats','좌석'],['list','목록']])+'</div><p class="sr-count" data-sr-count></p><div class="sr-seat-scroll" tabindex="0" aria-label="99석 배치표"><div class="sr-seat-grid"></div></div><div class="sr-table" data-sr-list hidden></div>';
   const grid=$('.sr-seat-grid');
   for(const [code,row,column] of seats){const b=document.createElement('button');b.type='button';b.dataset.sr='seat';b.dataset.seat=code;b.style.gridRow=(row-6)+' / span 4';b.style.gridColumn=column;b.innerHTML='<strong>'+code+'</strong><span data-number hidden></span><span data-name hidden></span>';grid.append(b);}
   paintCurrent();
@@ -28,7 +28,6 @@ export function mountStudyroom(root,{request,admin=false}){
   const d=state.dashboard;if(!d||state.view!=='current')return;
   $('[data-sr-session]').textContent=d.current?d.current.label+' · '+d.current.date+(d.enabled?'':' · 접수 중지'):'접수 중인 회차 없음';
   $('[data-sr-count]').textContent='출석 '+d.rows.length+'명 · '+time(d.serverAt);
-  $('[data-sr=manual]').disabled=!d.current||!d.enabled;
   const bySeat=new Map(d.rows.map(r=>[r.seat,r]));
   for(const b of root.querySelectorAll('[data-sr="seat"]')){
    const r=bySeat.get(b.dataset.seat),number=b.querySelector('[data-number]'),name=b.querySelector('[data-name]');
@@ -51,8 +50,8 @@ export function mountStudyroom(root,{request,admin=false}){
    const cells=[esc(r.student_number),name,esc(r.seat),time(r.first_at)].map(value=>'<td>'+value+'</td>').join('');
    if(query)return '<tr>'+cells+'<td class="sr-note">'+(r.note?button('readNote','읽기',record+' aria-label="'+esc(r.student_number+' '+r.name+' 비고 읽기')+'"'):'')+'</td></tr>';
    const status=r.state==='cancelled'?'<span>취소</span>':'';
-   return '<tr>'+cells+'<td class="sr-note">'+esc(r.note)+'<div class="sr-table-actions">'+
-    button('edit','변경',record)+button('history','이력',record)+status+'</div></td></tr>';
+   return '<tr>'+cells+'<td class="sr-note"><div class="sr-table-actions">'+
+    button('edit','변경',record)+button('history','이력',record)+status+'</div>'+(r.note?'<p class="sr-note-text">'+esc(r.note)+'</p>':'')+'</td></tr>';
   }).join('');
   return '<table><thead><tr>'+columns.map(label=>'<th scope="col">'+label+'</th>').join('')+'</tr></thead><tbody>'+body+'</tbody></table>';
  }
@@ -78,9 +77,9 @@ export function mountStudyroom(root,{request,admin=false}){
  }
  function renderQuery(){
   const month=localDate().slice(0,7);
-  content.innerHTML='<div class="sr-query-person" data-sr-person hidden><h3 tabindex="-1"></h3>'+button('allStudents','전체 학생')+'</div><div class="sr-toolbar">'+field('월 달력','<input type="month" name="month" value="'+month+'">')+
+  content.innerHTML='<div class="sr-query-person" data-sr-person hidden><h3 tabindex="-1"></h3>'+button('allStudents','전체 학생')+'</div><div class="sr-toolbar sr-attendance-toolbar sr-calendar-toolbar"><input type="month" name="month" aria-label="월 달력" value="'+month+'">'+
    toggleGroup('session','회차',[['','전체'],['오전','오전'],['오후','오후'],['야간','야간']])+
-   '</div><div class="sr-calendar" data-sr-calendar></div><div data-sr-results></div><div class="sr-toolbar" data-sr-pages hidden>'+button('previous','이전')+button('next','다음')+'</div>';
+   '</div><table class="sr-calendar" data-sr-calendar aria-label="출석 달력"></table><div data-sr-results></div><div class="sr-toolbar" data-sr-pages hidden>'+button('previous','이전')+button('next','다음')+'</div>';
   state.sessionLabel='';state.queryDay=null;state.person=null;
   return loadCalendar();
  }
@@ -99,14 +98,16 @@ export function mountStudyroom(root,{request,admin=false}){
   personHeading.hidden=!person;
   personHeading.querySelector('h3').textContent=person?person.student_number+' '+person.name:'';
   const counts=new Map(q.calendar.map(x=>[x.date,x.records]));
-  $('[data-sr-calendar]').innerHTML=['일','월','화','수','목','금','토'].map(x=>'<strong>'+x+'</strong>').join('')+
-   (start?'<span style="grid-column:span '+start+'"></span>':'')+
-   Array.from({length},(_,i)=>{
-    const day=month+'-'+String(i+1).padStart(2,'0'),count=counts.get(day);
-    const dateLabel='<span>'+(i+1)+'</span>'+(count?'<strong data-sr-count-day>'+count+'</strong>':'');
-    if(person)return '<div class="sr-calendar-day'+(count?' has-record':'')+'" data-day="'+day+'">'+dateLabel+'</div>';
-    return button('day',dateLabel,'class="sr-calendar-day" data-day="'+day+'" aria-pressed="'+(state.queryDay===day)+'" aria-label="'+day+(count?' 출석 '+count+'명':' 기록 없음')+'"');
-   }).join('');
+  const weekdays=['일','월','화','수','목','금','토'];
+  function dateCell(date){
+   if(date<1||date>length)return '<td></td>';
+   const day=month+'-'+String(date).padStart(2,'0'),count=counts.get(day);
+   const label='<span>'+date+'</span>'+(count?'<strong data-sr-count-day>'+count+'</strong>':'');
+   const attrs='class="sr-calendar-day'+(count?' has-record':'')+'" data-day="'+day+'"';
+   return '<td>'+(person?'<div '+attrs+'>'+label+'</div>':button('day',label,attrs+' aria-pressed="'+(state.queryDay===day)+'" aria-label="'+day+(count?' 출석 '+count+'명':' 기록 없음')+'"'))+'</td>';
+  }
+  $('[data-sr-calendar]').innerHTML='<thead><tr>'+weekdays.map(day=>'<th scope="col">'+day+'</th>').join('')+'</tr></thead><tbody>'+
+   Array.from({length:Math.ceil((start+length)/7)},(_,week)=>'<tr>'+weekdays.map((_,i)=>dateCell(week*7+i-start+1)).join('')+'</tr>').join('')+'</tbody>';
   if(person)return renderRecords(q);
   if(state.queryDay)return loadRecords();
   $('[data-sr-results]').innerHTML='<p class="sr-empty">날짜를 선택하세요.</p>';
@@ -142,7 +143,7 @@ export function mountStudyroom(root,{request,admin=false}){
   const a=b.dataset.sr;if(a==='view')return show(b.dataset.view);if(a==='refresh')return refresh();if(a==='closeDialog')return dialog.close();if(a==='addRule')return addRule();if(a==='removeRule')return b.closest('.sr-rule').remove();
   if(a==='display'){pressButton(b);$('.sr-seat-scroll').hidden=b.dataset.value!=='seats';$('[data-sr-list]').hidden=b.dataset.value!=='list';return paintCurrent();}
   if(a==='session'){pressButton(b);state.sessionLabel=b.dataset.value;return loadCalendar();}
-  if(a==='seat'){const r=state.dashboard?.rows.find(r=>r.seat===b.dataset.seat);if(r||state.dashboard?.current&&state.dashboard.enabled)return edit(r,b.dataset.seat);return;}if(a==='manual')return edit(null);
+  if(a==='seat'){const r=state.dashboard?.rows.find(r=>r.seat===b.dataset.seat);if(r||state.dashboard?.current&&state.dashboard.enabled)return edit(r,b.dataset.seat);return;}
   if(a==='edit'){const row=state.dashboard.rows.find(r=>r.id===b.dataset.id);if(row)return edit(row);}
   if(a==='readNote'){const row=state.query.rows.find(r=>r.id===b.dataset.id);if(row?.note)return edit(row,'',true);}
   if(a==='history'){

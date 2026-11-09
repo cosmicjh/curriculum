@@ -30,6 +30,7 @@ try{
   await teacher.goto(url+'/teacher.html');await teacher.locator('#password').fill('1234');await teacher.locator('form[data-form=login] button').click();await teacher.locator('[data-action=teacher-tab][data-tab=studyroom]').click();await idle();assert.equal(await sr.locator('[data-sr=seat]').count(),99);assert.match(await sr.locator('[data-seat="99"]').textContent(),/30101.*가상학생하나/);
   assert.equal(await sr.locator('[data-sr-identity]').count(),0);
   assert.equal(await sr.locator('input[type=search], [data-sr-view]').count(),0);
+  assert.equal(await sr.locator('[data-sr=manual]').count(),0);
   await sr.locator('[data-seat="99"]').click();await sr.locator('textarea[name=note]').fill('가상 특이사항');await sr.locator('dialog [data-sr-form=change] button').click();await idle();
   assert.equal((await h.sql('SELECT note FROM sr_attendance')).results[0].note,'가상 특이사항');
   await teacher.setViewportSize({width:320,height:760});
@@ -41,16 +42,31 @@ try{
   assert.equal(await sr.locator('[data-seat="98"]').textContent(),'98');
   assert.equal(await sr.locator('[data-seat="99"] > :not([hidden])').count(),2);
   assert(await sr.locator('[data-seat="99"] [data-number]').evaluate(e=>e.scrollWidth<=e.clientWidth),'mobile seat shows all five student-number digits');
-  assert(await sr.locator('button').evaluateAll(buttons=>buttons.every(button=>getComputedStyle(button).borderTopWidth===(button.dataset.sr==='seat'?'1px':'0px'))));
+  assert(await sr.locator('button').evaluateAll(buttons=>buttons.every(button=>getComputedStyle(button).borderTopWidth==='0px')));
+  assert.equal(await sr.locator('.sr-seat-scroll').evaluate(el=>getComputedStyle(el).borderTopWidth),'0px');
+  assert.equal(await sr.locator('[data-seat="98"]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(244, 244, 244)');
+  assert.equal(await sr.locator('[data-seat="99"]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(232, 241, 220)');
+  assert(await sr.locator('.sr-current-status').evaluate(el=>{
+   const [session,refresh]=Array.from(el.children,child=>child.getBoundingClientRect());
+   return Math.abs(session.y+session.height/2-refresh.y-refresh.height/2)<1;
+  }));
   assert(await sr.locator('.sr-seat-scroll').evaluate(e=>e.scrollWidth<=e.clientWidth));
   assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await teacher.screenshot({path:'test-results/studyroom/current-mobile.png',fullPage:true});
   await sr.locator('[data-sr=display][data-value=list]').click();assert(await sr.locator('[data-sr-list]').evaluate(e=>!e.hidden&&e.scrollWidth<=e.clientWidth));
+  assert(await sr.locator('[data-sr-list] tbody tr').evaluate(row=>{
+   const cell=row.cells[0],contentY=cell.getBoundingClientRect().y+parseFloat(getComputedStyle(cell).paddingTop);
+   return Math.abs(row.querySelector('[data-sr=history]').getBoundingClientRect().y-contentY)<1;
+  }));
   await sr.locator('[data-sr=display][data-value=seats]').click();await teacher.setViewportSize({width:1440,height:1000});
   await teacher.screenshot({path:'.impeccable/review/desktop.png',fullPage:true});
  });
  await step('calendars show date and student attendance, filter by session and month, and allow note edits',async()=>{
-  assert((await api('submit',{studentNumber:'30102',seat:'98',requestId:crypto.randomUUID()})).ok);
+  await sr.locator('[data-seat="98"]').click();
+  assert.equal(await sr.locator('dialog [name=seat]').inputValue(),'98');
+  await sr.locator('dialog [name=studentNumber]').fill('30102');
+  await sr.locator('dialog button.primary').click();await idle();
+  assert.match(await sr.locator('[data-seat="98"]').textContent(),/30102.*가상학생둘/);
   const queryIdle=()=>teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');
   await sr.locator('[data-sr=view][data-view=query]').click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-content]').locator('input[type=search], input[type=date], select, [name=includeCancelled]').count(),0);
@@ -58,7 +74,12 @@ try{
   const day=sr.locator('[data-sr=day][data-day="'+now.date+'"]');
   assert.equal(await day.locator('[data-sr-count-day]').textContent(),'2');
   assert.equal(await day.evaluate(el=>getComputedStyle(el).borderTopWidth),'1px');
-  assert.equal(await sr.locator('.sr-calendar').evaluate(el=>getComputedStyle(el).borderTopWidth),'1px');
+  assert.equal(await sr.locator('.sr-calendar').evaluate(el=>getComputedStyle(el).borderTopWidth),'0px');
+  assert.equal(await day.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(236, 236, 236)');
+  assert(await sr.locator('.sr-calendar').evaluate(el=>{
+   const offset=cell=>cell.firstElementChild.getBoundingClientRect().top-cell.getBoundingClientRect().top;
+   return Math.abs(offset(el.querySelector('.has-record'))-offset(el.querySelector('.sr-calendar-day:not(.has-record)')))<1;
+  }));
   await day.click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-results] h4').textContent(),'오전');
   await sr.locator('[data-sr=session][data-value="야간"]').click();await queryIdle();
@@ -66,6 +87,10 @@ try{
   await sr.locator('[data-sr=session][data-value="오전"]').click();await queryIdle();
   assert.equal(await day.getAttribute('aria-pressed'),'true');
   await teacher.screenshot({path:'test-results/studyroom/calendar-desktop.png',fullPage:true});await teacher.setViewportSize({width:320,height:760});
+  assert(await sr.locator('.sr-calendar-toolbar').evaluate(el=>{
+   const [month,filters]=Array.from(el.children,child=>child.getBoundingClientRect());
+   return Math.abs(month.y+month.height/2-filters.y-filters.height/2)<1;
+  }));
   const results=sr.locator('[data-sr-results] .sr-table');
   assert.equal(await results.locator('tbody tr').count(),2);
   await results.getByRole('button',{name:'가상학생하나',exact:true}).click();await queryIdle();
