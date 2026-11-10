@@ -16,7 +16,7 @@
   const swapPane=document.createElement('section');swapPane.id='class-swap-pane';swapPane.className='shell';swapPane.hidden=true;swapPane.setAttribute('aria-label','결보강');app.after(swapPane);
   const swapViews=new Map();
   const swapCachePrefix="timetable.swap-drafts.";
-  let firstGradeCatalog=null;
+  let classCatalog=null;
   const allocationViews=new Map();
   const studyroomViews=new Map();
   async function showStudyroom(root,role){
@@ -93,26 +93,26 @@
   async function run(fn,button,block=true){if(block&&++busyCount===1)setLoading(true);try{return await fn();}catch(e){if(e.code==='TERM_CHANGED'){rememberForms();if(modal.open)modal.close();modal.innerHTML='';state.teacherBoot=null;state.admin=null;state.timetable=null;state.roster=null;await renderRoute();}if(e.code==='AUTH_REQUIRED'){rememberForms();if(modal.open)modal.close();modal.innerHTML='';state.timetable=null;state.roster=null;sessionStorage.removeItem('timetable.admin');sessionStorage.removeItem('timetable.teacher');state.teacherBoot=null;state.admin=null;renderLogin(state.route==='admin'?'admin':'teacher');}toast(e.message||'처리하지 못했습니다.');}finally{if(block){busyCount--;if(!busyCount){setLoading(false);if(state.route!==route())run(renderRoute);}}}}
   function header(){
     const settings=state.meta&&state.meta.settings||{}, school=settings.schoolName||(window.TIMETABLE_CONFIG||{}).schoolName||'개인 시간표';
-    document.body.classList.toggle('workspace',['teacher','admin'].includes(state.route)&&!!token(state.route));
     document.title=(settings.title||'개인 시간표')+' · '+school;
     $('#header').innerHTML='<a class="brand" href="'+href('home')+'">'+esc(school)+'</a><div class="top-actions">'+(state.route!=='home'?'<a class="quiet" href="'+href('home')+'">처음</a>':'')+(['teacher','admin'].includes(state.route)&&token(state.route)?'<button class="quiet" data-action="logout">로그아웃</button>':'')+'</div>';
   }
   function head(title,actions=''){return '<div class="view-head"><div><h1>'+esc(title)+'</h1>'+(state.meta?'<p class="term-label">'+state.meta.settings.academicYear+'학년도 '+state.meta.settings.semester+'학기'+'</p>':'')+'</div>'+actions+'</div>';}
+  function showScreen(html,workspace=false){app.innerHTML=html;document.body.classList.toggle('workspace',workspace);}
   function renderHome(){
-    app.innerHTML='<div class="landing">'+head(state.meta?.settings.title||'개인 시간표')+'<nav class="entry-list" aria-label="사용자 메뉴"><a class="entry" href="'+href('student')+'">학생</a><a class="entry" href="'+href('teacher')+'">교사</a><a class="entry" href="'+href('admin')+'">관리자</a></nav></div>';
+    showScreen('<div class="landing">'+head(state.meta?.settings.title||'개인 시간표')+'<nav class="entry-list" aria-label="사용자 메뉴"><a class="entry" href="'+href('student')+'">학생</a><a class="entry" href="'+href('teacher')+'">교사</a><a class="entry" href="'+href('admin')+'">관리자</a></nav></div>');
   }
-  function renderLogin(role){hideSwap();header();const title=role==='admin'?'관리자':'교사';app.innerHTML='<div class="auth"><h1>'+title+'</h1><form data-form="login" data-role="'+role+'">'+field('비밀번호','password','<input id="password" type="password" required autocomplete="current-password" autofocus>')+'<p id="login-error" class="error" role="alert"></p><button class="primary" type="submit">입장</button></form><a class="back" href="'+href('home')+'">처음으로</a></div>';}
+  function renderLogin(role){hideSwap();header();const title=role==='admin'?'관리자':'교사';showScreen('<div class="auth"><h1>'+title+'</h1><form data-form="login" data-role="'+role+'">'+field('비밀번호','password','<input id="password" type="password" required autocomplete="current-password" autofocus>')+'<p id="login-error" class="error" role="alert"></p><button class="primary" type="submit">입장</button></form><a class="back" href="'+href('home')+'">처음으로</a></div>');}
   function timetableHTML(tt){
     const name=tt.kind==='student'?tt.studentNumber+' '+tt.name:tt.name+' 선생님';
     let body='';for(let p=1;p<=7;p++){body+='<tr><td class="period">'+p+'</td>';days.forEach(d=>{const i=tt.cells.findIndex(c=>c.day===d&&c.period===p),c=tt.cells[i]||{},has=!!c.subject;const inner='<span class="subject">'+esc(c.subject)+(c.sectionCode?'<span class="split">'+esc(c.sectionCode)+'</span>':'')+'</span>'+(c.room?'<span class="room">'+esc(c.room)+'</span>':'')+(c.teachers?.length?'<span class="teachers">'+esc(c.teachers.join(', '))+'</span>':'');body+='<td class="'+(c.isElective?'elective ':'')+(c.warning?'warning':'')+'">'+(c.roster&&has?'<button class="cell-button tt-slot" data-action="cell-roster" data-cell="'+i+'" aria-label="'+esc(c.subject+' 명렬표')+'">'+inner+'</button>':has?'<span class="tt-slot">'+inner+'</span>':inner)+'</td>';});body+='</tr>';}
     return '<div class="capture"><h2>'+esc(name)+'</h2><table class="tt"><thead><tr><th></th>'+days.map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
   }
   function resultHTML(){return state.timetable?'<div id="capture-area" class="panel">'+timetableHTML(state.timetable)+'</div><div class="result-tools"><button data-action="save-image">이미지 저장</button><button data-action="print-single">인쇄</button></div>':'';}
-  function renderStudent(){app.innerHTML='<div class="lookup">'+head('학생 시간표')+'<form class="lookup-form" data-form="student">'+field('학번','student-number',input('student-number','','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off" required'))+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+(state.timetable&&state.timetable.kind==='student'?resultHTML():'')+'</div></div>';}
+  function renderStudent(){showScreen('<div class="lookup">'+head('학생 시간표')+'<form class="lookup-form" data-form="student">'+field('학번','student-number',input('student-number','','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off" required'))+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+(state.timetable&&state.timetable.kind==='student'?resultHTML():'')+'</div></div>');}
   async function loadTeacher(force=false){
     const cached=state.teacherBoot,data=await call('teacherBootstrap',cached&&!force?{knownRevision:cached.meta.revision,sectionsRevision:cached.meta.sectionsRevision}:{},'teacher');
     if(!data.unchanged){if(state.timetable?.meta?.revision!==data.meta.revision){state.timetable=null;state.roster=null;}if(!data.sections&&cached&&cached.meta.term===data.meta.term)data.sections=cached.sections;state.teacherBoot=data;}
-    if(state.teacherTab==='roster')await ensureFirstGradeCatalog();
+    if(state.teacherTab==='roster')await ensureClassCatalog();
     useMeta(state.teacherBoot.meta);renderTeacher();
   }
   function renderTeacher(){
@@ -125,18 +125,20 @@
     if(state.teacherTab==='classSwap')html+='<div id="teacher-swap"></div>';
     if(state.teacherTab==='allocation')html+='<div id="teacher-allocation"></div>';
     if(state.teacherTab==='studyroom')html+='<div id="teacher-studyroom"></div>';
-    app.innerHTML=html+'</div>';if(state.teacherTab==='classSwap'){$('#teacher-swap').append(swapPane);swapPane.hidden=false;app.classList.add('teacher-tools');run(()=>showSwap('teacher',swapPane));}else hideSwap();if(state.teacherTab==='allocation')run(()=>showAllocation($('#teacher-allocation'),'teacher'));if(state.teacherTab==='studyroom')run(()=>showStudyroom($('#teacher-studyroom'),'teacher'));
+    showScreen(html+'</div>',true);if(state.teacherTab==='classSwap'){$('#teacher-swap').append(swapPane);swapPane.hidden=false;app.classList.add('teacher-tools');run(()=>showSwap('teacher',swapPane));}else hideSwap();if(state.teacherTab==='allocation')run(()=>showAllocation($('#teacher-allocation'),'teacher'));if(state.teacherTab==='studyroom')run(()=>showStudyroom($('#teacher-studyroom'),'teacher'));
   }
-  async function ensureFirstGradeCatalog(){
+  async function ensureClassCatalog(){
     const {meta}=state.teacherBoot,key=meta.revisions.schedule;
-    if(meta.classes['1']&&firstGradeCatalog?.key!==key)firstGradeCatalog={key,subjects:await call('roster',{query:{kind:'firstGradeSubjects'}},'teacher')};
+    if(classCatalog?.key!==key)classCatalog={key,grades:await call('roster',{query:{kind:'classSubjects'}},'teacher')};
   }
   function setRosterOptions(grade,subject='',section=''){
-    const boot=state.teacherBoot,sections=boot.sections.filter(s=>s.grade===grade);
-    const catalog=grade==='1'&&firstGradeCatalog?.key===boot.meta.revisions.schedule?firstGradeCatalog.subjects:[];
-    const subjects=grade==='1'?catalog.map(s=>s.subject):[...new Set(sections.map(s=>s.subject))].sort((a,b)=>a.localeCompare(b,'ko'));
-    const choices=grade==='1'?(catalog.find(s=>s.subject===subject)?.classes||[]).filter(n=>boot.meta.classes['1']?.includes(n)).map(n=>({value:n,label:n+'반'})):sections.filter(s=>s.subject===subject).map(s=>({value:s.id,label:s.code}));
-    $('label[for="roster-section"]').textContent=grade==='1'?'학급':'분반';
+    const boot=state.teacherBoot,sections=boot.sections.filter(s=>grade!=='1'&&s.grade===grade);
+    const catalog=classCatalog?.key===boot.meta.revisions.schedule?classCatalog.grades[grade]||[]:[];
+    const subjects=[...new Set([...catalog.map(s=>s.subject),...sections.map(s=>s.subject)])].sort((a,b)=>a.localeCompare(b,'ko'));
+    const classes=(catalog.find(s=>s.subject===subject)?.classes||[]).filter(n=>boot.meta.classes[grade]?.includes(n));
+    const electives=sections.filter(s=>s.subject===subject);
+    const choices=[...classes.map(n=>({value:grade==='1'?n:'class:'+n,label:n+'반'})),...electives.map(s=>({value:'section:'+s.id,label:s.code}))];
+    $('label[for="roster-section"]').textContent=grade==='1'||classes.length&&!electives.length?'학급':classes.length?'학급·분반':'분반';
     $('#roster-subject').innerHTML=options(subjects,subject,'선택');
     $('#roster-section').innerHTML=options(choices,section,'선택');
   }
@@ -169,7 +171,7 @@
     }
     useMeta(state.admin.meta);await ensureAdminTab(state.adminTab);renderAdmin();
   }
-  function renderAdmin(){if(!token('admin')){renderLogin('admin');return;}const tabs=[['students','학생'],['sections','선택분반'],['allocation','이동수업 배치표'],['imports','자료 등록'],['links','수업 연결'],['settings','설정'],['history','변경 이력'],['classSwap','제출된 결보강'],...(state.admin.meta.features?.studyroom?[['studyroom','스터디룸']]:[])];app.innerHTML=head('관리자',state.adminTab==='allocation'?'':'<button data-action="refresh-admin">새로고침</button>')+'<div class="admin-layout"><nav class="admin-nav" aria-label="관리 메뉴">'+tabs.map(([v,l])=>'<button data-action="admin-tab" data-tab="'+v+'" '+(state.adminTab===v?'class="active" aria-current="page"':'')+'>'+l+'</button>').join('')+'</nav><div id="admin-content" class="admin-content"></div></div>';renderAdminContent();}
+  function renderAdmin(){if(!token('admin')){renderLogin('admin');return;}const tabs=[['students','학생'],['sections','선택분반'],['allocation','이동수업 배치표'],['imports','자료 등록'],['links','수업 연결'],['settings','설정'],['history','변경 이력'],['classSwap','제출된 결보강'],...(state.admin.meta.features?.studyroom?[['studyroom','스터디룸']]:[])];showScreen(head('관리자',state.adminTab==='allocation'?'':'<button data-action="refresh-admin">새로고침</button>')+'<div class="admin-layout"><nav class="admin-nav" aria-label="관리 메뉴">'+tabs.map(([v,l])=>'<button data-action="admin-tab" data-tab="'+v+'" '+(state.adminTab===v?'class="active" aria-current="page"':'')+'>'+l+'</button>').join('')+'</nav><div id="admin-content" class="admin-content"></div></div>',true);renderAdminContent();}
   function renderAdminContent(){const root=$('#admin-content');if(!root||!state.admin)return;if(state.adminTab==='allocation')run(()=>showAllocation(root,'admin'));if(state.adminTab==='classSwap')run(()=>showSwap('admin',root));if(state.adminTab==='studyroom')run(()=>showStudyroom(root,'admin'));if(state.adminTab==='students')renderStudents(root);if(state.adminTab==='sections')renderSections(root);if(state.adminTab==='imports')renderImports(root);if(state.adminTab==='links')renderLinks(root);if(state.adminTab==='settings')renderSettings(root);if(state.adminTab==='history')renderHistory(root);}
   function renderStudents(root){const f=state.filters;root.innerHTML='<div class="filters">'+select('filter-grade',['1','2','3'],f.grade,'학년')+select('filter-class',Array.from(new Set(state.admin.store.students.filter(s=>!f.grade||s.grade===f.grade).map(s=>s.classNum))).sort((a,b)=>a-b),f.classNum,'학급')+select('filter-status',['재학','전출','자퇴','휴학','졸업'],f.status,'학적')+input('filter-search',f.search,'placeholder="이름·학번 검색" aria-label="학생 검색"')+'<button class="primary" data-action="new-student">추가</button></div><div id="student-table"></div>';renderStudentTable();}
   function renderStudentTable(){const f=state.filters,rows=state.admin.store.students.filter(s=>(!f.grade||s.grade===f.grade)&&(!f.classNum||s.classNum===f.classNum)&&(!f.status||s.status===f.status)&&(!f.search||s.name.includes(f.search)||studentNo(s).includes(f.search))).sort((a,b)=>Number(a.grade)-Number(b.grade)||Number(a.classNum)-Number(b.classNum)||Number(a.number)-Number(b.number));const max=Math.max(0,Math.ceil(rows.length/50)-1);state.page=Math.min(state.page,max);$('#student-table').innerHTML='<div class="table-scroll"><table class="data-table"><thead><tr><th>학번</th><th>이름</th><th>학적</th><th>수강</th><th>비고</th></tr></thead><tbody>'+rows.slice(state.page*50,state.page*50+50).map(s=>'<tr class="clickable" data-action="edit-student" data-id="'+esc(s.id)+'"><td>'+studentNo(s)+'</td><td>'+esc(s.name)+'</td><td>'+esc(s.status)+'</td><td>'+(s.choiceCount==null?Object.values(s.choices||{}).filter(Boolean).length:s.choiceCount)+'</td><td>'+esc(s.note)+'</td></tr>').join('')+'</tbody></table></div><div class="pager"><small>'+rows.length+'명</small><div><button class="quiet" data-action="student-page" data-delta="-1" '+(!state.page?'disabled':'')+'>이전</button><small>'+(state.page+1)+' / '+(max+1)+'</small><button class="quiet" data-action="student-page" data-delta="1" '+(state.page>=max?'disabled':'')+'>다음</button></div></div>';}
@@ -229,10 +231,10 @@
   }
   document.addEventListener('submit',e=>{const form=e.target.closest('form[data-form]');if(!form)return;e.preventDefault();const button=e.submitter||form.querySelector('button[type=submit],button.primary');run(async()=>{
     switch(form.dataset.form){
-      case 'login':{const role=form.dataset.role;try{const result=await call('login',{role,password:$('#password').value,initialize:true});sessionStorage.setItem('timetable.'+role,JSON.stringify({token:result.token,role:result.role,expiresAt:result.expiresAt}));if(role==='admin'){state.admin=result.initial;useMeta(state.admin.meta);await ensureAdminTab(state.adminTab);renderAdmin();}else{state.teacherBoot=result.initial;useMeta(state.teacherBoot.meta);if(state.teacherTab==='roster')await ensureFirstGradeCatalog();renderTeacher();}}catch(err){if($('#login-error'))$('#login-error').textContent=err.message;throw err;}break;}
+      case 'login':{const role=form.dataset.role;try{const result=await call('login',{role,password:$('#password').value,initialize:true});sessionStorage.setItem('timetable.'+role,JSON.stringify({token:result.token,role:result.role,expiresAt:result.expiresAt}));if(role==='admin'){state.admin=result.initial;useMeta(state.admin.meta);await ensureAdminTab(state.adminTab);renderAdmin();}else{state.teacherBoot=result.initial;useMeta(state.teacherBoot.meta);if(state.teacherTab==='roster')await ensureClassCatalog();renderTeacher();}}catch(err){if($('#login-error'))$('#login-error').textContent=err.message;throw err;}break;}
       case 'student':state.timetable=await call('student',{studentNumber:$('#student-number').value.trim()});useMeta(state.timetable.meta);$('#lookup-result').innerHTML=resultHTML();break;
       case 'teacher':state.teacherName=$('#teacher-name').value.trim();state.timetable=await call('teacher',{teacher:state.teacherName},'teacher');useMeta(state.timetable.meta);$('#lookup-result').innerHTML=resultHTML();break;
-      case 'roster':{const section=$('#roster-section').value,firstGrade=$('#roster-grade').value==='1';if(!section)throw Error('학년·과목·'+(firstGrade?'학급':'분반')+'을 선택하세요.');const query=firstGrade?{kind:'firstGrade',subject:$('#roster-subject').value,classNum:section}:{kind:'elective',sectionId:section};showRoster(await call('roster',{query},'teacher'));break;}
+      case 'roster':{const grade=$('#roster-grade').value,section=$('#roster-section').value;if(!section)throw Error('학년·과목·학급 또는 분반을 선택하세요.');const query=section.startsWith('section:')?{kind:'elective',sectionId:section.slice(8)}:{kind:'classSubject',grade,subject:$('#roster-subject').value,classNum:grade==='1'?section:section.slice(6)};showRoster(await call('roster',{query},'teacher'));break;}
       case 'batch':{const grade=$('#batch-grade').value,classNum=$('#batch-class').value;if(!grade||!classNum)throw Error('학년과 학급을 선택하세요.');const r=await call('classBatch',{grade,classNum},'teacher');if(!r.timetables.length)throw Error('해당 학급에 학생이 없습니다.');let html='';for(let i=0;i<r.timetables.length;i+=4)html+='<div class="batch-page">'+r.timetables.slice(i,i+4).map(t=>'<div class="batch-item">'+timetableHTML(t)+'</div>').join('')+'</div>';await print(html,'batch');break;}
       case 'save-student':{const old=state.editingStudent,choices=Object.assign({},old.choices);$('#student-choices').querySelectorAll('select').forEach(el=>choices[el.dataset.subject]=el.value);await mutation('saveStudent',{student:Object.assign({},old,{grade:$('#edit-grade').value,classNum:$('#edit-class').value,number:$('#edit-number').value,name:$('#edit-name').value,status:$('#edit-status').value,note:$('#edit-note').value,choices})});modal.close();toast('저장했습니다.');break;}
       case 'save-section':await mutation('saveSection',{section:Object.assign({},state.editingSection,{grade:$('#sec-grade').value,subject:$('#sec-subject').value,code:$('#sec-code').value,shortName:$('#sec-short').value,room:$('#sec-room').value})});modal.close();toast('저장했습니다.');break;
@@ -247,7 +249,7 @@
       case 'close-modal':modal.close();break;
       case 'password-dialog':passwordDialog(el.dataset.role);break;
       case 'logout':{const savedDrafts=Object.keys(sessionStorage).some(key=>key.startsWith(swapCachePrefix));if((savedDrafts||swapDirty()||allocationDirty())&&!confirm(savedDrafts?'이 탭의 결보강 임시저장본과 작성 중인 내용을 지우고 로그아웃할까요?':'저장하지 않은 내용을 버리고 로그아웃할까요?'))return;allocationViews.forEach(v=>v.destroy());allocationViews.clear();studyroomViews.forEach(v=>v.dispose());studyroomViews.clear();const role=state.route==='admin'?'admin':'teacher';await call('logout',{},role);discardSwap();forgetDraft();state.timetable=null;state.roster=null;state.editingStudent=null;state.editingSection=null;if(modal.open)modal.close();modal.innerHTML='';sessionStorage.removeItem('timetable.admin');sessionStorage.removeItem('timetable.teacher');if(role==='teacher'&&session('admin'))sessionStorage.removeItem('timetable.admin');state.teacherBoot=null;state.admin=null;state.adminTab='students';await renderRoute();break;}
-      case 'teacher-tab':if(el.dataset.tab==='roster')await ensureFirstGradeCatalog();state.teacherTab=el.dataset.tab;renderTeacher();break;
+      case 'teacher-tab':if(el.dataset.tab==='roster')await ensureClassCatalog();state.teacherTab=el.dataset.tab;renderTeacher();break;
       case 'admin-tab':state.adminTab=el.dataset.tab;if(state.admin.reloadAfterSwap){await loadAdmin();delete state.admin.reloadAfterSwap;}else{await ensureAdminTab(state.adminTab);renderAdmin();}break;
       case 'refresh-admin':await loadAdmin(true);toast('새로고침했습니다.');break;
       case 'new-student':await editStudent();break;

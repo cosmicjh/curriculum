@@ -36,7 +36,9 @@ try{
  });
  await step('five XLSX file registration and preview retain original UI and protect edits',async()=>{
   await button('admin-tab').filter({hasText:'자료 등록'}).click();await idle();await page.evaluate(()=>TTAssets.load('xlsx'));
-  const files=await page.evaluate(store=>{const book=rows=>{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Sheet1');return Array.from(new Uint8Array(XLSX.write(wb,{type:'array',bookType:'xlsx'})));};return {teacher:book(store.teacherRows),sections:book([['학년','선택반명','교과명','수업교실','축약과목명'],...store.sections.map(s=>[s.grade,s.code,s.subject,s.room,s.shortName])]),students:book([['학년','반','번호','이름','가상과학'],['3','1','1','가상학생하나','A1']]),extra:book([['학년','반','번호','이름','가상언어'],['3','1','1','가상학생하나','B1']]),grade2:book([['학년','반','번호','이름','가상선택'],['2','1','1','가상2','']])};},fixture());
+  const importFixture=fixture(),gradeTwoSlot=importFixture.teacherRows[2].indexOf('국어')+2;
+  importFixture.teacherRows[2][gradeTwoSlot]='수학';importFixture.teacherRows[3][gradeTwoSlot]='2-1';
+  const files=await page.evaluate(store=>{const book=rows=>{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Sheet1');return Array.from(new Uint8Array(XLSX.write(wb,{type:'array',bookType:'xlsx'})));};return {teacher:book(store.teacherRows),sections:book([['학년','선택반명','교과명','수업교실','축약과목명'],...store.sections.map(s=>[s.grade,s.code,s.subject,s.room,s.shortName])]),students:book([['학년','반','번호','이름','가상과학'],['3','1','1','가상학생하나','A1']]),extra:book([['학년','반','번호','이름','가상언어'],['3','1','1','가상학생하나','B1']]),grade2:book([['학년','반','번호','이름','가상선택'],['2','1','1','가상2','']])};},importFixture);
   const file=(name,data)=>({name,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(data)});
   await page.locator('#import-teacher').setInputFiles(file('teacher.xlsx',files.teacher));await page.locator('#import-elective').setInputFiles(file('sections.xlsx',files.sections));await page.locator('#import-students').setInputFiles([file('grade2.xlsx',files.grade2),file('grade3-3.xlsx',files.students),file('grade3-2.xlsx',files.extra)]);await page.locator('form[data-form=preview-import] button').click();await button('commit-import').waitFor();await idle();assert(!(await button('commit-import').isDisabled()));
   let attempted=0;await page.route('**/api/commitImport',async r=>{attempted++;await r.abort('failed');});await button('commit-import').click();await idle();assert.equal(attempted,1);assert.match(await page.locator('#toast').innerText(),/입력 자료는 유지/);assert.equal(await page.locator('#import-students').evaluate(el=>el.files.length),3);assert(!(await button('commit-import').isDisabled()));await page.unroute('**/api/commitImport');
@@ -51,8 +53,34 @@ try{
  await step('teacher timetable cell roster, course roster and A4 four-up class print',async()=>{
   for(let n=3;n<=5;n++)assert((await h.mutation('saveStudent',{student:{grade:'3',classNum:'1',number:String(n),name:'가상인쇄'+n,status:'재학',note:'',choices:{가상과학:'A1'}}},admin.cookie)).ok);
   await page.goto(url+'/teacher.html');await idle();await page.locator('#teacher-name').fill('가상교사');await page.locator('form[data-form=teacher] button').click();await page.locator('.cell-button').first().waitFor();await idle();await page.locator('.cell-button').filter({hasText:'가상과학'}).first().click();await page.locator('.roster-table').waitFor();await idle();assert((await page.locator('.roster-table').innerText()).includes('브라우저보호값'));await button('print-roster').click();await idle();await page.evaluate(()=>dispatchEvent(new Event('afterprint')));await button('close-modal').click();
-  await button('teacher-tab').filter({hasText:'교과 명렬표'}).click();await page.locator('#roster-grade').selectOption('3');await page.locator('#roster-subject').selectOption('가상과학');await page.locator('#roster-section').selectOption('section-one');await button('teacher-tab').filter({hasText:'시간표',exact:true}).click();await button('teacher-tab').filter({hasText:'교과 명렬표'}).click();assert.equal(await page.locator('#roster-grade').inputValue(),'3');assert.equal(await page.locator('#roster-subject').inputValue(),'가상과학');assert.equal(await page.locator('#roster-section').inputValue(),'section-one');await page.locator('form[data-form=roster] button').click();await page.locator('.roster-table').waitFor();await idle();await button('close-modal').click();
+  await button('teacher-tab').filter({hasText:'교과 명렬표'}).click();await page.locator('#roster-grade').selectOption('3');await page.locator('#roster-subject').selectOption('가상과학');await page.locator('#roster-section').selectOption('section:section-one');await button('teacher-tab').filter({hasText:'시간표',exact:true}).click();await button('teacher-tab').filter({hasText:'교과 명렬표'}).click();assert.equal(await page.locator('#roster-grade').inputValue(),'3');assert.equal(await page.locator('#roster-subject').inputValue(),'가상과학');assert.equal(await page.locator('#roster-section').inputValue(),'section:section-one');await page.locator('form[data-form=roster] button').click();await page.locator('.roster-table').waitFor();await idle();await button('close-modal').click();
+  await page.evaluate(()=>{window.print=()=>{};});
+  for(const [grade,subject,name] of [['2','수학','가상2'],['3','국어','브라우저보호값']]){
+   await page.locator('#roster-grade').selectOption(grade);await page.locator('#roster-subject').selectOption(subject);
+   assert.equal(await page.locator('label[for=roster-section]').textContent(),'학급');
+   await page.locator('#roster-section').selectOption('class:1');
+   await page.locator('form[data-form=roster] button').click();await page.locator('.roster-table').waitFor();await idle();
+   assert.match(await page.locator('.roster-table').textContent(),new RegExp(name));
+   await button('print-roster').click();await idle();
+   assert.match(await page.locator('#print-root').textContent(),new RegExp(grade+'학년 1반'));
+   await page.evaluate(()=>dispatchEvent(new Event('afterprint')));await button('close-modal').click();
+  }
   await button('teacher-tab').filter({hasText:'학급 인쇄'}).click();await page.locator('#batch-grade').selectOption('3');await page.locator('#batch-class').selectOption('1');await page.locator('form[data-form=batch] button').click();await page.locator('.batch-page').first().waitFor({state:'attached'});await idle();assert.equal(await page.locator('.batch-item').count(),5);assert.equal(await page.locator('.batch-page').count(),2);assert.equal(await page.locator('.batch-page').first().locator('.batch-item').count(),4);await page.emulateMedia({media:'print'});assert.equal(await page.locator('.batch-page').first().evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),2);assert.equal(await page.locator('.batch-page').first().evaluate(el=>getComputedStyle(el).gridTemplateRows.split(' ').length),2);await page.locator('.batch-page').first().screenshot({path:'test-results/print-batch.png'});await page.emulateMedia({media:'screen'});await page.evaluate(()=>dispatchEvent(new Event('afterprint')));
+ });
+ await step('home menu keeps its layout while the authenticated teacher workspace loads',async()=>{
+  await page.locator('#header .brand').click();
+  const menu=page.getByRole('navigation',{name:'사용자 메뉴'});await menu.waitFor();await idle();
+  const before=await menu.boundingBox();
+  let release,requested;
+  const gate=new Promise(resolve=>{release=resolve;}),requestStarted=new Promise(resolve=>{requested=resolve;});
+  await page.route('**/api/teacherBootstrap',async route=>{requested();await gate;await route.continue();},{times:1});
+  try{
+   await menu.getByRole('link',{name:'교사',exact:true}).click();await requestStarted;
+   assert(!await page.evaluate(()=>document.body.classList.contains('workspace')));
+   assert.deepEqual(await menu.boundingBox(),before);
+  }finally{release();}
+  await page.getByRole('navigation',{name:'교사 메뉴'}).waitFor();await idle();
+  assert(await page.evaluate(()=>document.body.classList.contains('workspace')));
  });
  await step('logout revokes server session and protected page requires login again',async()=>{await button('logout').click();await page.locator('#password').waitFor();await idle();const r=await page.evaluate(async()=>{const r=await fetch('/api/teacherBootstrap',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});return r.status;});assert.equal(r,401);});
  assert.deepEqual(errors,[]);await writeFile('test-results/browser.json',JSON.stringify({steps,errors},null,2)+'\n');

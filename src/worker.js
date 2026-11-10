@@ -59,23 +59,28 @@ async function read(db,ctx,req){
  }
  if(a==='roster'){
   const q=req.query||{};
-  if(q.kind==='firstGradeSubjects'||q.kind==='firstGrade'){
+  if(['classSubjects','classSubject','firstGradeSubjects','firstGrade'].includes(q.kind)){
    const source=await S.schedule(db,ctx);
-   if(!source.firstGradeSubjects){
-    const subjects=new Map();
+   if(!source.classSubjects){
+    const byGrade={1:new Map(),2:new Map(),3:new Map()};
     for(const lesson of Object.values(source.rt.bindings)){
-     if(!lesson.rawSubject)continue;
-     for(const key of lesson.classKeys)if(/^1-[1-9]\d?$/.test(key)){
+     if(!lesson.rawSubject||lesson.period>Number(ctx.settings.periods[lesson.day]||0))continue;
+     for(const key of lesson.classKeys)if(/^[1-3]-[1-9]\d?$/.test(key)){
+      const grade=key[0],subjects=byGrade[grade];
+      if(grade!=='1'&&(lesson.section||lesson.candidates.length))continue;
       if(!subjects.has(lesson.rawSubject))subjects.set(lesson.rawSubject,new Set());
       subjects.get(lesson.rawSubject).add(key.slice(2));
      }
     }
-    source.firstGradeSubjects=[...subjects].map(([subject,classes])=>({subject,classes:[...classes].sort((a,b)=>a-b)})).sort((a,b)=>a.subject.localeCompare(b.subject,'ko'));
+    source.classSubjects=Object.fromEntries(Object.entries(byGrade).map(([grade,subjects])=>[grade,
+     [...subjects].map(([subject,classes])=>({subject,classes:[...classes].sort((a,b)=>a-b)})).sort((a,b)=>a.subject.localeCompare(b.subject,'ko'))]));
    }
-   if(q.kind==='firstGradeSubjects')return source.firstGradeSubjects;
-   if(!source.firstGradeSubjects.some(s=>s.subject===q.subject&&s.classes.includes(q.classNum)))Auth.fail(400,'INVALID_REQUEST','1학년 과목과 학급을 확인하세요.');
-   const students=await db.all("SELECT grade,class_num AS classNum,number,name,note FROM students WHERE term_id=? AND status='재학' AND grade='1' AND class_num=? ORDER BY CAST(number AS INTEGER)",ctx.term,q.classNum);
-   return {title:q.subject,detail:'1학년 '+q.classNum+'반',students};
+   if(q.kind==='classSubjects')return source.classSubjects;
+   if(q.kind==='firstGradeSubjects')return source.classSubjects['1'];
+   const grade=q.kind==='firstGrade'?'1':String(q.grade);
+   if(!['1','2','3'].includes(grade)||!source.classSubjects[grade].some(s=>s.subject===q.subject&&s.classes.includes(q.classNum)))Auth.fail(400,'INVALID_REQUEST','학년·과목·학급을 확인하세요.');
+   const students=await db.all("SELECT grade,class_num AS classNum,number,name,note FROM students WHERE term_id=? AND status='재학' AND grade=? AND class_num=? ORDER BY CAST(number AS INTEGER)",ctx.term,grade,q.classNum);
+   return {title:q.subject,detail:grade+'학년 '+q.classNum+'반',students};
   }
   if(q.kind==='elective'){
    const c=await db.first('SELECT * FROM sections WHERE term_id=? AND id=?',ctx.term,q.sectionId||'');if(!c)Auth.fail(404,'NOT_FOUND','분반 정보를 찾을 수 없습니다.');

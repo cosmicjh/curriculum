@@ -127,8 +127,15 @@ try{
   await note.fill('가상 비고 수정');await sr.locator('dialog button.primary').click();await queryIdle();
   await results.locator('[data-sr=readNote]').click();assert.equal(await note.inputValue(),'가상 비고 수정');
   await sr.locator('dialog button[value=delete]').click();await queryIdle();
-  assert.equal(await results.locator('[data-sr=readNote]').count(),0);
+  const writeNote=results.getByRole('button',{name:'30101 가상학생하나 비고 작성'});
+  assert.equal(await writeNote.count(),1);
   assert.equal((await h.sql("SELECT note FROM sr_attendance WHERE student_number='30101'")).results[0].note,'');
+  await writeNote.click();
+  assert.equal(await note.inputValue(),'');
+  assert.equal(await sr.locator('dialog button[value=delete]').count(),0);
+  await note.fill('일반 교사 신규 비고');await sr.locator('dialog button.primary').click();await queryIdle();
+  assert.equal(await results.getByRole('button',{name:'30101 가상학생하나 비고 읽기'}).count(),1);
+  assert.equal((await h.sql("SELECT note FROM sr_attendance WHERE student_number='30101'")).results[0].note,'일반 교사 신규 비고');
   await sr.getByRole('button',{name:'전체 학생',exact:true}).click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-person]').isHidden(),true);
   await day.click();await queryIdle();
@@ -137,6 +144,7 @@ try{
  await step('administrator schedule form is functional, preserve shared roster editing',async()=>{
   const manager=await ctx.newPage();await manager.goto(url+'/admin.html');await manager.locator('#password').fill('1234');await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=studyroom]').click();const m=manager.locator('.studyroom');await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');await m.locator('[data-sr=view][data-view=settings]').click();await m.locator('[data-sr-form=schedule]').waitFor();await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal(await m.locator('.sr-rule').count(),1);
   assert.equal(await m.locator('[data-sr-form=staff]').count(),0);
+  assert.equal(await m.getByRole('button',{name:'이용 학생',exact:true}).count(),0);
   await m.locator('[data-sr-form=schedule] button:not([type=button])').click();await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal((await h.sql('SELECT count(*) n FROM sr_schedules')).results[0].n,2);
   await manager.screenshot({path:'test-results/studyroom/settings-desktop.png',fullPage:true});await manager.close();
  });
