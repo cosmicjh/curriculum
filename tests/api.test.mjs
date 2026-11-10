@@ -67,6 +67,7 @@ test('integrated allocation uses the existing workspace, role, and independent t
 });
 test('Workers + actual local D1: authorization, migration, edits, term isolation, backup, concurrent writes',async t=>{
  const h=await harness();t.after(()=>h.close());const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
+ const studentCookie=(await h.login('student')).cookie;
  const samples=[];
  await t.test('anonymous access, teacher/admin boundaries, strict Origin and cookies',async()=>{
   assert.equal((await h.api('adminBootstrap')).status,401);assert.equal((await h.api('adminBootstrap',{},teacher)).status,401);
@@ -77,10 +78,16 @@ test('Workers + actual local D1: authorization, migration, edits, term isolation
  await t.test('legacy JSON backup import, counts and exact timetable/roster parity',async()=>{
   const r=await h.mutation('restore',{backup:backup()},admin);assert(r.ok,JSON.stringify(r));
   for(const [table,count] of [['students',2],['sections',3],['assignments',3],['teachers',1],['lessons',35]])assert.equal((await h.sql('SELECT count(*) AS n FROM '+table)).results[0].n,count);
-  const s=await h.api('student',{studentNumber:'30101'});assert(s.ok,JSON.stringify(s));assert.deepEqual(s.data.cells,Core.studentTimetable(Core.runtime(fixture()),fixture().students[0]).cells);assert.equal(s.data.name,'가상학생하나');assert(!JSON.stringify(s.data).includes('가상학생둘'));assert(!('id' in s.data));
+  const s=await h.api('student',{studentNumber:'30101'},studentCookie);assert(s.ok,JSON.stringify(s));assert.deepEqual(s.data.cells,Core.studentTimetable(Core.runtime(fixture()),fixture().students[0]).cells);assert.equal(s.data.name,'가상학생하나');assert(!JSON.stringify(s.data).includes('가상학생둘'));assert(!('id' in s.data));
   const r2=await h.api('roster',{query:{kind:'elective',sectionId:'section-one'}},teacher);assert.deepEqual(r2.data,Core.roster(Core.runtime(fixture()),{kind:'elective',sectionId:'section-one'}));
   assert.equal(s.data.cells.filter(c=>c.subject==='가상과학').length,3);assert(s.data.cells.some(c=>!c.subject));
   const exported=await h.mutation('backup',{},admin);assert.deepEqual(summarize(exported.data.result.backup),summarize(backup()));
+ });
+ await t.test('switching roles replaces the browser session',async()=>{
+  const fresh=await h.login('admin'),student=await h.login('student','1234',fresh.cookie);
+  assert.equal((await h.api('adminBootstrap',{},fresh.cookie)).status,401);
+  assert.equal((await h.api('student',{studentNumber:'30101'},student.cookie)).status,200);
+  assert.equal((await h.api('adminBootstrap',{},student.cookie)).status,401);
  });
  await t.test('failed login revokes this browser\'s previous authenticated session',async()=>{
   const fresh=await h.login('teacher'),p=(await h.api('passwordParameters',{role:'teacher'})).data;
@@ -90,7 +97,7 @@ test('Workers + actual local D1: authorization, migration, edits, term isolation
  await t.test('single student update, stable ID/source, transfer exclusion, unrelated rows untouched',async()=>{
   const detail=await h.api('adminStudent',{id:'student-one'},admin),other=(await h.sql("SELECT * FROM students WHERE id='student-two'")).results[0];edited={...detail.data.student,classNum:'2',number:'7',name:'웹수정학생',status:'전출',choices:{가상과학:'A2',가상언어:'B1'}};
   const r=await h.mutation('saveStudent',{student:edited},admin);assert(r.ok,JSON.stringify(r));assert.equal(r.data.result.id,'student-one');assert.equal(r.data.result.sourceKey,'3-1-1');assert(r.data.result.manualFields.includes('choice:가상과학'));assert.deepEqual((await h.sql("SELECT * FROM students WHERE id='student-two'")).results[0],other);
-  assert.equal((await h.api('student',{studentNumber:'30207'})).status,404);assert.equal((await h.api('roster',{query:{kind:'elective',sectionId:'section-two'}},teacher)).data.students.length,1);
+  assert.equal((await h.api('student',{studentNumber:'30207'},studentCookie)).status,404);assert.equal((await h.api('roster',{query:{kind:'elective',sectionId:'section-two'}},teacher)).data.students.length,1);
   assert.equal((await h.api('classBatch',{grade:'3',classNum:'2'},teacher)).data.timetables.length,0);
  });
  await t.test('re-import protects web fields, status and assignment; teacher-only import keeps students',async()=>{
@@ -107,13 +114,13 @@ test('Workers + actual local D1: authorization, migration, edits, term isolation
  });
  await t.test('student creation and section changes update only related assignments',async()=>{
   const created=await h.mutation('saveStudent',{student:{grade:'2',classNum:'1',number:'1',name:'추가가상',status:'재학',note:'',choices:{}}},admin);assert(created.ok,JSON.stringify(created));const id=created.data.result.id;
-  assert.equal((await h.api('student',{studentNumber:'20101'})).data.name,'추가가상');
+  assert.equal((await h.api('student',{studentNumber:'20101'},studentCookie)).data.name,'추가가상');
   const section=(await h.api('adminSections',{},admin)).data.sections.find(s=>s.id==='section-two');
   const renamed=await h.mutation('saveSection',{section:{...section,code:'C2'}},admin);assert(renamed.ok,JSON.stringify(renamed));
   assert.equal((await h.api('adminStudent',{id:'student-two'},admin)).data.student.choices.가상과학,'C2');assert.equal((await h.api('adminStudent',{id:'student-one'},admin)).data.student.choices.가상과학,'C2');
   assert((await h.mutation('saveSection',{section:{...renamed.data.result,code:'A2'}},admin)).ok);
   // Retain the newly added student and verify status transition as well.
-  const detail=(await h.api('adminStudent',{id},admin)).data.student;assert((await h.mutation('saveStudent',{student:{...detail,status:'휴학'}},admin)).ok);assert.equal((await h.api('student',{studentNumber:'20101'})).status,404);
+  const detail=(await h.api('adminStudent',{id},admin)).data.student;assert((await h.mutation('saveStudent',{student:{...detail,status:'휴학'}},admin)).ok);assert.equal((await h.api('student',{studentNumber:'20101'},studentCookie)).status,404);
  });
  await t.test('manual lesson links and time blocks feed teacher and student timetables',async()=>{
   const o={teacher:'가상교사',day:'월',period:2,sectionId:'section-two'};

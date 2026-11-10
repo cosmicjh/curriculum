@@ -1,8 +1,8 @@
 (function(){
   'use strict';
   const $=s=>document.querySelector(s), esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const days=['월','화','수','목','금'];
-  const state={meta:null,teacherBoot:null,timetable:null,roster:null,admin:null,adminTab:'students',teacherTab:'timetable',page:0,filters:{grade:'',classNum:'',status:'',search:''},importPayload:null,importPreview:null,route:'home'};
+  const days=['월','화','수','목','금'],roles={student:'학생',teacher:'교사',admin:'관리자'};
+  const state={meta:null,teacherBoot:null,timetable:null,roster:null,admin:null,adminTab:'sectionAssignment',teacherTab:'timetable',page:0,filters:{grade:'',classNum:'',status:'',search:''},importPayload:null,importPreview:null,route:'home'};
   // Drafts remain in memory only, scoped to term/form/entity. Never retain passwords.
   const formDrafts=new Map();
   function draftKey(form){return form.dataset.draftKey||(form.dataset.draftKey=[state.meta?.term||'',form.dataset.form,form.dataset.form==='save-student'?(state.editingStudent?.id||'new'):form.dataset.form==='save-section'?(state.editingSection?.id||'new'):''].join('|'));}
@@ -17,6 +17,49 @@
   const swapViews=new Map();
   const coursePane=document.createElement('section'),courseFrames=new Map();
   coursePane.id='course-pane';coursePane.hidden=true;app.after(coursePane);
+  const sectionPane=document.createElement('section');sectionPane.id='section-assignment-pane';sectionPane.hidden=true;app.after(sectionPane);
+  let sectionFrame=null;
+  function showSectionAssignment(){
+    if(!sectionFrame){
+      sectionFrame=document.createElement('iframe');sectionFrame.title='분반배정';
+      sectionFrame.src='./section-assignment/view.html?v='+encodeURIComponent(window.TIMETABLE_CONFIG?.assetVersion||'1');
+      sectionPane.append(sectionFrame);
+    }
+    sectionPane.hidden=false;document.body.classList.add('section-assignment-workspace');
+  }
+  window.sectionAssignmentConnect=source=>{
+    if(sectionFrame?.contentWindow!==source||state.route!=='admin'||!token('admin'))return null;
+    return {
+      resize:height=>{if(sectionFrame?.contentWindow===source&&Number.isFinite(height))sectionFrame.style.height=Math.ceil(height)+'px';},
+      loadXlsx:()=>TTAssets.load('xlsx'),
+      importHours:data=>run(()=>openAssignmentHours(source,data),null,false),
+      previewStudents:data=>run(()=>previewAssignedStudents(source,data))
+    };
+  };
+  function requireSectionAssignment(source){
+    if(sectionFrame?.contentWindow!==source||state.route!=='admin'||state.adminTab!=='sectionAssignment'||!token('admin'))throw Error('관리자 메뉴에서 분반배정을 열어 주세요.');
+  }
+  async function openAssignmentHours(source,data){
+    requireSectionAssignment(source);
+    state.adminTab='hours';renderAdmin();
+    const frame=courseFrames.get('admin');
+    const open=()=>run(async()=>{
+      if(state.route!=='admin'||state.adminTab!=='hours'||courseFrames.get('admin')!==frame)return;
+      const receive=frame.contentWindow?.openSectionAssignmentHours;
+      if(!receive)throw Error('시수배당표가 준비되면 분반배정에서 다시 보내 주세요.');
+      await receive(data);
+    },null,false);
+    if(frame.contentWindow?.openSectionAssignmentHours)await open();
+    else frame.addEventListener('load',open,{once:true});
+  }
+  async function previewAssignedStudents(source,students){
+    requireSectionAssignment(source);
+    const payload={format:'timetable-import',assignmentOnly:true,students};
+    const preview=await call('previewImport',{payload},'admin');
+    state.importPayload=payload;state.importPreview=preview;state.preserveManual=true;
+    openDialog(modalHead('학생 배정 미리보기')+'<p>'+esc(state.admin.store.term)+'학기 · 배정 대상 '+students.length+'명</p><div id="import-preview" data-assignment-preview></div>',true);
+    renderImportPreview(preview);
+  }
   function courseNotice(message){openDialog(modalHead('시수배당표')+'<p>'+esc(message)+'</p><div class="form-footer"><button data-action="close-modal">확인</button></div>');}
   function hideCourse(){coursePane.hidden=true;document.body.classList.remove('course-workspace');}
   function showCourse(role){
@@ -96,9 +139,9 @@
     target.className='print-root';target.replaceChildren(style,host);await document.fonts.ready;
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));window.print();
   }
-  window.addEventListener('beforeunload',event=>{if(swapDirty()||allocationDirty()||[...courseFrames.values()].some(frame=>frame.contentWindow?.hasUnsavedCourseChanges?.())){event.preventDefault();event.returnValue='';}});
+  window.addEventListener('beforeunload',event=>{if(swapDirty()||allocationDirty()||sectionFrame?.contentWindow?.hasSectionAssignmentWork?.()||[...courseFrames.values()].some(frame=>frame.contentWindow?.hasUnsavedCourseChanges?.())){event.preventDefault();event.returnValue='';}});
 
-  const surfaces=[$('#header'),app,modal,swapPane,coursePane],lockedControls=new Map();
+  const surfaces=[$('#header'),app,modal,swapPane,coursePane,sectionPane],lockedControls=new Map();
   let loadingFocus=null;
   function lockControls(){surfaces.forEach(root=>root.querySelectorAll('input,select,textarea,button').forEach(el=>{if(!lockedControls.has(el))lockedControls.set(el,el.disabled);el.disabled=true;}));}
   const loadingObserver=new MutationObserver(()=>{if(busyCount)lockControls();});
@@ -112,6 +155,7 @@
   function route(){const h=location.hash.match(/^#\/(home|student|teacher|admin)/);return h?h[1]:(document.body.dataset.page||'home');}
   function href(page){return '#/'+page;}
   function session(role){try{const s=JSON.parse(sessionStorage.getItem('timetable.'+role)||'null');if(s&&s.expiresAt>Date.now()&&TTApi.hasSession(role))return s;}catch(e){}sessionStorage.removeItem('timetable.'+role);return null;}
+  function clearSessions(){for(const role of Object.keys(roles))sessionStorage.removeItem('timetable.'+role);}
   function token(role){return (session(role)||role==='teacher'&&session('admin')||{}).token||'';}
   async function call(action,args={},role){const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','backup','restore','changePassword']);const viewTerm=role==='admin'?state.admin?.store.term:role==='teacher'?state.teacherBoot?.meta.term:undefined;return TTApi.request(action,{...(!['adminBootstrap','teacherBootstrap','login','logout'].includes(action)&&viewTerm?{viewTerm}:{}),...(writes.has(action)?{expectedTerm:state.admin?.store.term,expectedRevision:state.admin?.meta.revision}:{}),...args});}
   function toast(message){$('#toast').textContent=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').textContent='',5500);}
@@ -120,19 +164,23 @@
   function field(label,id,control,wide=false){return '<div class="field'+(wide?' wide':'')+'"><label for="'+id+'">'+esc(label)+'</label>'+control+'</div>';}
   function input(id,value='',extra=''){return '<input id="'+id+'" value="'+esc(value)+'" '+extra+'>';}
   function select(id,values,selected,empty){return '<select id="'+id+'">'+options(values,selected,empty)+'</select>';}
-  async function run(fn,button,block=true){if(block&&++busyCount===1)setLoading(true);try{return await fn();}catch(e){if(e.code==='TERM_CHANGED'){rememberForms();if(modal.open)modal.close();modal.innerHTML='';state.teacherBoot=null;state.admin=null;state.timetable=null;state.roster=null;await renderRoute();}if(e.code==='AUTH_REQUIRED'){rememberForms();if(modal.open)modal.close();modal.innerHTML='';state.timetable=null;state.roster=null;sessionStorage.removeItem('timetable.admin');sessionStorage.removeItem('timetable.teacher');state.teacherBoot=null;state.admin=null;renderLogin(state.route==='admin'?'admin':'teacher');}toast(e.message||'처리하지 못했습니다.');}finally{if(block){busyCount--;if(!busyCount){setLoading(false);if(state.route!==route())run(renderRoute);}}}}
+  async function run(fn,button,block=true){if(block&&++busyCount===1)setLoading(true);try{return await fn();}catch(e){if(e.code==='TERM_CHANGED'){rememberForms();if(modal.open)modal.close();modal.innerHTML='';state.teacherBoot=null;state.admin=null;state.timetable=null;state.roster=null;await renderRoute();}if(e.code==='AUTH_REQUIRED'){rememberForms();if(modal.open)modal.close();modal.innerHTML='';state.timetable=null;state.roster=null;clearSessions();sectionPane.replaceChildren();sectionFrame=null;coursePane.replaceChildren();courseFrames.clear();state.teacherBoot=null;state.admin=null;renderLogin(roles[state.route]?state.route:'');}toast(e.message||'처리하지 못했습니다.');}finally{if(block){busyCount--;if(!busyCount){setLoading(false);if(state.route!==route())run(renderRoute);}}}}
   function header(){
     const settings=state.meta&&state.meta.settings||{}, school=settings.schoolName||(window.TIMETABLE_CONFIG||{}).schoolName||'개인 시간표';
     document.title=(settings.title||'개인 시간표')+' · '+school;
     const term=state.meta?'<span class="term-label">'+esc(settings.academicYear+'학년도 '+settings.semester+'학기')+'</span>':'';
-    $('#header').innerHTML='<div class="school-heading"><a class="brand" href="'+href('home')+'">'+esc(school)+'</a>'+term+'</div><div class="top-actions">'+(state.route!=='home'?'<a class="quiet" href="'+href('home')+'">처음</a>':'')+(['teacher','admin'].includes(state.route)&&token(state.route)?'<button class="quiet" data-action="logout">로그아웃</button>':'')+'</div>';
+    $('#header').innerHTML='<div class="school-heading"><a class="brand" href="'+href('home')+'">'+esc(school)+'</a>'+term+'</div><div class="top-actions">'+(state.route!=='home'?'<a class="quiet" href="'+href('home')+'">처음</a>':'')+(roles[state.route]&&token(state.route)?'<button class="quiet" data-action="logout">로그아웃</button>':'')+'</div>';
   }
   function head(title,actions=''){return '<div class="view-head"><div>'+(title?'<h1>'+esc(title)+'</h1>':'')+'</div>'+actions+'</div>';}
-  function showScreen(html,workspace=false){hideCourse();app.innerHTML=html;document.body.classList.toggle('workspace',workspace);}
-  function renderHome(){
-    showScreen('<div class="landing"><nav class="entry-list" aria-label="사용자 메뉴"><a class="entry" href="'+href('student')+'">학생</a><a class="entry" href="'+href('teacher')+'">교사</a><a class="entry" href="'+href('admin')+'">관리자</a></nav></div>');
+  function showScreen(html,workspace=false){hideCourse();sectionPane.hidden=true;document.body.classList.remove('section-assignment-workspace');app.innerHTML=html;document.body.classList.toggle('workspace',workspace);}
+  function renderLogin(role=''){
+    hideSwap();header();
+    const choices=Object.entries(roles).map(([value,label])=>({value,label}));
+    showScreen('<div class="auth"><h1>로그인</h1><form data-form="login">'+
+      field('사용자 유형','login-role','<select id="login-role" required'+(!role?' autofocus':'')+'>'+options(choices,role,'선택하세요')+'</select>')+
+      field('비밀번호','password','<input id="password" type="password" required maxlength="128" autocomplete="current-password"'+(role?' autofocus':'')+'>')+
+      '<p id="login-error" class="error" role="alert" hidden></p><button class="primary" type="submit">로그인</button></form></div>');
   }
-  function renderLogin(role){hideSwap();header();const title=role==='admin'?'관리자':'교사';showScreen('<div class="auth"><h1>'+title+'</h1><form data-form="login" data-role="'+role+'">'+field('비밀번호','password','<input id="password" type="password" required autocomplete="current-password" autofocus>')+'<p id="login-error" class="error" role="alert"></p><button class="primary" type="submit">입장</button></form><a class="back" href="'+href('home')+'">처음으로</a></div>');}
   function timetableHTML(tt){
     const name=tt.kind==='student'?tt.studentNumber+' '+tt.name:tt.name+' 선생님';
     let body='';for(let p=1;p<=7;p++){body+='<tr><td class="period">'+p+'</td>';days.forEach(d=>{const i=tt.cells.findIndex(c=>c.day===d&&c.period===p),c=tt.cells[i]||{},has=!!c.subject;const inner='<span class="subject">'+esc(c.subject)+(c.sectionCode?'<span class="split">'+esc(c.sectionCode)+'</span>':'')+'</span>'+(c.room?'<span class="room">'+esc(c.room)+'</span>':'')+(c.teachers?.length?'<span class="teachers">'+esc(c.teachers.join(', '))+'</span>':'');body+='<td class="'+(c.isElective?'elective ':'')+(c.warning?'warning':'')+'">'+(c.roster&&has?'<button class="cell-button tt-slot" data-action="cell-roster" data-cell="'+i+'" aria-label="'+esc(c.subject+' 명렬표')+'">'+inner+'</button>':has?'<span class="tt-slot">'+inner+'</span>':inner)+'</td>';});body+='</tr>';}
@@ -209,8 +257,8 @@
     }
     useMeta(state.admin.meta);await ensureAdminTab(state.adminTab);renderAdmin();
   }
-  function renderAdmin(){if(!token('admin')){renderLogin('admin');return;}const tabs=[['students','학생'],['hours','시수배당표'],['allocation','이동수업 배치표'],['classSwap','결보강'],...(state.admin.meta.features?.studyroom?[['studyroom','스터디룸']]:[]),['settings','설정']];showScreen(head('',['allocation','hours'].includes(state.adminTab)?'':'<button data-action="refresh-admin">새로고침</button>')+'<div class="admin-layout"><nav class="admin-nav" aria-label="관리 메뉴">'+tabs.map(([v,l])=>'<button data-action="admin-tab" data-tab="'+v+'" '+((state.adminTab===v||v==='settings'&&['links','imports','sections'].includes(state.adminTab))?'class="active" aria-current="page"':'')+'>'+l+'</button>').join('')+'</nav><div id="admin-content" class="admin-content"></div></div>',true);renderAdminContent();}
-  function renderAdminContent(){const root=$('#admin-content');if(!root||!state.admin)return;if(state.adminTab==='hours')showCourse('admin');if(state.adminTab==='allocation')run(()=>showAllocation(root,'admin'));if(state.adminTab==='classSwap')run(()=>showSwap('admin',root));if(state.adminTab==='studyroom')run(()=>showStudyroom(root,'admin'));if(state.adminTab==='students')renderStudents(root);if(state.adminTab==='sections')renderSections(root);if(state.adminTab==='imports')renderImports(root);if(state.adminTab==='links')renderLinks(root);if(state.adminTab==='settings')renderSettings(root);
+  function renderAdmin(){if(!token('admin')){renderLogin('admin');return;}const tabs=[['sectionAssignment','분반배정'],['students','학생'],['hours','시수배당표'],['allocation','이동수업 배치표'],['classSwap','결보강'],...(state.admin.meta.features?.studyroom?[['studyroom','스터디룸']]:[]),['settings','설정']];showScreen(head('',['sectionAssignment','allocation','hours'].includes(state.adminTab)?'':'<button data-action="refresh-admin">새로고침</button>')+'<div class="admin-layout"><nav class="admin-nav" aria-label="관리 메뉴">'+tabs.map(([v,l])=>'<button data-action="admin-tab" data-tab="'+v+'" '+((state.adminTab===v||v==='settings'&&['links','imports','sections'].includes(state.adminTab))?'class="active" aria-current="page"':'')+'>'+l+'</button>').join('')+'</nav><div id="admin-content" class="admin-content"></div></div>',true);renderAdminContent();}
+  function renderAdminContent(){const root=$('#admin-content');if(!root||!state.admin)return;if(state.adminTab==='sectionAssignment')showSectionAssignment();if(state.adminTab==='hours')showCourse('admin');if(state.adminTab==='allocation')run(()=>showAllocation(root,'admin'));if(state.adminTab==='classSwap')run(()=>showSwap('admin',root));if(state.adminTab==='studyroom')run(()=>showStudyroom(root,'admin'));if(state.adminTab==='students')renderStudents(root);if(state.adminTab==='sections')renderSections(root);if(state.adminTab==='imports')renderImports(root);if(state.adminTab==='links')renderLinks(root);if(state.adminTab==='settings')renderSettings(root);
     if(['settings','links','imports','sections'].includes(state.adminTab)){
       const nav=document.createElement('nav');nav.className='tabs settings-nav';nav.setAttribute('aria-label','설정 메뉴');
       nav.innerHTML=[['settings','학기·운영 설정'],['imports','자료 등록'],['sections','선택분반']].map(([v,label])=>'<button data-action="admin-tab" data-tab="'+(v==='settings'?'term-settings':v)+'"'+((state.adminTab==='links'?'imports':state.adminTab)===v?' aria-current="page"':'')+'>'+label+'</button>').join('');
@@ -269,10 +317,10 @@
   function renderLinks(root){const data=state.admin;root.innerHTML='<div class="toolbar"><button data-action="admin-tab" data-tab="imports">자료 등록으로</button>'+select('link-teacher',data.teachers,'','확인 필요')+'<small>'+data.warnings.length+'건</small></div><div id="link-table"></div><details class="settings-section"><summary>시간블록</summary><div class="toolbar" style="margin-top:20px">'+select('block-grade',Object.keys(data.meta.classes),'','학년')+'</div><div id="block-table"></div></details>';renderLinkTable();}
   function renderLinkTable(){const teacher=$('#link-teacher').value,source=teacher?(state.admin.lessonCache[teacher]||[]):state.admin.warnings;state.visibleLinks=source;$('#link-table').innerHTML='<div class="table-scroll"><table class="data-table"><thead><tr><th>교사</th><th>교시</th><th>원본 과목</th><th>연결 분반</th><th></th></tr></thead><tbody>'+source.map((l,i)=>{const over=state.admin.store.overrides.find(o=>o.teacher===l.teacher&&o.day===l.day&&Number(o.period)===l.period);const automatic=l.sectionId?state.admin.store.sections.find(s=>s.id===l.sectionId):null;return '<tr><td>'+esc(l.teacher)+'</td><td>'+l.day+l.period+'</td><td>'+esc(l.rawSubject)+'<br><small>'+esc(l.rawRoom)+'</small></td><td><select data-link-index="'+i+'" aria-label="연결 분반">'+options(state.admin.store.sections.map(s=>({value:s.id,label:s.grade+'학년 '+s.subject+' '+s.code})),over&&over.sectionId,'자동'+(automatic?' · '+automatic.subject+' '+automatic.code:''))+'</select></td><td><button class="mini" data-action="save-link" data-index="'+i+'">저장</button></td></tr>';}).join('')+'</tbody></table></div>';}
   function renderBlocks(){const g=$('#block-grade').value;if(!g){$('#block-table').innerHTML='';return;}const allBlocks=Array.from(new Set(state.admin.store.sections.filter(s=>s.grade===g).map(s=>(s.code.match(/^[A-Za-z]+/)||[''])[0].toUpperCase()))).filter(Boolean).sort();let html='<form data-form="save-blocks"><div class="table-scroll"><table class="data-table block-grid"><thead><tr><th></th>'+days.map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody>';for(let p=1;p<=7;p++){html+='<tr><th>'+p+'</th>';days.forEach(d=>{const o=state.admin.store.blocks.find(o=>o.grade===g&&o.day===d&&Number(o.period)===p),auto=(state.admin.blocks[d+'-'+p]||{})[g];html+='<td><select data-block-day="'+d+'" data-block-period="'+p+'" aria-label="'+d+p+' 시간블록">'+options(allBlocks,o?o.block:'','자동'+(auto?' · '+auto:''))+'</select></td>';});html+='</tr>';}html+='</tbody></table></div><div class="form-footer"><button class="primary">저장</button></div></form>';$('#block-table').innerHTML=html;}
-  function renderSettings(root){const s=state.admin.store.settings;root.innerHTML='<div class="panel"><div class="toolbar">'+select('switch-term',state.admin.terms,state.admin.store.term)+'<button data-action="switch-term">학기 전환</button></div><form data-form="settings"><div class="form-grid">'+field('학교명','set-school',input('set-school',s.schoolName,'maxlength="80"'))+field('시간표 제목','set-title',input('set-title',s.title,'maxlength="100"'))+field('학년도','set-year',input('set-year',s.academicYear,'type="number" min="2020" max="2100" required'))+field('학기','set-semester',select('set-semester',['1','2'],s.semester))+'</div><label class="check-label"><input type="checkbox" id="set-course-teachers" '+(s.courseAllocationTeachers?'checked':'')+'>교사 시수배당표 사용 허용</label><div class="settings-section"><h2>요일별 교시</h2><div class="check-grid">'+days.map(d=>field(d,'period-'+d,select('period-'+d,[1,2,3,4,5,6,7],s.periods[d]))).join('')+'</div></div><div class="settings-section"><h2>창체</h2><div class="check-grid">'+days.map(d=>'<div class="check-day"><h3>'+d+'</h3>'+[1,2,3,4,5,6,7].map(p=>'<label class="check-label"><input type="checkbox" data-fixed-day="'+d+'" data-fixed-period="'+p+'" '+(s.fixedPeriods.some(f=>f.day===d&&f.period===p)?'checked':'')+'>'+p+'교시</label>').join('')+'</div>').join('')+'</div></div><div class="form-footer"><button class="primary">저장</button></div></form><div class="settings-section"><h2>비밀번호 변경</h2><div class="toolbar"><button type="button" data-action="password-dialog" data-role="teacher">교사 비밀번호 변경</button><button type="button" data-action="password-dialog" data-role="admin">관리자 비밀번호 변경</button></div></div>'+backupSettings()+'</div>';}
-  function passwordDialog(role){const title=(role==='admin'?'관리자':'교사')+' 비밀번호 변경';openDialog(modalHead(title)+'<form data-form="password" data-role="'+role+'"><div class="form-stack">'+field('현재 관리자 비밀번호','password-current',input('password-current','','type="password" required maxlength="128" autocomplete="current-password" autofocus'))+field('새 비밀번호','password-new',input('password-new','','type="password" required minlength="4" maxlength="128" autocomplete="new-password"'))+field('새 비밀번호 확인','password-confirm',input('password-confirm','','type="password" required minlength="4" maxlength="128" autocomplete="new-password"'))+'</div><div class="form-footer"><button type="button" data-action="close-modal">취소</button><button class="primary" type="submit">비밀번호 변경</button></div></form>');}
+  function renderSettings(root){const s=state.admin.store.settings;root.innerHTML='<div class="panel"><div class="toolbar">'+select('switch-term',state.admin.terms,state.admin.store.term)+'<button data-action="switch-term">학기 전환</button></div><form data-form="settings"><div class="form-grid">'+field('학교명','set-school',input('set-school',s.schoolName,'maxlength="80"'))+field('시간표 제목','set-title',input('set-title',s.title,'maxlength="100"'))+field('학년도','set-year',input('set-year',s.academicYear,'type="number" min="2020" max="2100" required'))+field('학기','set-semester',select('set-semester',['1','2'],s.semester))+'</div><label class="check-label"><input type="checkbox" id="set-course-teachers" '+(s.courseAllocationTeachers?'checked':'')+'>교사 시수배당표 사용 허용</label><div class="settings-section"><h2>요일별 교시</h2><div class="check-grid">'+days.map(d=>field(d,'period-'+d,select('period-'+d,[1,2,3,4,5,6,7],s.periods[d]))).join('')+'</div></div><div class="settings-section"><h2>창체</h2><div class="check-grid">'+days.map(d=>'<div class="check-day"><h3>'+d+'</h3>'+[1,2,3,4,5,6,7].map(p=>'<label class="check-label"><input type="checkbox" data-fixed-day="'+d+'" data-fixed-period="'+p+'" '+(s.fixedPeriods.some(f=>f.day===d&&f.period===p)?'checked':'')+'>'+p+'교시</label>').join('')+'</div>').join('')+'</div></div><div class="form-footer"><button class="primary">저장</button></div></form><div class="settings-section"><h2>비밀번호 변경</h2><div class="toolbar"><button type="button" data-action="password-dialog" data-role="student">학생 비밀번호 변경</button><button type="button" data-action="password-dialog" data-role="teacher">교사 비밀번호 변경</button><button type="button" data-action="password-dialog" data-role="admin">관리자 비밀번호 변경</button></div></div>'+backupSettings()+'</div>';}
+  function passwordDialog(role){const title=roles[role]+' 비밀번호 변경';openDialog(modalHead(title)+'<form data-form="password" data-role="'+role+'"><div class="form-stack">'+field('현재 관리자 비밀번호','password-current',input('password-current','','type="password" required maxlength="128" autocomplete="current-password" autofocus'))+field('새 비밀번호','password-new',input('password-new','','type="password" required minlength="4" maxlength="128" autocomplete="new-password"'))+field('새 비밀번호 확인','password-confirm',input('password-confirm','','type="password" required minlength="4" maxlength="128" autocomplete="new-password"'))+'</div><div class="form-footer"><button type="button" data-action="close-modal">취소</button><button class="primary" type="submit">비밀번호 변경</button></div></form>');}
   function backupSettings(){return '<div class="settings-section"><h2>백업</h2><div class="toolbar"><button data-action="backup">백업 저장</button><button data-action="restore-file">백업 불러오기</button><input type="file" id="restore-file" accept=".json" hidden></div><div class="table-scroll"><table class="data-table"><thead><tr><th>일시</th><th>이름</th><th></th></tr></thead><tbody>'+state.admin.backups.filter(b=>b.term===state.admin.store.term).map(b=>'<tr><td>'+date(b.at)+'</td><td>'+esc(b.label)+'</td><td><button class="mini" data-action="download-backup" data-id="'+esc(b.id)+'">다운로드</button> <button class="mini" data-action="restore-backup" data-id="'+esc(b.id)+'">복원</button></td></tr>').join('')+'</tbody></table></div></div>';}
-  async function renderRoute(){hideSwap();state.route=route();header();if(state.route==='home')renderHome();if(state.route==='student')renderStudent();if(state.route==='teacher'){if(!token('teacher'))renderLogin('teacher');else await loadTeacher();}if(state.route==='admin'){if(!token('admin'))renderLogin('admin');else await loadAdmin();}}
+  async function renderRoute(){hideSwap();state.route=route();header();if(state.route==='home')renderLogin();if(state.route==='student'){if(token('student'))renderStudent();else renderLogin('student');}if(state.route==='teacher'){if(!token('teacher'))renderLogin('teacher');else await loadTeacher();}if(state.route==='admin'){if(!token('admin'))renderLogin('admin');else await loadAdmin();}}
   function download(blob,name){const link=document.createElement('a'),url=URL.createObjectURL(blob);link.href=url;link.download=name;link.hidden=true;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
   async function print(html,kind,paper='A3'){
     const target=$('#print-root');target.className='print-root print-'+kind;target.innerHTML=html;
@@ -313,7 +361,20 @@
   }
   document.addEventListener('submit',e=>{const form=e.target.closest('form[data-form]');if(!form)return;e.preventDefault();const button=e.submitter||form.querySelector('button[type=submit],button.primary');run(async()=>{
     switch(form.dataset.form){
-      case 'login':{const role=form.dataset.role;try{const result=await call('login',{role,password:$('#password').value,initialize:true});sessionStorage.setItem('timetable.'+role,JSON.stringify({token:result.token,role:result.role,expiresAt:result.expiresAt}));if(role==='admin'){state.admin=result.initial;useMeta(state.admin.meta);await ensureAdminTab(state.adminTab);renderAdmin();}else{state.teacherBoot=result.initial;useMeta(state.teacherBoot.meta);if(state.teacherTab==='roster')await ensureClassCatalog();renderTeacher();}}catch(err){if($('#login-error'))$('#login-error').textContent=err.message;throw err;}break;}
+      case 'login':{
+        const role=$('#login-role').value,error=$('#login-error');error.hidden=true;
+        let result;
+        try{result=await call('login',{role,password:$('#password').value,initialize:true,workspaceOnly:role==='admin'&&state.adminTab==='sectionAssignment'});}
+        catch(err){error.textContent=err.message;error.hidden=false;return;}
+        clearSessions();
+        sessionStorage.setItem('timetable.'+role,JSON.stringify({token:result.token,role:result.role,expiresAt:result.expiresAt}));
+        state.route=role;location.hash=href(role);
+        useMeta(result.initial.meta);
+        if(role==='admin'){state.admin=result.initial;await ensureAdminTab(state.adminTab);renderAdmin();}
+        else if(role==='teacher'){state.teacherBoot=result.initial;if(state.teacherTab==='roster')await ensureClassCatalog();renderTeacher();}
+        else renderStudent();
+        break;
+      }
       case 'student':state.timetable=await call('student',{studentNumber:$('#student-number').value.trim()});useMeta(state.timetable.meta);$('#lookup-result').innerHTML=resultHTML();break;
       case 'teacher':state.teacherName=$('#teacher-name').value.trim();state.timetable=await call('teacher',{teacher:state.teacherName},'teacher');useMeta(state.timetable.meta);$('#lookup-result').innerHTML=resultHTML();break;
       case 'roster':{const grade=$('#roster-grade').value,section=$('#roster-section').value;if(!section)throw Error('학년·과목·학급 또는 분반을 선택하세요.');const query=section.startsWith('section:')?{kind:'elective',sectionId:section.slice(8)}:{kind:'classSubject',grade,subject:$('#roster-subject').value,classNum:grade==='1'?section:section.slice(6)};showRoster(await call('roster',{query},'teacher'));break;}
@@ -330,7 +391,21 @@
     switch(action){
       case 'close-modal':modal.close();break;
       case 'password-dialog':passwordDialog(el.dataset.role);break;
-      case 'logout':{const savedDrafts=Object.keys(sessionStorage).some(key=>key.startsWith(swapCachePrefix));if((savedDrafts||swapDirty()||allocationDirty())&&!confirm(savedDrafts?'이 탭의 결보강 임시저장본과 작성 중인 내용을 지우고 로그아웃할까요?':'저장하지 않은 내용을 버리고 로그아웃할까요?'))return;allocationViews.forEach(v=>v.destroy());allocationViews.clear();studyroomViews.forEach(v=>v.dispose());studyroomViews.clear();const role=state.route==='admin'?'admin':'teacher';await call('logout',{},role);coursePane.replaceChildren();courseFrames.clear();discardSwap();forgetDraft();state.timetable=null;state.roster=null;state.editingStudent=null;state.editingSection=null;if(modal.open)modal.close();modal.innerHTML='';sessionStorage.removeItem('timetable.admin');sessionStorage.removeItem('timetable.teacher');if(role==='teacher'&&session('admin'))sessionStorage.removeItem('timetable.admin');state.teacherBoot=null;state.admin=null;state.adminTab='students';if(state.teacherTab==='hours')state.teacherTab='timetable';await renderRoute();break;}
+      case 'logout':{
+        const savedDrafts=Object.keys(sessionStorage).some(key=>key.startsWith(swapCachePrefix));
+        const courseDirty=[...courseFrames.values()].some(frame=>frame.contentWindow?.hasUnsavedCourseChanges?.());
+        const assignmentDirty=sectionFrame?.contentWindow?.hasSectionAssignmentWork?.();
+        if((savedDrafts||swapDirty()||allocationDirty()||courseDirty||assignmentDirty)&&!confirm('이 탭에서 작업 중인 내용을 버리고 로그아웃할까요?'))return;
+        await call('logout',{},state.route);
+        allocationViews.forEach(v=>v.destroy());allocationViews.clear();
+        studyroomViews.forEach(v=>v.dispose());studyroomViews.clear();
+        coursePane.replaceChildren();courseFrames.clear();sectionPane.replaceChildren();sectionFrame=null;
+        discardSwap();forgetDraft();clearSessions();
+        if(modal.open)modal.close();modal.innerHTML='';
+        Object.assign(state,{timetable:null,roster:null,editingStudent:null,editingSection:null,teacherBoot:null,admin:null,adminTab:'sectionAssignment',teacherTab:'timetable',importPayload:null,importPreview:null});
+        location.hash=href('home');await renderRoute();
+        break;
+      }
       case 'teacher-tab':if(el.dataset.tab==='hours'&&!state.teacherBoot.meta.settings.courseAllocationTeachers){courseNotice('관리자 설정에서 시수배당표 사용을 허용한 뒤 열 수 있습니다.');return;}if(el.dataset.tab==='roster')await ensureClassCatalog();state.teacherTab=el.dataset.tab;renderTeacher();break;
       case 'admin-tab':state.adminTab=el.dataset.tab==='term-settings'?'settings':el.dataset.tab;if(state.admin.reloadAfterSwap){await loadAdmin();delete state.admin.reloadAfterSwap;}else{await ensureAdminTab(state.adminTab);renderAdmin();}break;
       case 'refresh-admin':await loadAdmin(true);toast('새로고침했습니다.');break;
@@ -342,7 +417,7 @@
       case 'student-page':state.page+=Number(el.dataset.delta);renderStudentTable();break;
       case 'new-section':editSection();break;
       case 'edit-section':editSection(el.dataset.id);break;
-      case 'commit-import':if(!state.importPayload||!state.importPreview)throw Error('미리보기를 먼저 실행하세요.');await mutation('commitImport',{payload:state.importPayload,preserveManual:state.preserveManual,expectedRevision:state.importPreview.revision});state.importPayload=null;state.importPreview=null;if(modal.open&&modal.querySelector('[data-form=preview-import],[data-course-preview]')){modal.close();modal.innerHTML='';}toast('등록했습니다.');break;
+      case 'commit-import':if(!state.importPayload||!state.importPreview)throw Error('미리보기를 먼저 실행하세요.');await mutation('commitImport',{payload:state.importPayload,preserveManual:state.preserveManual,expectedRevision:state.importPreview.revision});state.importPayload=null;state.importPreview=null;if(modal.open&&modal.querySelector('[data-form=preview-import],[data-course-preview],[data-assignment-preview]')){modal.close();modal.innerHTML='';}toast('등록했습니다.');break;
       case 'cell-roster':{const c=state.timetable.cells[Number(el.dataset.cell)],q=c&&c.roster;if(!q)break;if(q.kind==='choose'){const secs=state.teacherBoot.sections.filter(s=>q.sectionIds.includes(s.id));openDialog(modalHead('학년·분반 선택')+'<div class="form-stack">'+secs.map(s=>'<button data-action="chosen-roster" data-id="'+esc(s.id)+'">'+esc(s.grade+'학년 '+s.subject+' '+s.code)+'</button>').join('')+'</div>');}else showRoster(await call('roster',{query:q},'teacher'));break;}
       case 'chosen-roster':showRoster(await call('roster',{query:{kind:'elective',sectionId:el.dataset.id}},'teacher'));break;
       case 'print-roster':await print('<h2>'+esc(state.roster.title)+' '+esc(state.roster.detail)+'</h2>'+rosterHTML(state.roster),'roster');break;
@@ -369,15 +444,14 @@
     if(el.id==='restore-file'&&el.files[0]){const file=el.files[0];if(file.size>10*1024*1024)throw Error('백업 파일 크기를 확인하세요.');const backup=JSON.parse(await file.text());if(backup.format!=='school-timetable-backup')throw Error('백업 파일 형식이 다릅니다.');if(confirm('선택한 백업으로 현재 학기의 자료를 복원하시겠습니까?')){await mutation('restore',{backup});toast('복원했습니다.');}}
   },null,['restore-file','link-teacher'].includes(el.id));});
   document.addEventListener('input',e=>{if(e.target.id==='filter-search'){state.filters.search=e.target.value;state.page=0;renderStudentTable();}if(e.target.id==='section-search')renderSectionTable();});
-  window.addEventListener('hashchange',()=>{if(!busyCount)run(renderRoute);});
+  window.addEventListener('hashchange',()=>{if(!busyCount&&state.route!==route())run(renderRoute);});
   window.addEventListener('afterprint',()=>{$('#print-root').innerHTML='';});
   async function start(){
     state.route=route();
-    if(!['teacher','admin'].includes(state.route)||!token(state.route)){
-      await renderRoute();
-      try{state.meta=await call('bootstrap');}catch(e){toast(e.message);}
-    }
     await renderRoute();
+    if(!roles[state.route]||!token(state.route)){
+      try{useMeta(await call('bootstrap'));}catch(e){toast(e.message);}
+    }
   }
   renderStudent=withDrafts(renderStudent);renderTeacher=withDrafts(renderTeacher);renderAdmin=withDrafts(renderAdmin);renderSettings=withDrafts(renderSettings);renderImports=withDrafts(renderImports);renderSections=withDrafts(renderSections);renderStudents=withDrafts(renderStudents);renderLogin=withDrafts(renderLogin);openDialog=withDrafts(openDialog);
   run(start);

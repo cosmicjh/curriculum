@@ -4,7 +4,7 @@
  if(cross&&(api.protocol!=='https:'||api.pathname!=='/api/'||api.search||api.hash||api.username||api.password))throw Error('API 주소를 확인하세요.');
  const reads=new Set(['allocation','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','previewImport','downloadBackup']);
  let memorySession=null;
- function hasSession(role){return !cross||Boolean(memorySession&&memorySession.expiresAt>Date.now()&&(role==='teacher'||role===memorySession.role));}
+ function hasSession(role){return !cross||Boolean(memorySession&&memorySession.expiresAt>Date.now()&&(role===memorySession.role||role==='teacher'&&memorySession.role==='admin'));}
  async function request(action,args={}){
   if(!/^[A-Za-z][A-Za-z0-9]*$/.test(action))throw Error('API 요청을 확인하세요.');
   const started=performance.now(),payload={...args};delete payload.token;

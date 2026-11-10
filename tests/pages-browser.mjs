@@ -30,11 +30,12 @@ try{
   return route.abort();
  });
  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
- const login=async()=>{await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('[data-action=new-student]').waitFor();await idle();};
+ const login=async()=>{await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('.admin-nav [data-tab=students]').click();await page.locator('[data-action=new-student]').waitFor();await idle();};
  await step('Pages displays the mobile student timetable without leaving its own origin',async()=>{
-  await page.goto(pages+'/timetable/student.html');await idle();await page.locator('#student-number').fill('30101');await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();await idle();assert.equal(new URL(page.url()).origin,pages);assert.equal(await page.locator('.tt tbody tr').count(),7);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.goto(pages+'/timetable/student.html');await idle();await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('#student-number').fill('30101');await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();await idle();assert.equal(new URL(page.url()).origin,pages);assert.equal(await page.locator('.tt tbody tr').count(),7);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  });
  await step('Pages admin login, real D1 save and history work without third-party cookies',async()=>{
+  await page.locator('[data-action=logout]').click();await idle();assert.equal(await page.locator('#login-role').inputValue(),'');
   await page.goto(pages+'/timetable/admin.html');await idle();await login();await page.locator('[data-action=edit-student]').first().click();await page.locator('#edit-name').waitFor();await idle();await page.locator('#edit-name').fill('Pages입력보호');await page.locator('form[data-form=save-student] button.primary').click();await page.waitForFunction(()=>!document.querySelector('#modal').open);await idle();assert.equal((await h.api('adminStudent',{id:'student-one'},cookieAdmin.cookie)).data.student.name,'Pages입력보호');assert.equal(new URL(page.url()).origin,pages);
   const storage=await page.evaluate(()=>({local:{...localStorage},session:{...sessionStorage}}));assert(!/[a-f0-9]{64}/.test(JSON.stringify(storage)));assert.equal(JSON.parse(storage.session['timetable.admin']).token,'memory');
  });
@@ -50,11 +51,11 @@ try{
   await page.screenshot({path:'test-results/course-mobile.png',fullPage:true});
  });
  await step('refresh requires a new login and logout revokes the in-memory Pages session',async()=>{
-  await page.reload();await idle();await page.locator('#password').waitFor();assert.equal(await page.locator('[data-action=new-student]').count(),0);await login();await page.locator('[data-action=logout]').click();await page.locator('#password').waitFor();await idle();assert.equal(await page.evaluate(()=>TTApi.hasSession('admin')),false);
+  await page.reload();await idle();await page.locator('#password').waitFor();assert.equal(await page.locator('[data-action=new-student]').count(),0);await login();await page.locator('[data-action=logout]').click();await page.locator('#password').waitFor();await idle();assert.equal(await page.evaluate(()=>TTApi.hasSession('admin')),false);await page.locator('#login-role').selectOption('admin');
  });
  await step('Separate password buttons select the intended role and preserve unsaved settings',async()=>{
   await login();await page.locator('[data-action=admin-tab]').filter({hasText:'설정',exact:true}).click();await idle();
-  assert.equal(await page.locator('#password-role').count(),0);assert.equal(await page.locator('[data-action=password-dialog]').count(),2);
+  assert.equal(await page.locator('#password-role').count(),0);assert.equal(await page.locator('[data-action=password-dialog]').count(),3);
   const teacher=await h.login('teacher');
   await page.locator('#set-school').fill('비밀번호 변경 중 설정 유지');
   await page.getByRole('button',{name:'교사 비밀번호 변경',exact:true}).click();

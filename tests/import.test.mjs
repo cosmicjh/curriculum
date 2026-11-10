@@ -40,7 +40,8 @@ test('teacher timetable and student assignments can be registered separately wit
  const section=await h.sql("SELECT id FROM sections WHERE subject='가상과학' AND code='A1'");
  const roster=await h.api('roster',{query:{kind:'elective',sectionId:section.results[0].id}},teacher.cookie);
  assert(roster.ok);assert.deepEqual(roster.data.students.map(s=>s.name),['가상학생하나']);
- const timetable=await h.api('student',{studentNumber:'30101'});assert(timetable.ok);
+ const studentCookie=(await h.login('student')).cookie;
+ const timetable=await h.api('student',{studentNumber:'30101'},studentCookie);assert(timetable.ok);
  assert.equal(timetable.data.cells.find(c=>c.day==='월'&&c.period===2).room,'과학실');
  assert.equal((await h.api('previewImport',{payload},cookie)).data.inferredSections,undefined);
 });

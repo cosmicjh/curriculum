@@ -83,7 +83,14 @@ function localDrafts(){
 function updateDrafts(drafts){sessionStorage.setItem(cachePrefix+S.term,JSON.stringify(drafts));}
 function renderHistory(){
  const q=$('historySearch').value.trim(),status=$('historyStatus').value;
- const plans=(admin?S.plans:localDrafts()).filter(p=>(!admin||status==='all'||p.status===status)&&(!q||((p.teacherAName||'')+' '+p.reason).includes(q)));
+ const from=$('historyFrom').value,to=$('historyTo').value;
+ const invalidRange=admin&&from&&to&&from>to;
+ $('historyRangeError').hidden=!invalidRange;
+ const plans=(admin?S.plans:localDrafts()).filter(p=>{
+  if(!admin)return !q||((p.teacherAName||'')+' '+p.reason).includes(q);
+  return !invalidRange&&(status==='all'||p.status===status)&&(!q||(p.teacherAName||'').includes(q))&&
+   ((!from&&!to)||p.items.some(({dateA})=>dateA&&(!from||dateA>=from)&&(!to||dateA<=to)));
+ });
  if(admin)plans.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
  $('historyList').innerHTML=plans.length?'<table class="list-table"><thead><tr><th>결강 교사</th><th>결강일</th><th>사유</th><th>수업</th><th>상태</th><th></th></tr></thead><tbody>'+plans.map(p=>
   '<tr><td><b>'+esc(p.teacherAName||'미지정')+'</b></td><td>'+esc([...new Set(p.items.map(i=>i.dateA))].sort().map(d=>prettyDate(d)).join(', '))+'</td><td>'+esc(p.reason)+'</td><td>'+p.items.length+'건</td><td><span class="type">'+(admin?(p.status==='active'?'제출됨':'취소됨'):'임시저장')+'</span></td><td class="right">'+
@@ -172,10 +179,11 @@ $('dateA').addEventListener('change',()=>{try{C.date($('dateA').value);S.sel.dat
 $('weekB').addEventListener('change',()=>{try{S.sel.weekB=C.monday($('weekB').value);S.sel.teacherB='';S.sel.periodB=0;renderSelection();}catch(e){showError(e);}});
 $('teacherB').addEventListener('change',()=>{S.sel.teacherB=$('teacherB').value;S.sel.dateB='';S.sel.periodB=0;if(S.sel.mode==='cover'&&S.sel.teacherB){S.sel.dateB=S.sel.dateA;S.sel.periodB=S.sel.periodA;}renderSelection();});
 $('roomOverride').addEventListener('input',()=>{S.sel.roomA=$('roomOverride').value;});
-['historySearch','historyStatus'].forEach(id=>$(id).addEventListener(id==='historySearch'?'input':'change',renderHistory));
+['historySearch','historyStatus','historyFrom','historyTo'].forEach(id=>$(id).addEventListener(id==='historySearch'?'input':'change',renderHistory));
 $('swapNav').hidden=admin;
 $('historyTitle').textContent=admin?'제출된 결보강 계획서':'내 임시저장 계획서';
-$('historyStatus').hidden=!admin;
+$('historyAdminFilters').hidden=!admin;
+if(admin){const search=$('historySearch');search.placeholder='결강 교사 이름 검색';search.setAttribute('aria-label',search.placeholder);}
 resetDraft();showSnapshot(initial);
 return Object.freeze({get dirty(){return S.dirty||S.editIndex>=0||Array.from(termDrafts.values()).some(d=>d.dirty||d.editIndex>=0);},resume(){return work(async()=>showSnapshot(await api('resume',{dataRev:S.dataRev,planRev:S.planRev})));},destroy(){clearTimeout(toastTimer);termDrafts.clear();root.replaceChildren();}});
 }

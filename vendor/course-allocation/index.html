@@ -444,7 +444,7 @@ body.row-order-dragging,body.row-order-dragging *{cursor:grabbing!important;user
   <input id="hours-import-file" type="file" accept="application/json,.json" hidden>
   <input id="backup-file" type="file" accept="application/json,.json" hidden>
   <script id="workbook-runtime">
-(async()=>{
+const workbookReady=(async()=>{
 "use strict";
 const C=await import("./shared/domain.js");
 const S=await import("./shared/state.js");const R=await import("./shared/catalog.js");const P=await import("./shared/print.js");// Import school-course-hours v1. Only workload and cohort references are retained.
@@ -1291,7 +1291,18 @@ window.addEventListener('beforeprint',()=>{
 });
 
 
+return async raw=>{
+  requireImportAdmin();
+  const data=H.parse(raw);
+  await ensureAllDepartments();
+  hoursImportDialog(data);
+};
 })().catch(error=>{document.querySelector("#app").textContent="배당표를 열지 못했습니다: "+error.message;});
+window.openSectionAssignmentHours=async data=>{
+  const open=await workbookReady;
+  if(!open)throw Error('시수배당표를 다시 열어 주세요.');
+  await open(data);
+};
 </script>
 </body>
 </html>

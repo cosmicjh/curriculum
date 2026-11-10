@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>분반배정</title>
+<link rel="stylesheet" href="../assets/font.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<p id="access" role="status">관리자 메뉴에서 분반배정을 열어 주세요.</p>
+<main hidden><div class="card">
+  <h2>수강신청 파일</h2>
+
+  <div class="file-area" id="fileArea">
+    <input type="file" id="fileInput" accept=".xlsx,.xls">
+    <div class="file-copy">
+      <div class="label">수강신청 엑셀</div>
+
+    </div>
+    <button type="button" class="btn secondary file-select-btn" id="fileSelectBtn">파일 선택</button>
+    <div class="filename" id="filename" role="status"></div>
+  </div>
+</div>
+
+<div class="card hidden" id="sheetsCard">
+  <h2>분반 코드</h2>
+
+  <div style="overflow-x:auto"><table class="sheet-table" id="sheetsTable"></table></div>
+  <div style="margin-top:12px"><button class="btn secondary" id="saveSettingsBtn">설정 저장</button>
+  <button class="btn secondary" id="loadSettingsBtn">설정 불러오기</button>
+  <input type="file" id="settingsFile" accept=".json" hidden></div>
+
+</div>
+
+<div class="card hidden" id="courseConfigCard">
+  <h2>과목 설정</h2>
+
+  <div class="capacity-panel">
+    <div class="field">
+      <label for="optMax">분반당 최대 인원</label>
+      <input type="number" id="optMax" value="35" min="1" max="100">
+    </div>
+    <button class="btn" id="applyDefaultMaxBtn">분반 수 자동 계산</button>
+
+  </div>
+  <div style="overflow-x:auto;"><table class="sheet-table" id="courseConfigTable"></table></div>
+</div>
+
+<div class="card hidden" id="creditPairCard">
+  <h2>2+1 결합</h2>
+
+  <div id="creditPairList"></div>
+  <button class="btn secondary" id="addCreditPairBtn">+ 2+1 결합 추가</button>
+  <span class="hint" id="creditPairHint"></span>
+</div>
+
+<div class="card hidden" id="optionsCard">
+  <h2>탐색 설정</h2>
+  <div class="options-grid">
+    <div class="option">
+      <label>인원 편차 목표 (명)</label>
+      <input type="number" id="optDiff" value="0" min="0" max="10">
+    </div>
+    <div class="option">
+      <label>탐색 모드</label>
+      <select id="optSearchMode">
+        <option value="fast">빠른 탐색</option>
+        <option value="standard" selected>표준 탐색</option>
+        <option value="precise">정밀 탐색</option>
+      </select>
+    </div>
+    <div class="option">
+      <label>난수 시드</label>
+      <input type="number" id="optSeed" value="42" min="0" max="99999">
+    </div>
+    <div class="option">
+      <label>결과 후보 수</label>
+      <input type="number" id="optNCandidates" value="1" min="1" max="30">
+    </div>
+  </div>
+
+</div>
+
+<div class="card hidden" id="bigsecCard">
+  <h2>대분반</h2>
+
+  <datalist id="coursesList"></datalist>
+  <div id="bigsecList"></div>
+  <button class="btn secondary" id="addBigsecBtn" disabled>+ 과목 추가</button>
+  <span class="hint" id="bigsecHint"></span>
+</div>
+
+<div class="card hidden" id="avoidCard">
+  <h2>학생 분리</h2>
+
+  <datalist id="studentsList"></datalist>
+  <div id="avoidList"></div>
+  <button class="btn secondary" id="addAvoidBtn" disabled>+ 학생 추가</button>
+  <span class="hint" id="avoidHint"></span>
+</div>
+
+<div class="card hidden" id="teacherCard">
+  <h2>교사 공유</h2>
+
+  <div id="teacherList"></div>
+  <button class="btn secondary" id="addTeacherBtn" disabled>+ 과목 묶음 추가</button>
+  <span class="hint" id="teacherHint"></span>
+</div>
+
+<div class="card hidden" id="coverageCard">
+  <h2>코드 커버리지</h2>
+
+  <div id="coverageList"></div>
+</div>
+
+<div class="card hidden" id="runCard">
+  <h2>배정 실행</h2>
+  <button class="btn" id="runBtn">분반 배정 실행</button>
+  <button class="btn secondary hidden" id="cancelBtn" disabled>계산 중지</button>
+  <button class="btn secondary hidden" id="downloadBtn" style="margin-left: 8px;">결과 xlsx 다운로드</button>
+
+  <div class="progress hidden" id="progress"></div>
+  <div class="summary hidden" id="summary">
+    <div class="stat"><div class="v" id="statStudents">-</div><div class="l">학생 수</div></div>
+    <div class="stat"><div class="v" id="statUnassigned">-</div><div class="l">전체 / 부분 미배정</div></div>
+    <div class="stat"><div class="v" id="statTime">-</div><div class="l">소요 시간</div></div>
+  </div>
+</div>
+
+<div class="card hidden" id="hoursExportCard">
+<h2>시수배당 내보내기</h2>
+
+<label for="hoursCandidate">결과 후보</label><select id="hoursCandidate"></select>
+<button class="btn" id="hoursExportBtn" type="button" style="margin-top:10px">JSON 다운로드</button>
+<button class="btn secondary" id="sendHoursBtn" type="button">시수배당으로 보내기</button>
+<button class="btn secondary" id="previewStudentsBtn" type="button">학생 배정 미리보기</button>
+<p class="desc" id="hoursExportStatus" role="status"></p>
+</div></main>
+<script type="module">
+let bridge;
+if(parent!==window){
+  try{bridge=parent.sectionAssignmentConnect?.(window);}catch{}
+}
+if(bridge){
+  const access=document.getElementById('access');
+  access.textContent='분반배정을 불러오는 중…';
+  try{
+    const url=new URL('app.js',location.href);
+    url.search=location.search;
+    const {mountSectionAssignment}=await import(url);
+    mountSectionAssignment(bridge);
+    document.querySelector('main').hidden=false;
+    access.hidden=true;
+  }catch(error){access.textContent='분반배정을 열지 못했습니다. '+error.message;}
+}
+</script>
+</body>
+</html>

@@ -13,9 +13,9 @@ try{
  page.on('pageerror',e=>errors.push(e.message));await context.route('**/*',r=>new URL(r.request().url()).origin===url?r.continue():r.abort());
  const button=a=>page.locator('[data-action="'+a+'"]');
  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
- async function login(){await page.goto(url+'/admin.html');await idle();await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('[data-action=new-student]').waitFor();await idle();}
+ async function login(){await page.goto(url+'/admin.html');await idle();await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('.admin-nav [data-tab=students]').click();await page.locator('[data-action=new-student]').waitFor();await idle();}
  await step('student/mobile timetable, shared Pretendard, same-origin requests',async()=>{
-  await page.goto(url+'/student.html');await idle();await page.locator('#student-number').fill('30101');await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();await idle();
+  await page.goto(url+'/student.html');await idle();await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('#student-number').fill('30101');await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();await idle();
   await page.setViewportSize({width:390,height:844});assert.equal(await page.locator('.tt tbody tr').count(),7);assert.equal(await page.locator('.tt thead th').count(),6);assert(await page.locator('link[href*="font.css"]').count());assert(await page.evaluate(()=>document.fonts.check('12px "Timetable UI"','한글')));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert((await page.locator('.tt').boundingBox()).height<470);await page.screenshot({path:'test-results/mobile.png',fullPage:true});
  });
  await step('PNG output is real PNG and single timetable print has print layout',async()=>{
@@ -75,15 +75,16 @@ try{
   }
   await button('teacher-tab').filter({hasText:'학급별 시간표 인쇄'}).click();await page.locator('#batch-grade').selectOption('3');await page.locator('#batch-class').selectOption('1');await page.locator('form[data-form=batch] button').click();await page.locator('.batch-page').first().waitFor({state:'attached'});await idle();assert.equal(await page.locator('.batch-item').count(),5);assert.equal(await page.locator('.batch-page').count(),2);assert.equal(await page.locator('.batch-page').first().locator('.batch-item').count(),4);await page.emulateMedia({media:'print'});assert.equal(await page.locator('.batch-page').first().evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),2);assert.equal(await page.locator('.batch-page').first().evaluate(el=>getComputedStyle(el).gridTemplateRows.split(' ').length),2);await page.locator('.batch-page').first().screenshot({path:'test-results/print-batch.png'});await page.emulateMedia({media:'screen'});await page.evaluate(()=>dispatchEvent(new Event('afterprint')));
  });
- await step('home menu keeps its layout while the authenticated teacher workspace loads',async()=>{
+ await step('role selection keeps its layout while teacher login loads',async()=>{
   await page.locator('#header .brand').click();
-  const menu=page.locator('.entry-list');await menu.waitFor();await idle();
+  const menu=page.locator('.auth');await menu.waitFor();await idle();
+  await page.locator('#login-role').selectOption('teacher');await page.locator('#password').fill('1234');
   const before=await menu.boundingBox();
   let release;
   const gate=new Promise(resolve=>{release=resolve;});
-  await page.route('**/api/teacherBootstrap',async route=>{await gate;await route.continue();},{times:1});
+  await page.route('**/api/login',async route=>{await gate;await route.continue();},{times:1});
   try{
-   await Promise.all([page.waitForRequest('**/api/teacherBootstrap'),menu.getByRole('link',{name:'교사',exact:true}).click()]);
+   await Promise.all([page.waitForRequest('**/api/login'),menu.getByRole('button',{name:'로그인',exact:true}).click()]);
    assert(!await page.evaluate(()=>document.body.classList.contains('workspace')));
    assert.deepEqual(await menu.boundingBox(),before);
   }finally{release();}

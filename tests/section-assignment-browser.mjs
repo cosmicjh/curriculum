@@ -1,0 +1,100 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import {readFile,mkdir} from 'node:fs/promises';
+import {runInNewContext} from 'node:vm';
+import {harness} from './harness.mjs';
+import {backup} from './fixture.mjs';
+import '../scripts/build.mjs';
+
+const scope={};runInNewContext(await readFile('assets/xlsx.full.min.js','utf8'),scope);
+const {XLSX}=scope,workbook=XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([
+  ['학번','이름','신규 가상 과목'],[30101,'가상학생하나',1],[30102,'가상학생둘',1]
+]),'3학년');
+const bytes=Buffer.from(XLSX.write(workbook,{type:'array',bookType:'xlsx'}));
+const h=await harness({course:true});
+let browser;
+try{
+  const admin=await h.login('admin'),anonymous=await h.api('student',{studentNumber:'30101'});
+  assert.equal(anonymous.status,401);
+  assert((await h.mutation('restore',{backup:backup()},admin.cookie)).ok);
+  const base=await h.listen();
+  browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'msedge'}:{})});
+  const page=await browser.newPage({viewport:{width:1440,height:960}}),requests=[],errors=[];
+  page.on('request',request=>requests.push(new URL(request.url()).pathname));
+  page.on('pageerror',error=>errors.push(error.message));
+  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
+  async function login(role,password='1234'){
+    await page.locator('#login-role').selectOption(role);
+    await page.locator('#password').fill(password);
+    await page.getByRole('button',{name:'로그인',exact:true}).click();
+    await idle();
+  }
+  async function logout(){
+    await page.getByRole('button',{name:'로그아웃',exact:true}).click();
+    await idle();
+    assert.equal(await page.locator('#login-role').inputValue(),'');
+  }
+  await mkdir('test-results',{recursive:true});
+  await page.goto(base);await idle();
+  await page.screenshot({path:'test-results/role-login-desktop.png',fullPage:true});
+  await login('student','0000');
+  assert.match(await page.locator('#login-error').textContent(),/비밀번호/);
+  await login('student');
+  await page.locator('#student-number').fill('30101');
+  await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();
+  assert.equal(await page.getByText('분반배정',{exact:true}).count(),0);
+  await logout();
+  await login('teacher');await page.locator('[data-action=teacher-tab]').first().waitFor();
+  assert.equal(await page.getByText('분반배정',{exact:true}).count(),0);
+  await logout();
+  assert(!requests.some(url=>url.includes('/section-assignment/')));
+  await page.goto(base+'/section-assignment/view.html');
+  assert(await page.locator('#access').isVisible());assert(await page.locator('main').isHidden());
+  await page.goto(base);await idle();
+  await login('admin');
+  assert.equal(await page.locator('.admin-nav button').first().textContent(),'분반배정');
+  const loginPerf=await page.evaluate(()=>TIMETABLE_PERF.find(entry=>entry.action==='login'));
+  assert(!requests.includes('/api/adminBootstrap'));
+  const frame=page.frameLocator('#section-assignment-pane iframe');
+  await frame.locator('#fileSelectBtn').waitFor();
+  await page.screenshot({path:'test-results/section-assignment-desktop.png',fullPage:true});
+  assert(!requests.includes('/assets/xlsx.full.min.js'));
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:'test-results/section-assignment-mobile.png',fullPage:true});
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await frame.locator('#fileInput').setInputFiles({name:'synthetic.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:bytes});
+  await frame.locator('#optSearchMode').selectOption('fast');
+  await frame.locator('#runBtn').click();
+  await frame.locator('#hoursExportCard').waitFor();
+  assert.equal(await frame.locator('#statUnassigned').textContent(),'0');
+  assert(requests.includes('/section-assignment/worker.js'));
+  const download=page.waitForEvent('download');
+  await frame.locator('#downloadBtn').click();
+  assert((await download).suggestedFilename().endsWith('.xlsx'));
+  await frame.locator('#previewStudentsBtn').click();
+  await page.locator('[data-assignment-preview] [data-action=commit-import]').click();
+  await idle();
+  const detail=await h.api('adminStudent',{id:'student-one'},admin.cookie);
+  assert(detail.data.student.choices['신규 가상 과목']);
+  assert.equal(detail.data.student.note,'가상 자료');
+  await frame.locator('#sendHoursBtn').click();
+  const hours=page.frameLocator('#course-pane iframe');
+  await hours.locator('.hours-import-dialog').waitFor();
+  assert.match(await hours.locator('.hours-import-dialog').textContent(),/신규 가상 과목/);
+  await page.locator('.admin-nav [data-tab=settings]').click();await idle();
+  const student=await h.login('student');
+  assert.equal((await h.api('teacherBootstrap',{},student.cookie)).status,401);
+  assert.equal((await h.api('adminBootstrap',{},student.cookie)).status,401);
+  await page.getByRole('button',{name:'학생 비밀번호 변경',exact:true}).click();
+  await page.locator('#password-current').fill('1234');
+  await page.locator('#password-new').fill('7890');
+  await page.locator('#password-confirm').fill('7890');
+  await page.locator('form[data-form=password] button.primary').click();await idle();
+  assert.equal((await h.api('student',{studentNumber:'30101'},student.cookie)).status,401);
+  page.once('dialog',dialog=>dialog.accept());
+  await logout();await login('student','7890');
+  assert(await page.locator('#student-number').isVisible());
+  assert.deepEqual(errors,[]);
+  console.log('PASS section assignment, role login/logout, student password and transfer',loginPerf);
+}finally{await browser?.close();await h.close();}

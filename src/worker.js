@@ -153,7 +153,7 @@ async function mutate(db,env,ctx,session,req,headers){
   const snap=S.snapshot(db,await S.load(db,ctx),'수동 백업');statements.push(...snap.statements);result={id:snap.id,backup:snap.backup};backupId=snap.id;historyOnly=true;
  }else if(action==='changePassword'){
   await Auth.rateLimit(db,env.request,'password');
-  try{statements=await Auth.passwordChangeStatements(db,env,req);}catch(e){if(e.code==='AUTH_REQUIRED'){await Auth.revoke(db,env.request,env);if(!pagesRequest(env.request,env)){headers.append('Set-Cookie',Auth.cookie('teacher'));headers.append('Set-Cookie',Auth.cookie('admin'));}}throw e;}
+  try{statements=await Auth.passwordChangeStatements(db,env,req);}catch(e){if(e.code==='AUTH_REQUIRED'){await Auth.revoke(db,env.request,env);if(!pagesRequest(env.request,env)){for(const role of Auth.roles)headers.append('Set-Cookie',Auth.cookie(role));}}throw e;}
   target=req.role;historyOnly=true;
  }else Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
  if(action!=='switchTerm'&&!(action==='saveSettings'&&bootstrap)&&parts.some(p=>p!=='students')){
@@ -221,13 +221,13 @@ async function api(request,env){
   else if(action==='courseLaunch')data=await launchCourse(db,await S.context(db),env,request,req.role);
   else if(action==='courseBridge')data=await bridgeCourse(db,env,req);
   else if(action==='passwordParameters')data=await Auth.parameters(db,env,req.role);
-  else if(action==='logout'){await Auth.revoke(db,request,env);if(!pagesRequest(request,env)){headers.append('Set-Cookie',Auth.cookie('teacher'));headers.append('Set-Cookie',Auth.cookie('admin'));}data=true;}
+  else if(action==='logout'){await Auth.revoke(db,request,env);if(!pagesRequest(request,env)){for(const role of Auth.roles)headers.append('Set-Cookie',Auth.cookie(role));}data=true;}
   else if(action==='login'){
-   data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx):await teacherBoot(db,ctx);}
+   data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?(req.workspaceOnly===true?{meta:S.meta(ctx),store:{term:ctx.term,settings:ctx.settings},loaded:{}}:await adminBoot(db,ctx)):req.role==='teacher'?await teacherBoot(db,ctx):{meta:S.meta(ctx)};}
   }else if(action==='studyroom')data=await studyroom(db,await S.context(db),env,req,request);
   else{
    const requiresAdmin=!teacherActions.has(action)||action==='classSwap'&&req.swapScope==='admin';
-   const session=action==='bootstrap'||action==='student'?null:await Auth.authenticate(db,request,requiresAdmin?'admin':'teacher',env);
+   const session=action==='bootstrap'?null:await Auth.authenticate(db,request,action==='student'?'student':requiresAdmin?'admin':'teacher',env);
    if(action==='student')await Auth.rateLimit(db,request,'student',60);
    const ctx=await S.context(db);
    if(req.viewTerm&&req.viewTerm!==ctx.term)Auth.fail(409,'TERM_CHANGED','활성 학기가 변경되어 해당 학기 자료를 다시 불러옵니다. 이전 입력값은 이전 학기의 초안으로 보관합니다.');

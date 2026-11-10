@@ -70,7 +70,16 @@ try{
   await swap.locator('[data-action=nav][data-view=history]').click();assert.doesNotMatch(await swap.locator('#historyList').textContent(),/통합 검증/);
   const manager=await context.newPage();await manager.goto(pages+'/timetable/admin.html');await manager.locator('#password').fill('1234');
   await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=classSwap]').click();
-  const history=manager.locator('#admin-content');await history.locator('[data-action=openPlan]').first().click();
+  const history=manager.locator('#admin-content');
+  const planRows=history.locator('#historyList tbody tr');
+  await planRows.first().waitFor();
+  await history.locator('#historySearch').fill('통합 검증');assert.equal(await planRows.count(),0);
+  await history.locator('#historySearch').fill('가교사');assert.equal(await planRows.count(),1);
+  const date=plan.items[0].dateA;
+  await history.locator('#historyFrom').fill(date);await history.locator('#historyTo').fill(date);assert.equal(await planRows.count(),1);
+  await history.locator('#historyTo').fill('2020-01-01');assert.equal(await planRows.count(),0);assert(await history.locator('#historyRangeError').isVisible());
+  await history.locator('#historyFrom').fill('');assert.equal(await planRows.count(),0);
+  await history.locator('#historyTo').fill('');await history.locator('[data-action=openPlan]').first().click();
   assert.match(await history.locator('#detailContent').textContent(),/통합 검증/);await history.locator('#planDetail button').click();
   manager.once('dialog',d=>d.accept());await history.locator('[data-action=cancelPlan]').first().click();
   await history.locator('#historyStatus').selectOption('cancelled');await history.locator('#historyList .type').filter({hasText:'취소됨'}).waitFor();

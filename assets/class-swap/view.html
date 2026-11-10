@@ -11,6 +11,13 @@
 :host{display:block;font-family:inherit}.section-top{padding-top:0}
 
 :host{background:transparent}.shell{max-width:none;padding:0}.section-top{padding-top:0}.section-top h2{font-size:21px}
+
+.search-row{max-width:none;display:flex;align-items:end;flex-wrap:wrap;margin-bottom:18px}
+.search-row>input{flex:1 1 220px;max-width:340px}
+.history-filters{display:flex;align-items:end;gap:10px;flex-wrap:wrap}
+.history-filters label{margin-bottom:0}
+.history-filters :is(input,select){display:block;margin-top:4px}
+#historyRangeError{margin:-8px 0 14px}
 </style>
 <fieldset id="uiLock" data-lock> <div id="appView">
   <nav id="swapNav" class="nav" aria-label="주 메뉴"><button class="active" data-action="nav" data-view="write">계획서 작성</button><button data-action="nav" data-view="history">내 임시저장 <span id="historyCount"></span></button></nav>
@@ -27,7 +34,7 @@
    <div class="selection-bar"><div class="selection-text grow" id="selectionText">결강 교사와 수업을 선택해 주세요.</div><input id="roomOverride" placeholder="학급·대상 입력" aria-label="학급·대상" maxlength="80" hidden><div class="right-actions"><button class="btn" data-action="clearSelection" id="clearSelectionBtn" hidden>선택 취소</button><button class="btn primary" data-action="add" id="addBtn" disabled>계획에 추가</button></div></div>
    <div class="panel" style="padding:0;overflow:hidden"><div class="panel-title" style="padding-top:8px"><h3>계획 내역 <span id="itemCount" class="count">0건</span></h3></div><div id="items" class="table-box"></div></div>
   </section>
-  <section id="historyView" hidden><div class="section-top"><div><h2 id="historyTitle">내 임시저장 계획서</h2></div><button class="btn" data-action="refresh">새로고침</button></div><div class="search-row" style="margin-bottom:18px"><input id="historySearch" placeholder="교사명 또는 사유 검색" aria-label="계획서 검색"><select id="historyStatus" aria-label="계획서 상태"><option value="active">제출됨</option><option value="cancelled">취소됨</option><option value="all">전체</option></select></div><div id="historyList" class="panel table-box" style="padding:0"></div></section>
+  <section id="historyView" hidden><div class="section-top"><div><h2 id="historyTitle">내 임시저장 계획서</h2></div><button class="btn" data-action="refresh">새로고침</button></div><div class="search-row"><input id="historySearch" placeholder="교사명 또는 사유 검색" aria-label="계획서 검색"><div class="history-filters" id="historyAdminFilters" hidden><label>결강일 시작<input type="date" id="historyFrom"></label><label>결강일 끝<input type="date" id="historyTo"></label><label>상태<select id="historyStatus"><option value="active">제출됨</option><option value="cancelled">취소됨</option><option value="all">전체</option></select></label></div></div><p id="historyRangeError" role="alert" hidden>끝 날짜를 시작 날짜 이후로 설정하세요.</p><div id="historyList" class="panel table-box" style="padding:0"></div></section>
 </div></fieldset>
 <dialog id="planDetail" aria-labelledby="detailTitle"><div class="section-top"><h2 id="detailTitle"></h2><form method="dialog"><button class="btn">닫기</button></form></div><div id="detailContent"></div></dialog>
 <div id="toast" role="status" hidden></div>
