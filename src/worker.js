@@ -7,9 +7,10 @@ import {allowedRequest,pagesRequest,cors} from './origin.js';
 import {prepareAllocation} from './allocations.js';
 import {studyroom,runStudyroomSchedule} from './studyroom.js';
 import {launchCourse,bridgeCourse,requireEnabled,storeCourseTransfer} from './course-bridge.js';
+import {validTerm,newTermSettings,prepareToolTransfer,readToolTransfer,readCourseTransfer,importPayload} from './tool-transfer.js';
 import {courseRequest} from '../vendor/course-allocation/server/api.js';
-const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup','courseTransfer']);
-const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','backup','restore','changePassword']);
+const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup','courseTransfer','toolTransfer']);
+const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);
 const teacherActions=new Set(['allocation','classSwap','teacherBootstrap','teacher','roster','classBatch']);
 async function teacherBoot(db,ctx,req={}){
  const m=await S.metadata(db,ctx,true);if(req.knownRevision===m.revision)return {unchanged:true,revision:m.revision,historyRevision:m.historyRevision,meta:m};
@@ -19,7 +20,9 @@ async function teacherBoot(db,ctx,req={}){
  return {meta:m,teachers:teachers.results.map(r=>r.name),sectionsRevision:m.sectionsRevision,...(sections?{sections:sections.results.map(S.sectionRow)}:{})};
 }
 async function adminBoot(db,ctx,req={}){
- const m=await S.metadata(db,ctx,true);if(req.knownRevision===m.revision)return {unchanged:true,revision:m.revision,historyRevision:m.historyRevision,meta:m};
+ const m=req.workspaceOnly===true?S.meta(ctx):await S.metadata(db,ctx,true);
+ if(req.knownRevision===m.revision)return {unchanged:true,revision:m.revision,historyRevision:m.historyRevision,meta:m};
+ if(req.workspaceOnly===true)return {meta:m,store:{term:ctx.term,settings:ctx.settings},loaded:{},lessonCache:{}};
  const [studentResult,countResult]=await db.batch([
   db.prepare('SELECT * FROM students WHERE term_id=? ORDER BY CAST(grade AS INTEGER),CAST(class_num AS INTEGER),CAST(number AS INTEGER)',ctx.term),
   db.prepare("SELECT student_id,count(*) AS choice_count FROM assignments INDEXED BY assignment_student_active WHERE term_id=? AND code!='' GROUP BY student_id",ctx.term)
@@ -31,11 +34,15 @@ async function links(db,ctx,includeSections=true){const {store:st,rt}=await S.sc
 async function read(db,ctx,req){
  const a=req.action;
  if(a==='bootstrap')return S.meta(ctx);
- if(a==='courseTransfer'){const row=await db.first('SELECT content,saved_at FROM course_transfers WHERE term_id=?',ctx.term);return row?{transfer:JSON.parse(row.content),savedAt:row.saved_at}:null;}
+ if(a==='courseTransfer')return readCourseTransfer(db,ctx.term,req.summary==='counts'?'counts':req.summary===true);
+ if(a==='toolTransfer')return readToolTransfer(db,ctx.term,req.kind);
  if(a==='allocation'){const st=await S.load(db,ctx,['sections','allocation']);return {board:st.allocation||null,sections:st.sections,meta:S.meta(ctx)};}
  if(a==='adminBootstrap')return adminBoot(db,ctx,req);
  if(a==='teacherBootstrap')return teacherBoot(db,ctx,req);
- if(a==='adminSettings')return {meta:await S.metadata(db,ctx,true),backups:await S.backupList(db,ctx.term),terms:(await db.all('SELECT id FROM terms ORDER BY id DESC')).map(r=>r.id)};
+ if(a==='adminSettings'){
+  const [backups,terms]=await db.batch([S.prepareBackupList(db,ctx.term),db.prepare('SELECT id FROM terms ORDER BY id DESC')]);
+  return {meta:await S.metadata(db,ctx,true),backups:backups.results,terms:terms.results.map(r=>r.id)};
+ }
  if(a==='adminSections'){const m=S.meta(ctx);return {meta:m,sectionsRevision:m.sectionsRevision,...(req.sectionsRevision===m.sectionsRevision?{unchanged:true}:{sections:(await db.all('SELECT * FROM sections WHERE term_id=? ORDER BY grade,subject,code',ctx.term)).map(S.sectionRow)})};}
  if(a==='adminStudent'){
   const st=await S.load(db,ctx,['students'], 'AND id=?',[req.id||'']);if(req.id&&!st.students.length)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');
@@ -93,7 +100,7 @@ async function read(db,ctx,req){
   const cs=Array.isArray(q.classes)?q.classes:[];if(cs.length>30||cs.some(s=>!String(s).match(/^[1-3]-[1-9][0-9]?$/)))Auth.fail(400,'INVALID_REQUEST','학급을 확인하세요.');
   const rows=await db.all("SELECT grade,class_num AS classNum,number,name,note FROM students WHERE term_id=? AND status='재학' AND grade||'-'||class_num IN (SELECT value FROM json_each(?)) ORDER BY CAST(grade AS INTEGER),CAST(class_num AS INTEGER),CAST(number AS INTEGER)",ctx.term,JSON.stringify(cs));return {title:D.clean(q.subject),detail:D.clean(q.detail)||cs.join(', '),students:rows};
  }
- if(a==='previewImport'){const st=await S.load(db,ctx);return D.prepareImport(st,req.payload,req.preserveManual!==false,String(ctx.revision),true).summary;}
+ if(a==='previewImport'){const payload=await importPayload(db,ctx.term,req),st=await S.load(db,ctx);return D.prepareImport(st,payload,req.preserveManual!==false,String(ctx.revision),true).summary;}
  if(a==='dashboard'){const st=await S.load(db,ctx),rt=Core.runtime(st);return {store:st,meta:await S.metadata(db,ctx,true),...(await links(db,ctx)),lessons:Object.values(rt.bindings).map(D.lesson),history:await db.all('SELECT id,at,term_id AS term,action,target FROM history WHERE term_id=? ORDER BY at DESC LIMIT 100',ctx.term),backups:await S.backupList(db,ctx.term),terms:(await db.all('SELECT id FROM terms ORDER BY id DESC')).map(r=>r.id)};}
  Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
 }
@@ -140,11 +147,22 @@ async function mutate(db,env,ctx,session,req,headers){
    statements.push(db.prepare('INSERT OR IGNORE INTO terms(id,settings) VALUES(?,?)',activeTerm,JSON.stringify(defaults)));
   }else statements.push(db.prepare('UPDATE terms SET settings=? WHERE id=?',JSON.stringify(s),activeTerm));
   parts=['config'];result=s;before=ctx.settings;after=s;
+ }else if(action==='createTerm'){
+  if(!validTerm(req.term))throw Error('학년도와 학기를 확인하세요.');
+  if(await db.first('SELECT id FROM terms WHERE id=?',req.term))Auth.fail(409,'TERM_EXISTS','이미 생성된 학기입니다.');
+  const defaults=newTermSettings(ctx.settings,req.term);
+  statements.push(db.prepare('INSERT INTO terms(id,settings) VALUES(?,?)',req.term,JSON.stringify(defaults)));
+  target=req.term;result={term:req.term};historyOnly=true;
+ }else if(action==='stageToolTransfer'){
+  if(req.term!==ctx.term)Auth.fail(409,'TERM_CHANGED','현재 학기를 다시 확인하세요.');
+  const prepared=prepareToolTransfer(db,ctx.term,req.kind,req.data);
+  statements.push(prepared.statement);result=prepared.result;
+  target=req.kind;after=result;historyOnly=true;
  }else if(action==='switchTerm'){
   if(!await db.first('SELECT id FROM terms WHERE id=?',req.term||''))throw Error('학기 정보가 없습니다.');activeTerm=req.term;parts=['config'];bootstrap=true;
  }else if(action==='commitImport'||action==='restore'){
   const st=await S.load(db,ctx);let next;
-  if(action==='commitImport'){const p=D.prepareImport(st,req.payload,req.preserveManual!==false,String(ctx.revision));if(p.summary.errors.length)throw Error(p.summary.errors.join('\n'));next=p.store;parts=p.parts;result=p.summary;}
+  if(action==='commitImport'){const p=D.prepareImport(st,await importPayload(db,ctx.term,req),req.preserveManual!==false,String(ctx.revision));if(p.summary.errors.length)throw Error(p.summary.errors.join('\n'));next=p.store;parts=p.parts;result=p.summary;}
   else {const raw=req.backup||await S.readBackup(db,req.backupId);if(raw.format!=='school-timetable-backup'||raw.schemaVersion!==1)throw Error('백업 형식·버전을 확인하세요.');next=structuredClone(raw.store);if(!next?.settings||String(next.settings.academicYear)+'-'+next.settings.semester!==ctx.term||next.term&&next.term!==ctx.term)throw Error('백업과 현재 학기가 다릅니다. 먼저 해당 학기로 전환하세요.');next.term=ctx.term;next.overrides??=[];next.blocks??=[];parts=['students','sections','teacherRows','overrides','blocks','allocation','config'];}
   if(next.allocation)next=prepareAllocation(next,next.allocation).store;
   D.assertStore(next);nextSwapStore=next;const snap=S.snapshot(db,st,action==='restore'?'복원 전':'자료 등록 전');backupId=snap.id;
@@ -178,7 +196,7 @@ async function mutate(db,env,ctx,session,req,headers){
  const out={result,meta:await S.metadata(db,updated,true)};
  if(changedStudents.length)out.students=changedStudents.map(D.studentSummary);if(changedSection)out.section=changedSection;
  if(['saveOverride','saveBlock','saveBlocks'].includes(action)){out.links=await links(db,updated,false);if(req.viewTeacher){const r=await read(db,updated,{action:'adminLessons',teacher:req.viewTeacher});Object.assign(out.links,{teacher:req.viewTeacher,lessons:r.lessons});}}
- if(bootstrap)out.bootstrap=await adminBoot(db,updated);
+ if(bootstrap)out.bootstrap=await adminBoot(db,updated,{workspaceOnly:req.workspaceOnly});
  if(allocationReply)out.allocation=allocationReply;
  if(action==='backup')out.backups=await S.backupList(db,updated.term);
  const final=await db.first('SELECT revision,active_term FROM app_state WHERE id=1');if(final.revision!==committedRevision||final.active_term!==activeTerm)savedRefresh();
@@ -204,7 +222,7 @@ async function api(request,env){
   if(action!=='courseBridge'&&!allowedRequest(request,env))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
   if(!request.headers.get('Content-Type')?.startsWith('application/json'))Auth.fail(415,'INVALID_REQUEST','JSON 요청을 사용하세요.');
   if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');
-  const maxBody=['classSwap','studyroom','courseBridge'].includes(action)?256*1024:action==='courseWorkspace'?5*1024*1024:10*1024*1024;
+  const maxBody=['classSwap','studyroom','courseBridge'].includes(action)?256*1024:action==='courseWorkspace'?5*1024*1024:action==='stageToolTransfer'?1024*1024:10*1024*1024;
   const length=Number(request.headers.get('Content-Length')||0);if(length>maxBody)Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');
   const reader=request.body?.getReader(),chunks=[];let size=0;if(reader){while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>maxBody){await reader.cancel();Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');}chunks.push(value);}}
   const bytes=new Uint8Array(size);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.length;}
@@ -216,14 +234,14 @@ async function api(request,env){
    if(req.role==='teacher')requireEnabled(await S.context(db));
    if(!env.COURSE_DB)Auth.fail(503,'SETUP_REQUIRED','시수배당 저장소를 확인하세요.');
    if(typeof req.path!=='string'||!['GET','POST','PUT'].includes(req.method)||!req.data||typeof req.data!=='object'||Array.isArray(req.data))Auth.fail(400,'INVALID_REQUEST','시수배당 요청을 확인하세요.');
-   data=await courseRequest(env.COURSE_DB,req.role,req.path,req.method,req.data,transfer=>storeCourseTransfer(db,transfer));
+   data=await courseRequest(env.COURSE_DB,req.role,req.path,req.method,req.data,transfer=>storeCourseTransfer(db,transfer),term=>readToolTransfer(db,term,'hours',true));
   }
   else if(action==='courseLaunch')data=await launchCourse(db,await S.context(db),env,request,req.role);
   else if(action==='courseBridge')data=await bridgeCourse(db,env,req);
   else if(action==='passwordParameters')data=await Auth.parameters(db,env,req.role);
   else if(action==='logout'){await Auth.revoke(db,request,env);if(!pagesRequest(request,env)){for(const role of Auth.roles)headers.append('Set-Cookie',Auth.cookie(role));}data=true;}
   else if(action==='login'){
-   data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?(req.workspaceOnly===true?{meta:S.meta(ctx),store:{term:ctx.term,settings:ctx.settings},loaded:{}}:await adminBoot(db,ctx)):req.role==='teacher'?await teacherBoot(db,ctx):{meta:S.meta(ctx)};}
+   data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx,req):req.role==='teacher'?await teacherBoot(db,ctx):{meta:S.meta(ctx)};}
   }else if(action==='studyroom')data=await studyroom(db,await S.context(db),env,req,request);
   else{
    const requiresAdmin=!teacherActions.has(action)||action==='classSwap'&&req.swapScope==='admin';

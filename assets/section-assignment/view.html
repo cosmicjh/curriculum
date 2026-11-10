@@ -30,7 +30,8 @@
   <div style="overflow-x:auto"><table class="sheet-table" id="sheetsTable"></table></div>
   <div style="margin-top:12px"><button class="btn secondary" id="saveSettingsBtn">설정 저장</button>
   <button class="btn secondary" id="loadSettingsBtn">설정 불러오기</button>
-  <input type="file" id="settingsFile" accept=".json" hidden></div>
+  <button class="btn secondary" id="courseCountsBtn">시수배당 분반 수 불러오기</button>
+  <input type="file" id="settingsFile" accept=".json" hidden><p id="courseCountsStatus" class="desc" role="status"></p></div>
 
 </div>
 
@@ -130,7 +131,7 @@
 </div>
 
 <div class="card hidden" id="hoursExportCard">
-<h2>시수배당 내보내기</h2>
+<h2>배정 결과 전달</h2>
 
 <label for="hoursCandidate">결과 후보</label><select id="hoursCandidate"></select>
 <button class="btn" id="hoursExportBtn" type="button" style="margin-top:10px">JSON 다운로드</button>

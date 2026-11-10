@@ -126,10 +126,17 @@ async function switchTerm(s,term,session,now){
   ]);}catch(error){if(/global_conflict|sheet_conflict/.test(String(error)))fail(409,'global_conflict','학기 전환 중 자료가 변경되었습니다. 다시 시도하세요.');throw error;}
   return {term};
 }
-export async function courseRequest(db,role,path,method,data,sendTransfer){
+export async function courseRequest(db,role,path,method,data,sendTransfer,receiveHours){
   const s=store(db),session={role},admin=role==='admin',now=Date.now();
   if(method==='GET'&&path==='/workspace')return workspace(s,data,admin);
   if(method==='POST'&&path==='/term')return switchTerm(s,data.term,session,now);
+  if(method==='GET'&&path==='/assignment-hours'){
+    requireAdmin(session);
+    const row=await s.first('SELECT payload FROM workspace WHERE id=1');
+    const term=termOf(JSON.parse(row.payload));
+    if(data.term&&data.term!==term)fail(409,'term_mismatch',data.term+' 학기로 전환한 뒤 서버 분반배정을 불러오세요.');
+    return receiveHours(term);
+  }
   if(method==='POST'&&path==='/timetable-transfer'){
     requireAdmin(session);
     const current=await workspace(s,{all:true},true),transfer=C.timetableTransfer(assemble(current.global,current.parts));

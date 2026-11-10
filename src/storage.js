@@ -106,7 +106,8 @@ export async function readBackup(db,id){
  const rows=await db.all('SELECT p.part,p.body,b.parts FROM backup_parts p JOIN backups b ON b.id=p.backup_id WHERE b.id=? ORDER BY p.part',id);
  if(!rows.length||rows.length!==rows[0].parts||rows.some((r,i)=>r.part!==i))throw Error('백업 데이터가 불완전합니다.');return JSON.parse(rows.map(r=>r.body).join(''));
 }
-export const backupList=(db,term)=>db.all('SELECT id,at,term_id AS term,label,bytes FROM backups WHERE term_id=? ORDER BY at DESC LIMIT 200',term);
+export const prepareBackupList=(db,term)=>db.prepare('SELECT id,at,term_id AS term,label,bytes FROM backups WHERE term_id=? ORDER BY at DESC LIMIT 200',term);
+export const backupList=async(db,term)=>(await db.batch([prepareBackupList(db,term)]))[0].results;
 export async function commit(db,ctx,session,req,statements,{action=req.action,target='',before=null,after=null,backupId=null,parts=[],activeTerm=ctx.term,historyOnly=false}={}){
  if(req.expectedTerm!==ctx.term||req.expectedRevision!==String(ctx.revision)){const e=Error('다른 변경이나 학기 전환이 있습니다. 입력값을 복사한 뒤 새로고침하여 다시 저장하세요.');e.status=409;e.code='CONFLICT';throw e;}
  const id=crypto.randomUUID(),at=new Date().toISOString();

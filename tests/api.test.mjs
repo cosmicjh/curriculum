@@ -25,6 +25,7 @@ test('course launch inherits the role and can transfer to an inactive term',asyn
  assert.equal((await h.api('courseBridge',{token:adminToken})).data.role,'admin');
  assert((await h.mutation('switchTerm',{term:'2027-1'},admin)).ok);
  assert.deepEqual((await h.api('courseTransfer',{},admin)).data.transfer,transfer);
+ assert.deepEqual((await h.api('courseTransfer',{summary:'counts'},admin)).data,[{grade:'3',subject:'가상과학',count:1}]);
  assert((await h.mutation('switchTerm',{term:'2026-2'},admin)).ok);
  await h.api('logout',{},teacher);
  assert.equal((await h.api('courseBridge',{token:teacherToken})).status,401);
@@ -65,6 +66,46 @@ test('integrated allocation uses the existing workspace, role, and independent t
  await h.api('logout',{},admin);
  assert.equal((await request(admin,'admin')).status,401);
 });
+test('school terms and staged transfers are admin-only, isolated, and versioned',async t=>{
+ const h=await harness({course:true});t.after(()=>h.close());
+ const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
+ assert((await h.mutation('restore',{backup:backup()},admin)).ok);
+ assert.equal((await h.mutation('createTerm',{term:'2027-1'},teacher)).status,401);
+ assert.equal((await h.mutation('createTerm',{term:'2027-3'},admin)).status,400);
+ const created=await h.mutation('createTerm',{term:'2027-1'},admin);assert(created.ok,created.error);
+ assert.equal((await h.api('bootstrap')).data.term,'2026-2');
+ assert.equal((await h.mutation('createTerm',{term:'2027-1'},admin)).code,'TERM_EXISTS');
+ const rows=[{grade:'3',classNum:'1',number:'1',name:'가상학생하나',choices:{가상선택:'A1'}}];
+ const stage=(data,cookie=admin)=>h.mutation('stageToolTransfer',{term:'2026-2',kind:'students',data},cookie);
+ assert.equal((await stage(rows,teacher)).status,401);
+ const first=await stage(rows);assert(first.ok,JSON.stringify(first));
+ const transferRef={kind:'students',id:first.data.result.id};
+ assert.equal((await h.api('toolTransfer',{kind:'students'},teacher)).status,401);
+ const read=await h.api('toolTransfer',{kind:'students'},admin);
+ assert.equal(read.data.id,transferRef.id);assert.equal(read.data.count,1);assert(!('data' in read.data));
+ assert.equal((await h.api('previewImport',{transferRef},admin)).data.changedStudents,1);
+ assert((await stage(rows)).ok);
+ assert.equal((await h.mutation('commitImport',{transferRef},admin)).code,'TRANSFER_CHANGED');
+ const hours={format:'school-course-hours',schemaVersion:1,hoursUnit:'weekly-periods',includesStudentData:false,sheets:[{
+  sheetId:'grade3',sourceSheetName:'3학년',grade:3,students:['전달에서 제외할 이름'],
+  validation:{complete:true,hardConstraintsPassed:true,coupledCohortsPassed:true},coupledCohorts:[],
+  courses:[{courseId:'science',courseName:'가상과학',credits:3,weeklyHours:3,sectionCount:1,totalWeeklyHours:3,
+   sections:[{sectionId:'science-a',sectionCode:'A',timeBlock:'A',weeklyHours:3}]}]
+ }]};
+ assert((await h.mutation('stageToolTransfer',{term:'2026-2',kind:'hours',data:hours},admin)).ok);
+ const receive=(role,cookie,data={})=>h.api('courseWorkspace',{role,path:'/assignment-hours',method:'GET',data},cookie);
+ assert.equal((await receive('admin',admin,{term:'2026-2'})).code,'term_mismatch');
+ assert((await h.api('courseWorkspace',{role:'admin',path:'/term',method:'POST',data:{term:'2026-2'}},admin)).ok);
+ const received=await receive('admin',admin);
+ assert(received.ok,received.error);assert.equal(received.data.term,'2026-2');
+ assert.equal(received.data.data.sheets[0].year,2026);assert.equal(received.data.data.sheets[0].grade,3);
+ assert(!JSON.stringify(received.data).includes('전달에서 제외할 이름'));
+ assert.equal((await receive('teacher',teacher)).status,403);
+ assert((await h.mutation('switchTerm',{term:'2027-1'},admin)).ok);
+ assert.equal((await h.api('toolTransfer',{kind:'students'},admin)).data,null);
+ assert.equal((await stage(rows)).code,'TERM_CHANGED');
+});
+
 test('Workers + actual local D1: authorization, migration, edits, term isolation, backup, concurrent writes',async t=>{
  const h=await harness();t.after(()=>h.close());const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
  const studentCookie=(await h.login('student')).cookie;

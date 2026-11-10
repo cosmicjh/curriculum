@@ -1345,6 +1345,11 @@ downloadBtn.addEventListener('click',async ()=>{
 
 // school-course-hours v1: sheets[].courses[].sections are the workload records.
 // coupledCohorts describe links only; do not add them again to total hours.
+function sheetGrade(sheet){
+  const grades=new Set(sheet.students.map(student=>Number(student.grade||String(student.studentId??'').trim().match(/^([1-3])[0-9]{4}$/)?.[1])));
+  const grade=grades.values().next().value;
+  return grades.size===1&&[1,2,3].includes(grade)?grade:null;
+}
 function buildHoursExport(sheets, results, candidateIndex) {
   if(!Number.isInteger(candidateIndex)||candidateIndex<0)throw new Error('결과 후보를 선택하세요.');
   return {format:'school-course-hours',schemaVersion:1,exportedAt:new Date().toISOString(),
@@ -1375,7 +1380,7 @@ function buildHoursExport(sheets, results, candidateIndex) {
           sectionCount:sections.length,totalWeeklyHours:credits*sections.length,
           parallelSectionLimit:result.validation.parallelLimits[c],sections};
       });
-      return {sheetId,sourceSheetName:sheet.name,academicYear:null,semester:null,grade:null,candidateRank:rank+1,
+      return {sheetId,sourceSheetName:sheet.name,academicYear:null,semester:null,grade:sheetGrade(sheet),candidateRank:rank+1,
         studentCount:sheet.students.length,validation:{complete:true,hardConstraintsPassed:true,coupledCohortsPassed:true},
         timeBlocks:sheet.groups.map((code,i)=>({code,credits:Number(sheet.groupCredits[i])})),courses,coupledCohorts:links,
         totals:{courseCount:courses.length,sectionCount:courses.reduce((n,c)=>n+c.sectionCount,0),totalWeeklyHours:courses.reduce((n,c)=>n+c.totalWeeklyHours,0)}};
@@ -1399,6 +1404,33 @@ function selectedCandidate(){
   if(!hoursExportResults||selected===''||resultIncomplete[rank]!==false)throw Error('완전배정 결과 후보가 없습니다.');
   return rank;
 }
+
+const courseCountsBtn=document.getElementById('courseCountsBtn');
+courseCountsBtn.addEventListener('click',async()=>{
+  if(!loadedData||isRunning)return;
+  const workbook=loadedData,status=document.getElementById('courseCountsStatus');
+  courseCountsBtn.disabled=true;
+  try{
+    const rows=await bridge.loadCourseSections();
+    if(workbook!==loadedData||isRunning)return;
+    const key=(grade,name)=>grade+'|'+name.normalize('NFKC').replace(/[\s_-]/g,'').toUpperCase();
+    const counts=new Map();
+    for(const row of rows){
+      const id=key(row.grade,row.subject);
+      counts.set(id,(counts.get(id)||0)+row.count);
+    }
+    const updates=workbook.sheets.flatMap(sheet=>Object.keys(sheet.courses).flatMap(course=>{
+      const count=counts.get(key(sheetGrade(sheet),course));
+      return count&&count!==sheet.courses[course]?[{sheet,course,count}]:[];
+    }));
+    if(!updates.length){status.textContent='변경할 과목이 없습니다. 신청 파일의 학년과 과목명을 확인하세요.';return;}
+    if(!window.confirm(updates.length+'개 과목의 분반 수를 서버 확정 자료로 바꿀까요?'))return;
+    for(const {sheet,course,count} of updates)sheet.courses[course]=count;
+    invalidateResults();renderCourseConfig();
+    status.textContent=updates.length+'개 과목의 분반 수를 불러왔습니다.';
+  }catch(error){status.textContent=error.message;}
+  finally{courseCountsBtn.disabled=false;}
+});
 
 document.getElementById('sendHoursBtn').addEventListener('click',()=>{
   try{bridge.importHours(buildHoursExport(loadedData.sheets,hoursExportResults,selectedCandidate()));}

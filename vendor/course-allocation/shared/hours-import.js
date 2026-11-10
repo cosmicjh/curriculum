@@ -20,10 +20,11 @@ function parse(raw){
     });
     unique(courses,'id','과목 식별자');const all=courses.flatMap(c=>c.sections);unique(all,'id','시트 내 분반 식별자');
     if(!Array.isArray(s.coupledCohorts))throw new Error('2+1 결합 정보를 확인하세요.');
+    const byId=new Map(all.map(section=>[section.id,section]));
     const used=new Set(),links=s.coupledCohorts.map(l=>{
       const id=text(l.cohortId,'결합 식별자');
       if(l.sameStudents!==true||!Array.isArray(l.sectionIds)||l.sectionIds.length!==2||l.sectionIds[0]===l.sectionIds[1])throw new Error('동일 학생 결합 정보를 확인하세요.');
-      const members=l.sectionIds.map(sid=>all.find(a=>a.id===sid));
+      const members=l.sectionIds.map(sid=>byId.get(sid));
       if(members.some(a=>!a)||members.some(a=>a.cohortId!==id)||members[0].block!==members[1].block||members[0].code!==members[1].code||members.some(a=>used.has(a.id)))throw new Error('결합 과목의 실제 분반 연결이 일치하지 않습니다.');
       members.forEach(a=>used.add(a.id));return {id,sectionIds:members.map(a=>a.id)};
     });
@@ -45,10 +46,11 @@ function canonical(section,grade){
 function defaults(data,state){
   return {year:state.school.year,semester:state.school.semester,clearAssignments:false,sheets:data.sheets.map(sheet=>({include:true,grade:sheet.grade||'',courses:sheet.courses.map(c=>{
     const matches=state.courses.filter(x=>norm(x.name)===norm(c.name)&&(!sheet.grade||x.grade===sheet.grade)),depts=[...new Set(matches.map(x=>x.deptId))];
+    const existingHours=[...new Set(matches.map(x=>x.baseHours).filter(h=>Number.isInteger(h)&&h>0&&h<=40))];
     const item=R.catalog.find(x=>norm(x.name)===norm(c.name));
     const group=R.groups.find(g=>g.id===item?.groupId||g.id===c.subjectGroup||g.name===c.subjectGroup);
     const candidates=group?state.departments.filter(d=>R.suggestedGroup(d.name)===group.id):[];
-    return {include:true,name:matches.length?matches[0].name:c.name,deptName:depts.length===1?state.departments.find(d=>d.id===depts[0]).name:candidates.length===1?candidates[0].name:group?.name||'',hours:c.hours};
+    return {include:true,name:matches.length?matches[0].name:c.name,deptName:depts.length===1?state.departments.find(d=>d.id===depts[0]).name:candidates.length===1?candidates[0].name:group?.name||'',hours:sheet.grade&&existingHours.length===1?existingHours[0]:c.hours};
   })}))};
 }
 function plan(data,original,options){

@@ -56,7 +56,7 @@ export async function storeCourseTransfer(db,transfer){
  const defaults=D.settings({...Core.defaultSettings(),academicYear,semester,schoolName:ctx.settings.schoolName,title:ctx.settings.title});
  await db.batch([
   db.prepare('INSERT OR IGNORE INTO terms(id,settings) VALUES(?,?)',term,JSON.stringify(defaults)),
-  db.prepare('INSERT INTO course_transfers(term_id,content,saved_at) VALUES(?,?,?) ON CONFLICT(term_id) DO UPDATE SET content=excluded.content,saved_at=excluded.saved_at',term,JSON.stringify({format:transfer.format,schemaVersion:1,term,sections:normalized}),at),
+  db.prepare('INSERT INTO course_transfers(term_id,content,saved_at,transfer_id) VALUES(?,?,?,?) ON CONFLICT(term_id) DO UPDATE SET content=excluded.content,saved_at=excluded.saved_at,transfer_id=excluded.transfer_id',term,JSON.stringify({format:transfer.format,schemaVersion:1,term,sections:normalized}),at,crypto.randomUUID()),
   db.prepare('UPDATE app_state SET history_revision=history_revision+1 WHERE id=1')
  ]);
  return {term,sections:sections.length};
