@@ -6,7 +6,7 @@ import {harness} from './harness.mjs';
 import {backup} from './fixture.mjs';
 import '../scripts/build-pages.mjs';
 // Reserved test hosts only. Every browser request is fulfilled locally or aborted.
-const pages='https://timetable-pages.test',api='https://timetable-api.test',h=await harness({frontendOrigin:pages});
+const pages='https://timetable-pages.test',api='https://timetable-api.test',h=await harness({frontendOrigin:pages,course:true});
 const cookieAdmin=await h.login();assert((await h.mutation('restore',{backup:backup()},cookieAdmin.cookie)).ok);
 let browser;const errors=[],requests=[],steps=[];await mkdir('test-results',{recursive:true});
 async function step(name,fn){await fn();steps.push(name);console.log('PASS '+name);}
@@ -37,6 +37,17 @@ try{
  await step('Pages admin login, real D1 save and history work without third-party cookies',async()=>{
   await page.goto(pages+'/timetable/admin.html');await idle();await login();await page.locator('[data-action=edit-student]').first().click();await page.locator('#edit-name').waitFor();await idle();await page.locator('#edit-name').fill('Pages입력보호');await page.locator('form[data-form=save-student] button.primary').click();await page.waitForFunction(()=>!document.querySelector('#modal').open);await idle();assert.equal((await h.api('adminStudent',{id:'student-one'},cookieAdmin.cookie)).data.student.name,'Pages입력보호');assert.equal(new URL(page.url()).origin,pages);
   const storage=await page.evaluate(()=>({local:{...localStorage},session:{...sessionStorage}}));assert(!/[a-f0-9]{64}/.test(JSON.stringify(storage)));assert.equal(JSON.parse(storage.session['timetable.admin']).token,'memory');
+ });
+ await step('Pages opens the course allocation worksheet with the same in-memory admin session',async()=>{
+  await page.locator('.admin-nav [data-tab=hours]').click();await idle();
+  const workbook=page.frameLocator('#course-pane iframe');
+  await workbook.locator('.workbook').waitFor();
+  assert(await workbook.getByRole('button',{name:'학교 설정',exact:true}).isVisible());
+  assert(await workbook.locator('.workbook-brand span').isVisible());
+  assert.equal(await workbook.locator('input[type=password]').count(),0);
+  assert.equal(new URL(page.url()).origin,pages);
+  assert(requests.some(r=>r.action==='courseWorkspace'&&r.authorized));
+  await page.screenshot({path:'test-results/course-mobile.png',fullPage:true});
  });
  await step('refresh requires a new login and logout revokes the in-memory Pages session',async()=>{
   await page.reload();await idle();await page.locator('#password').waitFor();assert.equal(await page.locator('[data-action=new-student]').count(),0);await login();await page.locator('[data-action=logout]').click();await page.locator('#password').waitFor();await idle();assert.equal(await page.evaluate(()=>TTApi.hasSession('admin')),false);

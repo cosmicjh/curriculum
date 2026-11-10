@@ -12,7 +12,7 @@ async function key(env){
  const material=await crypto.subtle.digest('SHA-256',encoder.encode('timetable-course-access:'+env.PASSWORD_PEPPER));
  return crypto.subtle.importKey('raw',material,'AES-GCM',false,['encrypt','decrypt']);
 }
-function requireEnabled(ctx){
+export function requireEnabled(ctx){
  if(ctx.settings.courseAllocationTeachers!==true)Auth.fail(403,'COURSE_CLOSED','시수배당표가 열려 있지 않습니다. 관리자 설정에서 시수배당표 사용을 허용해 주세요.');
 }
 export async function launchCourse(db,ctx,env,request,role){
@@ -39,8 +39,11 @@ export async function bridgeCourse(db,env,req){
  const session=await courseSession(db,env,req.token);
  if(!req.transfer)return session;
  if(session.role!=='admin')Auth.fail(403,'ADMIN_REQUIRED','관리자만 시간표로 전달할 수 있습니다.');
- const {term,sections}=req.transfer;
- if(!/^(?:20[2-9]\d|2100)-[12]$/.test(term)||req.transfer.format!=='school-course-allocation-transfer'||req.transfer.schemaVersion!==1||!Array.isArray(sections)||!sections.length||sections.length>3000)Auth.fail(400,'INVALID_REQUEST','전달 자료의 학기와 형식을 확인하세요.');
+ return storeCourseTransfer(db,req.transfer);
+}
+export async function storeCourseTransfer(db,transfer){
+ const {term,sections}=transfer;
+ if(!/^(?:20[2-9]\d|2100)-[12]$/.test(term)||transfer.format!=='school-course-allocation-transfer'||transfer.schemaVersion!==1||!Array.isArray(sections)||!sections.length||sections.length>3000)Auth.fail(400,'INVALID_REQUEST','전달 자료의 학기와 형식을 확인하세요.');
  const keys=new Set(),validHours=hours=>Number.isInteger(hours)&&hours>0&&hours<=40;
  const normalized=sections.map(s=>{
   const code=D.clean(s.code,30),subject=D.clean(s.subject),grade=String(s.grade),key=Core.sectionKey(grade,subject,code);
@@ -53,7 +56,7 @@ export async function bridgeCourse(db,env,req){
  const defaults=D.settings({...Core.defaultSettings(),academicYear,semester,schoolName:ctx.settings.schoolName,title:ctx.settings.title});
  await db.batch([
   db.prepare('INSERT OR IGNORE INTO terms(id,settings) VALUES(?,?)',term,JSON.stringify(defaults)),
-  db.prepare('INSERT INTO course_transfers(term_id,content,saved_at) VALUES(?,?,?) ON CONFLICT(term_id) DO UPDATE SET content=excluded.content,saved_at=excluded.saved_at',term,JSON.stringify({format:req.transfer.format,schemaVersion:1,term,sections:normalized}),at),
+  db.prepare('INSERT INTO course_transfers(term_id,content,saved_at) VALUES(?,?,?) ON CONFLICT(term_id) DO UPDATE SET content=excluded.content,saved_at=excluded.saved_at',term,JSON.stringify({format:transfer.format,schemaVersion:1,term,sections:normalized}),at),
   db.prepare('UPDATE app_state SET history_revision=history_revision+1 WHERE id=1')
  ]);
  return {term,sections:sections.length};

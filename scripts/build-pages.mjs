@@ -1,4 +1,4 @@
-import {cp,writeFile,rm,readFile} from 'node:fs/promises';
+import {cp,writeFile,rm,readFile,readdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 import './build.mjs';
@@ -11,6 +11,9 @@ const apiBase='https://school-timetable.cosmicjh.workers.dev/api/';
 const source=await Promise.all(['studyroom.js','studyroom-layout.js','studyroom-student.js','studyroom.css','font.css','app.js','allocations.js','allocation-import.js','transport.js','assets.js','import.js','password.js','style.css','xlsx.full.min.js','html2canvas.min.js'].map(name=>readFile(resolve(output,'assets',name),'utf8')));
 for(const name of ['timetable-ui.woff2','pretendard.woff2'])source.push(createHash('sha256').update(await readFile(resolve(output,'assets',name))).digest('hex'));
 source.push(...await Promise.all(['app.js','view.html'].map(name=>readFile(resolve(output,'class-swap',name),'utf8'))));
+const course=resolve(output,'course-allocation');
+source.push(await readFile(resolve(course,'view.html'),'utf8'));
+for(const file of (await readdir(resolve(course,'shared'))).sort())source.push(await readFile(resolve(course,'shared',file),'utf8'));
 const version=createHash('sha256').update(source.map(s=>s.replaceAll('\r\n','\n')).join('\n')+apiBase).digest('hex').slice(0,12);
 await writeFile(resolve(output,'config.js'),"window.TIMETABLE_CONFIG="+JSON.stringify({schoolName:'첨단고등학교',apiBase,assetVersion:version})+';\n');
 // A previously cached Apps Script/redirect client must not replace this release.

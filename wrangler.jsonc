@@ -17,6 +17,12 @@
       "database_name": "school-timetable-db",
       "migrations_dir": "migrations",
       "database_id": "c4c3186c-bcfa-4bb9-959f-5086151abce8"
+    },
+    {
+      "binding": "COURSE_DB",
+      "database_name": "course-allocation-db",
+      "migrations_dir": "vendor/course-allocation/migrations",
+      "database_id": "2f1b7cde-5ea8-453b-b810-f372cf138c60"
     }
   ],
   "build": {

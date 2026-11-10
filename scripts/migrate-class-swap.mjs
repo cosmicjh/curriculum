@@ -37,7 +37,7 @@ function targetDatabase(){
 }
 export async function migrate(apply=false){
  await mkdir(resolve(root,'private'),{recursive:true});const config=JSON.parse(await readFile(resolve(root,'wrangler.jsonc'),'utf8'));
- assert.equal(config.name,'school-timetable');assert.equal(config.d1_databases.length,1);assert.equal(config.d1_databases[0].database_id,'c4c3186c-bcfa-4bb9-959f-5086151abce8');
+ assert.equal(config.name,'school-timetable');assert.equal(config.d1_databases.find(d=>d.binding==='DB').database_id,'c4c3186c-bcfa-4bb9-959f-5086151abce8');
  if(apply){
   const stamp=new Date().toISOString().replaceAll(/[:.]/g,'-');
   for(const database of ['DB',source]){await command(['d1','export',database,'--remote','--output',resolve(root,'private/shared-before-'+database+'-'+stamp+'.local.sql')]);console.log('PASS private backup: '+database);}

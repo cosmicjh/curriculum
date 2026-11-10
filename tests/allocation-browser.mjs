@@ -4,7 +4,7 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import {harness} from './harness.mjs';
 import {backup,allocationFixture} from './fixture.mjs';
 import '../scripts/build.mjs';
-const h=await harness(),admin=await h.login();assert((await h.mutation('restore',{backup:backup()},admin.cookie)).ok);const testBoard=allocationFixture();testBoard.rooms.unshift(...Array.from({length:20},(_,i)=>({id:'extra-'+i,label:'가상실 '+i,classNum:''})));assert((await h.mutation('saveAllocation',{board:testBoard},admin.cookie)).ok);
+const h=await harness({course:true}),admin=await h.login();assert((await h.mutation('restore',{backup:backup()},admin.cookie)).ok);const testBoard=allocationFixture();testBoard.rooms.unshift(...Array.from({length:20},(_,i)=>({id:'extra-'+i,label:'가상실 '+i,classNum:''})));assert((await h.mutation('saveAllocation',{board:testBoard},admin.cookie)).ok);
 const fullBoard=allocationFixture();fullBoard.rooms=testBoard.rooms;
 const available=[];for(const d of ['월','화','수','목','금'])for(let period=1;period<=(d==='수'?6:7);period++)if(!(d==='월'&&period===1||d==='수'&&period>=5))available.push({day:d,period});
 const first=fullBoard.grades[0].blocks[0],rest=available.filter(t=>!first.slots.some(s=>s.day===t.day&&s.period===t.period));let at=0;
@@ -21,8 +21,6 @@ try{
   await login('admin');let frame;
   assert.equal(await page.locator('.admin-nav [data-tab=links]').count(),0);
   assert.deepEqual(await page.locator('.admin-nav').locator('button,a').allTextContents(),['학생','시수배당표','이동수업 배치표','결보강','설정']);
-  await page.evaluate(()=>{window.open=()=>({location:{replace:url=>{window.courseOpened=new URL(url).hash.startsWith('#session=tt.');}}});});
-  await page.locator('.admin-nav [data-action=course-allocation]').click();await page.waitForFunction(()=>window.courseOpened===true);
   for(const tab of ['students','allocation','settings','sections','imports']){
    await page.locator('[data-action=admin-tab][data-tab='+tab+']').click();await idle();
    const current=await page.locator('#admin-content').evaluate(el=>{const content=el.getBoundingClientRect(),nav=document.querySelector('.admin-nav').getBoundingClientRect();return [content.x,content.y,content.width,nav.x,nav.y];});
@@ -31,6 +29,25 @@ try{
    if(['sections','settings'].includes(tab))await page.screenshot({path:'test-results/workspace-admin-'+tab+'.png',fullPage:true});
   }
   await page.locator('[data-tab=allocation]').click();await idle();await page.screenshot({path:'test-results/workspace-admin-allocation.png',fullPage:true});
+ });
+ await step('admin opens the worksheet in the current tab and keeps it mounted across tools',async()=>{
+  await page.locator('.admin-nav [data-tab=hours]').click();await idle();
+  const workbook=page.frameLocator('#course-pane iframe');
+  await workbook.locator('.workbook').waitFor();
+  await workbook.locator('body').evaluate(el=>{el.ownerDocument.defaultView.print=()=>{el.dataset.printed='true';};});
+  await workbook.getByRole('button',{name:'양식 인쇄',exact:true}).click();
+  await workbook.locator('body[data-printed=true]').waitFor();
+  assert.equal(await workbook.locator('#print-root svg').count(),1);
+  await workbook.getByRole('button',{name:'학교 설정',exact:true}).click();
+  await workbook.locator('#school-form input[name=name]').fill('가상 작성 중');
+  const initialUrl=page.url();assert.equal(context.pages().length,1);
+  await page.screenshot({path:'test-results/course-desktop.png',fullPage:true});
+  await page.locator('[data-tab=students]').click();await idle();
+  assert(await page.locator('#course-pane').isHidden());
+  await page.locator('[data-tab=hours]').click();await idle();
+  assert.equal(await workbook.locator('#school-form input[name=name]').inputValue(),'가상 작성 중');
+  assert.equal(page.url(),initialUrl);
+  await page.locator('[data-tab=allocation]').click();await idle();
  });
  await step('admin edits a room without losing the draft when switching tabs',async()=>{
   assert.equal(await page.locator('#allocation-room').count(),0);await page.locator('#allocation-query').fill('가상과학');assert.equal(await page.locator('.allocation-table td.allocation-match').count(),2);assert.equal(await page.locator('.allocation-table thead th').count(),23);await page.locator('#allocation-query').fill('');
@@ -44,7 +61,7 @@ try{
   await page.locator('[data-tab=students]').click();await idle();assert.match(await page.locator('#student-table').textContent(),/다른 관리자 수정 보존/);await page.locator('[data-tab=allocation]').click();await idle();
  });
  await step('teacher highlights lessons without changing the grid or exposing editing controls and sees the shared room',async()=>{
-  await page.locator('[data-action=logout]').click();await idle();await login('teacher');assert.equal(await page.locator('[data-alloc=save],[data-alloc=cell],[data-alloc=rooms]').count(),0);assert.equal(await page.locator('#allocation-room').count(),0);const cells=page.locator('.allocation-table tr[data-allocation-block] td'),count=await cells.count();await page.locator('#allocation-query').fill('협력교사');assert.equal(await cells.count(),count);assert.equal(await cells.and(page.locator('.allocation-match')).count(),1);assert.equal(await page.locator('.allocation-table thead .allocation-match').textContent(),'새 실험실');assert.equal(await page.locator('.allocation-table tbody th.allocation-match').count(),1);assert.equal(await page.locator('.allocation-table tbody th.allocation-match').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(230, 230, 230)');await page.screenshot({path:'test-results/allocation-search.png',fullPage:true});await page.locator('#allocation-query').fill('없는과목');assert.equal(await page.locator('.allocation-match').count(),0);assert.equal(await cells.count(),count);await page.locator('#allocation-query').fill('');
+  await page.locator('[data-action=logout]').click();await idle();await login('teacher');await page.locator('.tabs [data-tab=hours]').click();await page.locator('#modal').getByText('관리자 설정에서 시수배당표 사용을 허용한 뒤 열 수 있습니다.').waitFor();await page.locator('#modal [data-action=close-modal]').last().click();assert(await page.locator('#course-pane').isHidden());assert.equal(await page.locator('[data-alloc=save],[data-alloc=cell],[data-alloc=rooms]').count(),0);assert.equal(await page.locator('#allocation-room').count(),0);const cells=page.locator('.allocation-table tr[data-allocation-block] td'),count=await cells.count();await page.locator('#allocation-query').fill('협력교사');assert.equal(await cells.count(),count);assert.equal(await cells.and(page.locator('.allocation-match')).count(),1);assert.equal(await page.locator('.allocation-table thead .allocation-match').textContent(),'새 실험실');assert.equal(await page.locator('.allocation-table tbody th.allocation-match').count(),1);assert.equal(await page.locator('.allocation-table tbody th.allocation-match').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(230, 230, 230)');await page.screenshot({path:'test-results/allocation-search.png',fullPage:true});await page.locator('#allocation-query').fill('없는과목');assert.equal(await page.locator('.allocation-match').count(),0);assert.equal(await cells.count(),count);await page.locator('#allocation-query').fill('');
   await page.screenshot({path:'test-results/allocation-desktop.png',fullPage:true});await page.locator('[data-tab=timetable]').click();await page.locator('#teacher-name').fill('가상교사');await page.locator('form[data-form=teacher] button').click();await idle();assert.match(await page.locator('.tt').textContent(),/새 실험실/);
  });
  await step('mobile search preserves all rooms and all grades print',async()=>{

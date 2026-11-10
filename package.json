@@ -13,7 +13,7 @@
     "deploy": "node scripts/check-deploy.mjs && wrangler deploy",
     "setup:local": "node scripts/setup.mjs",
     "setup:production": "node scripts/setup.mjs --production",
-    "db:migrate:local": "node scripts/wrangler.mjs d1 migrations apply DB --local",
+    "db:migrate:local": "node scripts/wrangler.mjs d1 migrations apply DB --local && node scripts/wrangler.mjs d1 migrations apply COURSE_DB --local",
     "db:migrate:remote": "node scripts/check-deploy.mjs && wrangler d1 migrations apply DB --remote",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:browser": "node tests/browser.mjs",
