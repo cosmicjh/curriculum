@@ -26,7 +26,7 @@
 .sr-note-text{color:var(--muted);line-height:1.5}
 .sr-query-person:not([hidden]){display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:18px}
 .sr-query-person h3{margin:0;overflow-wrap:anywhere}
-.studyroom .sr-table :is([data-sr=readNote],.sr-student-link){min-height:24px;margin:0;padding:0;line-height:24px;vertical-align:top;text-align:left}
+.studyroom .sr-table .sr-student-link{min-height:24px;margin:0;padding:0;line-height:24px;vertical-align:top;text-align:left}
 .studyroom .sr-student-link{text-decoration:underline;text-underline-offset:2px}
 .sr-day h3{margin-bottom:8px}.sr-day h4{margin:16px 0 6px}
 @media(max-width:920px){
@@ -43,3 +43,8 @@
  .sr-table th:nth-child(3){width:11%}
  .sr-table th:nth-child(4){width:19%}
 }
+
+.sr-query-note{position:relative}
+.studyroom .sr-query-note button{display:block;width:100%;min-height:24px;margin:0;padding:0;text-align:left;line-height:1.6;overflow-wrap:anywhere;white-space:pre-wrap}
+.sr-query-note button::after{content:'';position:absolute;inset:0}
+.sr-query-note:hover{background:var(--ui-subtle)}

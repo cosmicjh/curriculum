@@ -19,7 +19,8 @@ try{
  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false'),login=async(role)=>{await page.goto(base+'/'+role+'.html');await idle();await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('[data-tab=allocation]').waitFor();await idle();await page.locator('[data-tab=allocation]').click();await page.locator('.allocation-table').waitFor();await idle();};
  await step('administrator menus keep the same navigation and content frame',async()=>{
   await login('admin');let frame;
-  for(const tab of ['students','sections','allocation','links','imports','settings','history']){
+  assert.equal(await page.locator('.admin-nav [data-tab=links]').count(),0);
+  for(const tab of ['students','sections','allocation','imports','settings','history']){
    await page.locator('[data-action=admin-tab][data-tab='+tab+']').click();await idle();
    const current=await page.locator('#admin-content').evaluate(el=>{const content=el.getBoundingClientRect(),nav=document.querySelector('.admin-nav').getBoundingClientRect();return [content.x,content.y,content.width,nav.x,nav.y];});
    frame??=current;assert.deepEqual(current,frame,tab);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

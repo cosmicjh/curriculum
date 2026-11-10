@@ -114,7 +114,7 @@ try{
   assert.equal(await attended.getAttribute('data-day'),now.date);
   assert.deepEqual(await results.getByRole('columnheader').allTextContents(),['학번','이름','좌석','제출','비고']);
   assert.equal(await results.locator('tbody tr').evaluate(row=>getComputedStyle(row).display),'table-row');
-  assert.match(await results.locator('tbody tr').textContent(),/30101.*가상학생하나.*99.*읽기/);
+  assert.match(await results.locator('tbody tr').textContent(),/30101.*가상학생하나.*99.*가상 특이사항/);
   assert.match(await results.locator('tbody td').nth(3).textContent(),/^\d{2}:\d{2}$/);
   assert.equal(await results.locator('[data-sr=edit], [data-sr=history]').count(),0);
   assert(await results.evaluate(e=>e.scrollWidth<=e.clientWidth));
@@ -127,14 +127,15 @@ try{
   await note.fill('가상 비고 수정');await sr.locator('dialog button.primary').click();await queryIdle();
   await results.locator('[data-sr=readNote]').click();assert.equal(await note.inputValue(),'가상 비고 수정');
   await sr.locator('dialog button[value=delete]').click();await queryIdle();
-  const writeNote=results.getByRole('button',{name:'30101 가상학생하나 비고 작성'});
+  const writeNote=results.getByRole('button',{name:'30101 가상학생하나 비고 편집',exact:true});
   assert.equal(await writeNote.count(),1);
+  assert.equal(await writeNote.textContent(),'');
   assert.equal((await h.sql("SELECT note FROM sr_attendance WHERE student_number='30101'")).results[0].note,'');
   await writeNote.click();
   assert.equal(await note.inputValue(),'');
   assert.equal(await sr.locator('dialog button[value=delete]').count(),0);
   await note.fill('일반 교사 신규 비고');await sr.locator('dialog button.primary').click();await queryIdle();
-  assert.equal(await results.getByRole('button',{name:'30101 가상학생하나 비고 읽기'}).count(),1);
+  assert.equal(await results.locator('[data-sr=readNote]').textContent(),'일반 교사 신규 비고');
   assert.equal((await h.sql("SELECT note FROM sr_attendance WHERE student_number='30101'")).results[0].note,'일반 교사 신규 비고');
   await sr.getByRole('button',{name:'전체 학생',exact:true}).click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-person]').isHidden(),true);

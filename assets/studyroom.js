@@ -48,10 +48,7 @@ export function mountStudyroom(root,{request,admin=false}){
    const record='data-id="'+esc(r.id)+'"';
    const name=query&&!state.person?button('studentCalendar',esc(r.name),record+' class="sr-student-link"'):esc(r.name);
    const cells=[esc(r.student_number),name,esc(r.seat),time(r.first_at)].map(value=>'<td>'+value+'</td>').join('');
-   if(query){
-    const action=r.note?'읽기':'작성';
-    return '<tr>'+cells+'<td class="sr-note">'+button('readNote',action,record+' aria-label="'+esc(r.student_number+' '+r.name+' 비고 '+action)+'"')+'</td></tr>';
-   }
+   if(query)return '<tr>'+cells+'<td class="sr-note sr-query-note">'+button('readNote',esc(r.note),record+' aria-label="'+esc(r.student_number+' '+r.name+' 비고 편집'+(r.note?' · '+r.note:''))+'" title="비고 편집"')+'</td></tr>';
    const status=r.state==='cancelled'?'<span>취소</span>':'';
    return '<tr>'+cells+'<td class="sr-note"><div class="sr-table-actions">'+
     button('edit','변경',record)+button('history','이력',record)+status+'</div>'+(r.note?'<p class="sr-note-text">'+esc(r.note)+'</p>':'')+'</td></tr>';

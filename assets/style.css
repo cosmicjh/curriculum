@@ -98,3 +98,9 @@ body.workspace #class-swap-pane{max-width:none;margin:0;padding:0;width:100%}
  .allocation-table .allocation-grade-row th,.allocation-table .allocation-grade-row td{height:28px;padding:4px 3px;font-size:12px}
  .allocation-note{font-size:11px;margin-top:8px;line-height:1.4}
 }
+
+.import-intro{max-width:65ch;margin:10px 0 20px;line-height:1.6;color:var(--muted)}
+.import-step{display:grid;gap:8px;justify-items:start;border-top:1px solid var(--border);padding-top:14px}
+.import-step p,.import-step .field{max-width:100%;min-width:0}
+.import-step p{font-size:13px;line-height:1.6;color:var(--muted)}
+.import-step small{margin-left:5px}

@@ -136,7 +136,14 @@ var TTCore = (function () {
       var ls=rt.slots[day+'-'+p]||[], boardBlock=null;
       if(rt.store.allocation)(rt.store.allocation.grades||[]).forEach(function(g){if(g.grade===String(student.grade))g.blocks.forEach(function(b){if(b.slots.some(function(t){return t.day===day&&t.period===p;}))boardBlock=b.code;});});
       var exactOwn=own.filter(function(s){return (!boardBlock||block(s.code)===boardBlock)&&ls.some(function(l){return l.section&&l.section.id===s.id;});});
-      if(exactOwn.length===1){cells.push(electiveCell(day,p,exactOwn[0]));continue;}
+      if(exactOwn.length===1){
+        var cell=electiveCell(day,p,exactOwn[0]);
+        if(!cell.room){
+          var rooms=Array.from(new Set(ls.filter(function(l){return l.section&&l.section.id===exactOwn[0].id&&l.rawRoom;}).map(function(l){return l.rawRoom;})));
+          if(rooms.length===1)cell.room=rooms[0];
+        }
+        cells.push(cell);continue;
+      }
       if(exactOwn.length>1){empty.subject='배정 확인';empty.warning=true;cells.push(empty);continue;}
       var b=(rt.blocks[day+'-'+p]||{})[student.grade], matched=b?own.filter(function(s){return block(s.code)===b;}):[];
       if(matched.length===1){cells.push(electiveCell(day,p,matched[0]));continue;}

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {harness} from './harness.mjs';
 import {importScaleFixture} from './import-scale.fixture.mjs';
+import {fixture} from './fixture.mjs';
 import {prepareImport} from '../src/domain.js';
 import Core from '../src/core.js';
 const empty=()=>({term:'2026-2',settings:Core.defaultSettings(),students:[],sections:[],teacherRows:[],overrides:[],blocks:[]});
@@ -12,6 +13,23 @@ test('student source/natural keys stay consistent as imported numbers change',()
  const p=prepareImport(store,payload);assert.deepEqual(p.store.students.map(s=>[s.id,s.number]),[['first','1'],['second','2']]);assert.equal(p.summary.addedStudents,0);assert.equal(p.summary.changedStudents,2);assert.deepEqual(store.students.map(s=>s.number),['2','3']);
  assert.throws(()=>prepareImport(store,{...payload,students:[payload.students[1]]}),/학번 연결이 모호/);
  assert.throws(()=>prepareImport(empty(),{...payload,students:[payload.students[0],payload.students[0]]}),/중복/);
+});
+test('teacher timetable and student assignments can be registered separately with no section file',async t=>{
+ const h=await harness();t.after(()=>h.close());const {cookie}=await h.login(),teacher=await h.login('teacher'),{teacherRows,students}=fixture();
+ const format='timetable-import',schedule={format,teacherRows};
+ assert((await h.mutation('commitImport',{payload:schedule},cookie)).ok);
+ assert.equal((await h.sql('SELECT count(*) AS n FROM sections')).results[0].n,0);
+ const payload={format,students,inferSections:true};
+ assert.equal((await h.api('previewImport',{payload},teacher.cookie)).status,401);
+ const preview=await h.api('previewImport',{payload},cookie);
+ assert(preview.ok);assert.deepEqual(preview.data.inferredSections,['3학년 가상과학 A1','3학년 가상언어 B1','3학년 가상과학 A2']);
+ const saved=await h.mutation('commitImport',{payload,expectedRevision:preview.data.revision},cookie);assert(saved.ok,JSON.stringify(saved.error));
+ const section=await h.sql("SELECT id FROM sections WHERE subject='가상과학' AND code='A1'");
+ const roster=await h.api('roster',{query:{kind:'elective',sectionId:section.results[0].id}},teacher.cookie);
+ assert(roster.ok);assert.deepEqual(roster.data.students.map(s=>s.name),['가상학생하나']);
+ const timetable=await h.api('student',{studentNumber:'30101'});assert(timetable.ok);
+ assert.equal(timetable.data.cells.find(c=>c.day==='월'&&c.period===2).room,'과학실');
+ assert.equal((await h.api('previewImport',{payload},cookie)).data.inferredSections,undefined);
 });
 test('school-sized registration is atomic, restores exact choices and protects subsequent web edits',async t=>{
  const h=await harness();t.after(()=>h.close());const {cookie}=await h.login(),payload=importScaleFixture();

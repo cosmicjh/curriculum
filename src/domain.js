@@ -49,9 +49,13 @@ export function prepareImport(store,payload,preserve=true,revision=''){
  }
  if(payload.students){
  const seen=new Set(),studentsByKey=new Map(),sectionsBySource=new Map();
+ const inferred=[],infer=payload.inferSections===true&&!payload.sections;
  // Build lookup keys once. Re-normalizing every section for every choice can
  // exhaust the deployed Worker's CPU before its atomic D1 write starts.
- for(const section of next.sections)if(!sectionsBySource.has(section.sourceKey))sectionsBySource.set(section.sourceKey,section);
+ for(const section of next.sections){
+  if(!sectionsBySource.has(section.sourceKey))sectionsBySource.set(section.sourceKey,section);
+  if(infer)sectionsBySource.set(Core.sectionKey(section.grade,section.subject,section.code),section);
+ }
  const keys=s=>new Set([s.sourceKey,Core.key(s)]);
  function indexStudent(s,index,remove=false){for(const key of keys(s)){if(remove)studentsByKey.get(key)?.delete(index);else{if(!studentsByKey.has(key))studentsByKey.set(key,new Set());studentsByKey.get(key).add(index);}}}
  next.students.forEach((s,index)=>indexStudent(s,index));
@@ -59,12 +63,30 @@ export function prepareImport(store,payload,preserve=true,revision=''){
   const sourceKey=Core.key(raw),candidates=Array.from(studentsByKey.get(sourceKey)||[]);if(candidates.length>1)throw Error('학번 연결이 모호합니다: '+sourceKey);
   const index=candidates[0],old=index===undefined?null:next.students[index],s=old?structuredClone(old):{id:crypto.randomUUID(),sourceKey,status:'재학',choices:{},manualFields:[]};if(seen.has(s.id))throw Error('등록 학생이 중복됩니다: '+sourceKey);seen.add(s.id);
   for(const k of ['grade','classNum','number','name','note']){const value=['grade','classNum','number'].includes(k)?Core.number(raw[k]):clean(raw[k],k==='note'?500:80);if(preserve&&old&&s.manualFields.includes(k)){if(value!==s[k])summary.preservedFields++;}else s[k]=value;}
-  for(const subject of Object.keys(raw.choices||{})){const value=clean(raw.choices[subject],30);if(preserve&&old&&s.manualFields.includes('choice:'+subject)){if(value!==s.choices[subject])summary.preservedFields++;}else {const mapped=sectionsBySource.get(Core.sectionKey(raw.grade,subject,value));s.choices[mapped?.subject||subject]=mapped?.code||value;}}
+  for(const subject of Object.keys(raw.choices||{})){
+   const value=clean(raw.choices[subject],30);
+   if(preserve&&old&&s.manualFields.includes('choice:'+subject)){if(value!==s.choices[subject])summary.preservedFields++;continue;}
+   const choiceKey=Core.sectionKey(raw.grade,subject,value);
+   let mapped=sectionsBySource.get(choiceKey);
+   if(infer&&(!mapped||mapped.grade!==s.grade)){
+    const name=clean(subject,100),key=Core.sectionKey(s.grade,name,value);
+    mapped=sectionsBySource.get(key);
+    if(mapped&&mapped.grade!==s.grade)mapped=null;
+    if(!mapped&&name&&['1','2','3'].includes(s.grade)&&/^[A-Z]+\d*$/.test(Core.code(value))){
+     mapped={id:crypto.randomUUID(),sourceKey:key,grade:s.grade,subject:name,code:value,room:'',shortName:'',manualFields:[]};
+     next.sections.push(mapped);sectionsBySource.set(key,mapped);
+     inferred.push(s.grade+'학년 '+name+' '+value);
+    }
+   }
+   s.choices[mapped?.subject||subject]=mapped?.code||value;
+  }
   if(!preserve)s.manualFields=s.manualFields.filter(k=>k==='status');s.updatedAt=new Date().toISOString();
   if(old){indexStudent(old,index,true);next.students[index]=s;indexStudent(s,index);if(JSON.stringify({...s,updatedAt:old.updatedAt})!==JSON.stringify(old))summary.changedStudents++;}else{const addedIndex=next.students.length;next.students.push(s);indexStudent(s,addedIndex);summary.addedStudents++;}
  }
  const grades=new Set(payload.students.map(s=>String(s.grade)));summary.missingStudents=store.students.filter(s=>grades.has(s.grade)&&!seen.has(s.id)).length;
- if(summary.missingStudents)summary.warnings.push('업로드에 없는 기존 학생 '+summary.missingStudents+'명은 유지합니다.');parts.push('students');}
+ if(summary.missingStudents)summary.warnings.push('업로드에 없는 기존 학생 '+summary.missingStudents+'명은 유지합니다.');
+ if(inferred.length){parts.push('sections');summary.inferredSections=inferred;}
+ parts.push('students');}
  const v=Core.validate(next);summary.errors=v.errors;summary.warnings.push(...v.warnings);const rt=Core.runtime(next);
  Object.assign(summary,{students:next.students.length,sections:next.sections.length,teachers:rt.teachers.length,linkWarnings:rt.warnings.length});
  if(rt.warnings.length)summary.warnings.push('학년·분반 확인이 필요한 수업 '+rt.warnings.length+'건');return {store:next,parts,summary};
