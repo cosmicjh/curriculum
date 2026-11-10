@@ -18,7 +18,7 @@ function requireEnabled(ctx){
 export async function launchCourse(db,ctx,env,request,role){
  if(!['teacher','admin'].includes(role))Auth.fail(400,'INVALID_REQUEST','권한을 확인하세요.');
  const session=await Auth.authenticate(db,request,role,env);
- requireEnabled(ctx);
+ if(role==='teacher')requireEnabled(ctx);
  const iv=crypto.getRandomValues(new Uint8Array(12));
  const data=encoder.encode(JSON.stringify({session:session.token_hash,role}));
  const ciphertext=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},await key(env),data));
@@ -32,7 +32,7 @@ async function courseSession(db,env,token){
  catch{Auth.fail(401,'AUTH_REQUIRED','통합시간표에서 시수배당표를 다시 열어 주세요.');}
  const session=await db.first('SELECT s.role FROM sessions s JOIN credentials c ON c.role=s.role AND c.epoch=s.epoch WHERE s.token_hash=? AND s.expires_at>?',grant.session,Date.now());
  if(!session||grant.role==='admin'&&session.role!=='admin')Auth.fail(401,'AUTH_REQUIRED','통합시간표에서 시수배당표를 다시 열어 주세요.');
- requireEnabled(await S.context(db));
+ if(grant.role==='teacher')requireEnabled(await S.context(db));
  return {role:grant.role};
 }
 export async function bridgeCourse(db,env,req){

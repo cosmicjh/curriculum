@@ -7,11 +7,14 @@ import Core from '../src/core.js';
 import {summarize} from '../scripts/compare-backups.mjs';
 test('course launch inherits the role and can transfer to an inactive term',async t=>{
  const h=await harness();t.after(()=>h.close());const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
- assert.equal((await h.api('courseLaunch',{role:'admin'},admin)).code,'COURSE_CLOSED');
+ const launch=await h.api('courseLaunch',{role:'admin'},admin);
+ assert(launch.ok);
+ const adminToken=launch.data.token;
+ assert.equal((await h.api('courseBridge',{token:adminToken})).data.role,'admin');
  assert.equal((await h.api('courseLaunch',{role:'teacher'},teacher)).code,'COURSE_CLOSED');
  assert((await h.mutation('saveSettings',{settings:{...Core.defaultSettings(),courseAllocationTeachers:true}},admin)).ok);
  const grant=async(role,cookie)=>(await h.api('courseLaunch',{role},cookie)).data.token;
- const adminToken=await grant('admin',admin),teacherToken=await grant('teacher',teacher);
+ const teacherToken=await grant('teacher',teacher);
  assert.equal((await h.api('courseBridge',{token:teacherToken})).data.role,'teacher');
  assert.equal((await h.api('courseLaunch',{role:'admin'},teacher)).status,401);
  const transfer={format:'school-course-allocation-transfer',schemaVersion:1,term:'2027-1',sections:[{grade:'3',subject:'가상과학',code:'A1',weeklyHours:3,teachers:[{name:'가상교사',hours:3}]}]};
@@ -19,6 +22,7 @@ test('course launch inherits the role and can transfer to an inactive term',asyn
  assert.equal((await h.api('courseBridge',{token:adminToken,transfer})).data.term,'2027-1');
  assert.equal((await h.api('bootstrap')).data.term,'2026-2');
  assert.equal((await h.api('courseTransfer',{},admin)).data,null);
+ assert.equal((await h.api('courseBridge',{token:adminToken})).data.role,'admin');
  assert((await h.mutation('switchTerm',{term:'2027-1'},admin)).ok);
  assert.deepEqual((await h.api('courseTransfer',{},admin)).data.transfer,transfer);
  assert((await h.mutation('switchTerm',{term:'2026-2'},admin)).ok);

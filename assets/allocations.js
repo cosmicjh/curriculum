@@ -1,18 +1,15 @@
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const blank=()=>({rooms:Array.from({length:12},(_,i)=>({id:'room-'+i,label:(i+1)+'반',classNum:String(i+1)})),grades:['3','2'].map(grade=>({grade,homerooms:{},blocks:[]}))});
 export function mountAllocation(root,initial,{admin,request,onSaved,print,loadXlsx,onError}){
- let data=initial,board=structuredClone(data.board||blank()),sections=data.sections,dirty=false,grade=board.grades[0]?.grade||'3',room='',query='',paper='A3',dialog,returnFocus;
+ let data=initial,board=structuredClone(data.board||blank()),sections=data.sections,dirty=false,grade=board.grades[0]?.grade||'3',query='',paper='A3',dialog,returnFocus;
  const section=c=>sections.find(s=>s.id===c?.sectionId)||c||{},current=()=>board.grades.find(g=>g.grade===grade),names=c=>(c?.teachers||[]).join(', ');
  const field=(label,id,value,extra='')=>'<div class="field"><label for="'+id+'">'+label+'</label><input id="'+id+'" value="'+esc(value)+'" '+extra+'></div>';
  function table(){
-  const grades=[...board.grades].sort((a,b)=>Number(b.grade)-Number(a.grade)),matches=c=>!query||[section(c).subject,section(c).code,names(c)].join(' ').includes(query);
-  const rooms=board.rooms.filter(r=>(!room||r.id===room)&&(!query||grades.some(g=>g.blocks.some(b=>b.cells[r.id]&&matches(b.cells[r.id])))));
-  if(!rooms.length)return '<p class="empty">검색 결과가 없습니다.</p>';
+  const grades=[...board.grades].sort((a,b)=>Number(b.grade)-Number(a.grade)),rooms=board.rooms;
   const bodies=grades.map(g=>{
-   const blocks=g.blocks.filter(b=>!query||rooms.some(r=>b.cells[r.id]&&matches(b.cells[r.id])));
    const heading='<tr class="allocation-grade-row"><th scope="rowgroup">'+g.grade+'학년</th>'+rooms.map(r=>'<td>'+esc(g.homerooms[r.id]||'')+'</td>').join('')+'</tr>';
-   const rows=blocks.map(b=>'<tr data-allocation-block="'+esc(b.code)+'"><th scope="row">'+(admin?'<button data-alloc="block" data-grade="'+g.grade+'" data-code="'+esc(b.code)+'" aria-label="'+esc(g.grade+'학년 '+b.code+' '+b.slots.map(t=>t.day+t.period).join(', ')+' 시간블록 수정')+'">':'<span>')+esc(b.code)+'<span class="allocation-times">'+b.slots.map(t=>'<span class="allocation-time">'+t.day+t.period+'</span>').join(' ')+'</span>'+(admin?'</button>':'</span>')+'</th>'+rooms.map(r=>{const c=b.cells[r.id],course=section(c),content=c?'<strong>'+esc(course.subject)+' <span>'+esc(course.code)+'</span></strong><span class="allocation-teachers">'+esc(c.teachers.join(','))+'</span>':'<span class="allocation-vacant" aria-hidden="true">—</span>';return '<td>'+(admin?'<button class="allocation-cell" data-alloc="cell" data-grade="'+g.grade+'" data-code="'+esc(b.code)+'" data-room="'+esc(r.id)+'" aria-label="'+esc(g.grade+'학년 '+b.code+' '+r.label+' '+(c?[course.subject,course.code,names(c)].join(' '):'빈 교실')+' 배치 수정')+'">'+content+'</button>':content)+'</td>';}).join('')+'</tr>').join('');
-   return '<tbody data-allocation-grade="'+g.grade+'">'+heading+(rows||'<tr><td class="allocation-empty" colspan="'+(rooms.length+1)+'">'+(query?'검색 결과가 없습니다.':'시간블록을 추가해 주세요.')+'</td></tr>')+'</tbody>';
+   const rows=g.blocks.map(b=>'<tr data-allocation-block="'+esc(b.code)+'"><th scope="row">'+(admin?'<button data-alloc="block" data-grade="'+g.grade+'" data-code="'+esc(b.code)+'" aria-label="'+esc(g.grade+'학년 '+b.code+' '+b.slots.map(t=>t.day+t.period).join(', ')+' 시간블록 수정')+'">':'<span>')+esc(b.code)+'<span class="allocation-times">'+b.slots.map(t=>'<span class="allocation-time">'+t.day+t.period+'</span>').join(' ')+'</span>'+(admin?'</button>':'</span>')+'</th>'+rooms.map(r=>{const c=b.cells[r.id],course=section(c),content=c?'<strong>'+esc(course.subject)+' <span>'+esc(course.code)+'</span></strong><span class="allocation-teachers">'+esc(c.teachers.join(','))+'</span>':'<span class="allocation-vacant" aria-hidden="true">—</span>';return '<td'+(c?' data-allocation-lesson':'')+'>'+(admin?'<button class="allocation-cell" data-alloc="cell" data-grade="'+g.grade+'" data-code="'+esc(b.code)+'" data-room="'+esc(r.id)+'" aria-label="'+esc(g.grade+'학년 '+b.code+' '+r.label+' '+(c?[course.subject,course.code,names(c)].join(' '):'빈 교실')+' 배치 수정')+'">'+content+'</button>':content)+'</td>';}).join('')+'</tr>').join('');
+   return '<tbody data-allocation-grade="'+g.grade+'">'+heading+(rows||'<tr><td class="allocation-empty" colspan="'+(rooms.length+1)+'">시간블록을 추가해 주세요.</td></tr>')+'</tbody>';
   }).join('');
   return '<div class="allocation-scroll" tabindex="0" role="region" aria-label="전체 학년·교실 배치표"><table class="allocation-table"><caption class="sr-only">이동수업 교실 배치표</caption><thead><tr><th scope="col">블록 / 교시</th>'+rooms.map(r=>'<th scope="col">'+esc(r.label)+'</th>').join('')+'</tr></thead>'+bodies+'</table></div>';
  }
@@ -24,9 +21,23 @@ export function mountAllocation(root,initial,{admin,request,onSaved,print,loadXl
  function render(){
   const oldScroll=root.querySelector('.allocation-scroll'),position=oldScroll?{left:oldScroll.scrollLeft,top:oldScroll.scrollTop}:null,focused=document.activeElement,focusKey=focused&&root.contains(focused)?{id:focused.id,action:focused.dataset.alloc,code:focused.dataset.code,room:focused.dataset.room,grade:focused.dataset.grade}:null;
   root.className='allocation-view';
-  root.innerHTML='<div class="allocation-heading"><div><h2>이동수업 배치표</h2></div><div class="toolbar">'+(admin?'<span class="allocation-status" role="status">'+(dirty?'저장하지 않은 변경':'저장됨')+'</span><button data-alloc="save" class="primary" '+(!dirty?'disabled':'')+'>배치표 저장</button>':'')+'<button data-alloc="refresh">새로고침</button><label class="sr-only" for="allocation-paper">인쇄 용지</label><select id="allocation-paper"><option value="A3" '+(paper==='A3'?'selected':'')+'>A3 가로</option><option value="A4" '+(paper==='A4'?'selected':'')+'>A4 가로</option></select><button data-alloc="print">전체 한 장 인쇄</button></div></div><div class="allocation-filters"><div class="field"><label for="allocation-room">교실</label><select id="allocation-room"><option value="">전체 교실</option>'+board.rooms.map(r=>'<option value="'+esc(r.id)+'" '+(room===r.id?'selected':'')+'>'+esc(r.label)+'</option>').join('')+'</select></div><div class="field allocation-search">'+field('과목·교사 검색','allocation-query',query,'type="search" autocomplete="off"').replace(/^<div class="field">|<\/div>$/g,'')+'</div></div>'+(admin?'<div class="toolbar"><button data-alloc="block">시간블록 추가</button><button data-alloc="rooms">교실·담임 편집</button><button data-alloc="import">엑셀 불러오기</button><input id="allocation-file" type="file" accept=".xlsx,.xls" hidden></div>':'')+'<div id="allocation-grid">'+table()+'</div>';
+  root.innerHTML='<div class="allocation-heading"><div><h2>이동수업 배치표</h2></div><div class="toolbar">'+(admin?'<span class="allocation-status" role="status">'+(dirty?'저장하지 않은 변경':'저장됨')+'</span><button data-alloc="save" class="primary" '+(!dirty?'disabled':'')+'>배치표 저장</button>':'')+'<button data-alloc="refresh">새로고침</button><label class="sr-only" for="allocation-paper">인쇄 용지</label><select id="allocation-paper"><option value="A3" '+(paper==='A3'?'selected':'')+'>A3 가로</option><option value="A4" '+(paper==='A4'?'selected':'')+'>A4 가로</option></select><button data-alloc="print">전체 한 장 인쇄</button></div></div><div class="allocation-filters"><div class="field allocation-search">'+field('과목·교사 검색','allocation-query',query,'type="search" autocomplete="off"').replace(/^<div class="field">|<\/div>$/g,'')+'</div></div>'+(admin?'<div class="toolbar"><button data-alloc="block">시간블록 추가</button><button data-alloc="rooms">교실·담임 편집</button><button data-alloc="import">엑셀 불러오기</button><input id="allocation-file" type="file" accept=".xlsx,.xls" hidden></div>':'')+'<div id="allocation-grid">'+table()+'</div>';
+  highlightMatches();
   const scroll=root.querySelector('.allocation-scroll');if(scroll&&position){scroll.scrollLeft=position.left;scroll.scrollTop=position.top;}
   if(focusKey){const target=focusKey.id?root.querySelector('#'+CSS.escape(focusKey.id)):Array.from(root.querySelectorAll('[data-alloc]')).find(el=>el.dataset.alloc===focusKey.action&&el.dataset.code===focusKey.code&&el.dataset.room===focusKey.room&&el.dataset.grade===focusKey.grade);target?.focus({preventScroll:true});}
+ }
+ function highlightMatches(){
+  const table=root.querySelector('.allocation-table'),term=query.trim().toLowerCase(),rooms=new Set();
+  for(const row of table.querySelectorAll('[data-allocation-block]')){
+   let matched=false;
+   for(const cell of row.querySelectorAll('[data-allocation-lesson]')){
+    const match=!!term&&cell.textContent.toLowerCase().includes(term);
+    cell.classList.toggle('allocation-match',match);
+    if(match){rooms.add(cell.cellIndex);matched=true;}
+   }
+   row.cells[0].classList.toggle('allocation-match',matched);
+  }
+  for(const heading of table.tHead.rows[0].cells)heading.classList.toggle('allocation-match',rooms.has(heading.cellIndex));
  }
  function changed(){dirty=true;render();}
  function close(){if(!dialog)return;dialog.close();dialog.remove();dialog=null;const opener=returnFocus;returnFocus=null;opener?.focus({preventScroll:true});}
@@ -76,7 +87,7 @@ export function mountAllocation(root,initial,{admin,request,onSaved,print,loadXl
    if(action==='save'&&admin){el.disabled=true;root.inert=true;root.setAttribute('aria-busy','true');try{const reply=await request('saveAllocation',{board:structuredClone(board),expectedTerm:data.meta.term,expectedRevision:data.meta.revision,patch:true,compact:true});dirty=false;onSaved(reply);data={...reply.allocation,meta:reply.meta};board=structuredClone(data.board);sections=data.sections;render();if(reply.result.warnings.length)onError(Error(reply.result.warnings.join('\n')));}finally{root.inert=false;root.setAttribute('aria-busy','false');if(el.isConnected)el.disabled=false;}}
   })().catch(onError);
  });
- root.addEventListener('change',e=>{const el=e.target;if(el.id==='allocation-paper')paper=el.value;if(el.id==='allocation-room'){room=el.value;render();}if(el.id==='allocation-file'&&el.files[0]){(async()=>{await loadXlsx();await import('./allocation-import.js?v='+(window.TIMETABLE_CONFIG?.assetVersion||'1'));const next=await TTAllocationImport.file(el.files[0]);if((dirty||data.board)&&!confirm('불러온 파일로 현재 배치표 초안을 바꿀까요? 저장 전까지 기존 자료는 유지됩니다.'))return;board=next;grade=next.grades[0].grade;room='';query='';changed();})().catch(onError);}});
- root.addEventListener('input',e=>{if(e.target.id==='allocation-query'){query=e.target.value.trim();root.querySelector('#allocation-grid').innerHTML=table();}});
+ root.addEventListener('change',e=>{const el=e.target;if(el.id==='allocation-paper')paper=el.value;if(el.id==='allocation-file'&&el.files[0]){(async()=>{await loadXlsx();await import('./allocation-import.js?v='+(window.TIMETABLE_CONFIG?.assetVersion||'1'));const next=await TTAllocationImport.file(el.files[0]);if((dirty||data.board)&&!confirm('불러온 파일로 현재 배치표 초안을 바꿀까요? 저장 전까지 기존 자료는 유지됩니다.'))return;board=next;grade=next.grades[0].grade;query='';changed();})().catch(onError);}});
+ root.addEventListener('input',e=>{if(e.target.id==='allocation-query'){query=e.target.value;highlightMatches();}});
  render();return {get dirty(){return dirty;},get revision(){return data.meta.revision;},term:data.meta.term,refresh,destroy(){close();root.remove();}};
 }

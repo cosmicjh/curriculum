@@ -37,7 +37,7 @@ export function section(input,old){
  s.sourceKey=old?.sourceKey||Core.sectionKey(s.grade,s.subject,s.code);
  for(const k of ['grade','subject','code','shortName','room'])if(!old||s[k]!==old[k])s.manualFields.push(k);s.manualFields=[...new Set(s.manualFields)];return s;
 }
-export function prepareImport(store,payload,preserve=true,revision=''){
+export function prepareImport(store,payload,preserve=true,revision='',includeLinkExceptions=false){
  if(!payload||payload.format!=='timetable-import'||!payload.teacherRows&&!payload.sections&&!payload.students)throw Error('업로드 자료를 선택하세요.');
  const next=structuredClone(store),parts=[],summary={errors:[],warnings:[],addedStudents:0,changedStudents:0,preservedFields:0,missingStudents:0,revision};
  if(payload.teacherRows){next.teacherRows=payload.teacherRows;parts.push('teacherRows');}
@@ -90,7 +90,9 @@ export function prepareImport(store,payload,preserve=true,revision=''){
  parts.push('students');}
  const v=Core.validate(next);summary.errors=v.errors;summary.warnings.push(...v.warnings);const rt=Core.runtime(next);
  Object.assign(summary,{students:next.students.length,sections:next.sections.length,teachers:rt.teachers.length,linkWarnings:rt.warnings.length});
- if(rt.warnings.length)summary.warnings.push('학년·분반 확인이 필요한 수업 '+rt.warnings.length+'건');return {store:next,parts,summary};
+ if(includeLinkExceptions)summary.linkExceptions=rt.warnings;
+ else if(rt.warnings.length)summary.warnings.push('학년·분반 확인이 필요한 수업 '+rt.warnings.length+'건');
+ return {store:next,parts,summary};
 }
 export const studentSummary=s=>({id:s.id,grade:s.grade,classNum:s.classNum,number:s.number,name:s.name,status:s.status,note:s.note||'',choiceCount:Object.values(s.choices||{}).filter(Boolean).length});
 export const lesson=l=>({key:l.key,teacher:l.teacher,day:l.day,period:l.period,rawSubject:l.rawSubject,rawRoom:l.rawRoom,sectionId:l.section?.id||'',candidateIds:l.candidates.map(s=>s.id)});

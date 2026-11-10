@@ -34,7 +34,7 @@ async function read(db,ctx,req){
  if(a==='allocation'){const st=await S.load(db,ctx,['sections','allocation']);return {board:st.allocation||null,sections:st.sections,meta:S.meta(ctx)};}
  if(a==='adminBootstrap')return adminBoot(db,ctx,req);
  if(a==='teacherBootstrap')return teacherBoot(db,ctx,req);
- if(a==='adminSettings')return {meta:await S.metadata(db,ctx,true)};
+ if(a==='adminSettings')return {meta:await S.metadata(db,ctx,true),backups:await S.backupList(db,ctx.term),terms:(await db.all('SELECT id FROM terms ORDER BY id DESC')).map(r=>r.id)};
  if(a==='adminSections'){const m=S.meta(ctx);return {meta:m,sectionsRevision:m.sectionsRevision,...(req.sectionsRevision===m.sectionsRevision?{unchanged:true}:{sections:(await db.all('SELECT * FROM sections WHERE term_id=? ORDER BY grade,subject,code',ctx.term)).map(S.sectionRow)})};}
  if(a==='adminStudent'){
   const st=await S.load(db,ctx,['students'], 'AND id=?',[req.id||'']);if(req.id&&!st.students.length)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');
@@ -92,7 +92,7 @@ async function read(db,ctx,req){
   const cs=Array.isArray(q.classes)?q.classes:[];if(cs.length>30||cs.some(s=>!String(s).match(/^[1-3]-[1-9][0-9]?$/)))Auth.fail(400,'INVALID_REQUEST','학급을 확인하세요.');
   const rows=await db.all("SELECT grade,class_num AS classNum,number,name,note FROM students WHERE term_id=? AND status='재학' AND grade||'-'||class_num IN (SELECT value FROM json_each(?)) ORDER BY CAST(grade AS INTEGER),CAST(class_num AS INTEGER),CAST(number AS INTEGER)",ctx.term,JSON.stringify(cs));return {title:D.clean(q.subject),detail:D.clean(q.detail)||cs.join(', '),students:rows};
  }
- if(a==='previewImport'){const st=await S.load(db,ctx);return D.prepareImport(st,req.payload,req.preserveManual!==false,String(ctx.revision)).summary;}
+ if(a==='previewImport'){const st=await S.load(db,ctx);return D.prepareImport(st,req.payload,req.preserveManual!==false,String(ctx.revision),true).summary;}
  if(a==='dashboard'){const st=await S.load(db,ctx),rt=Core.runtime(st);return {store:st,meta:await S.metadata(db,ctx,true),...(await links(db,ctx)),lessons:Object.values(rt.bindings).map(D.lesson),history:await db.all('SELECT id,at,term_id AS term,action,target FROM history WHERE term_id=? ORDER BY at DESC LIMIT 100',ctx.term),backups:await S.backupList(db,ctx.term),terms:(await db.all('SELECT id FROM terms ORDER BY id DESC')).map(r=>r.id)};}
  Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
 }

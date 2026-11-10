@@ -32,19 +32,22 @@ try{
   await page.unroute('**/api/saveStudent');await page.locator('form[data-form=save-student] button.primary').click();await page.waitForFunction(()=>!document.querySelector('#modal').open);await idle();assert((await page.locator('#student-table').innerText()).includes('브라우저보호값'));
  });
  await step('unsaved settings survive tab rerender and data loading',async()=>{
-  await page.locator('.admin-nav [data-tab=settings]').click();await idle();await page.locator('#set-school').fill('미저장설정보호');await button('admin-tab').filter({hasText:'변경 이력'}).click();await idle();await page.locator('.admin-nav [data-tab=settings]').click();await idle();assert.equal(await page.locator('#set-school').inputValue(),'미저장설정보호');
+  await page.locator('.admin-nav [data-tab=settings]').click();await idle();assert.equal(await page.getByRole('button',{name:'변경 이력',exact:true}).count(),0);await page.getByRole('button',{name:'백업 저장',exact:true}).waitFor();await page.locator('#set-school').fill('미저장설정보호');await button('admin-tab').filter({hasText:'자료 등록'}).click();await idle();await page.locator('.admin-nav [data-tab=settings]').click();await idle();assert.equal(await page.locator('#set-school').inputValue(),'미저장설정보호');
  });
  await step('timetable XLSX and separate student uploads retain drafts and protect edits',async()=>{
   await page.locator('.admin-nav [data-tab=settings]').click();await idle();await button('admin-tab').filter({hasText:'자료 등록'}).click();await idle();await page.evaluate(()=>TTAssets.load('xlsx'));
   await page.screenshot({path:'test-results/import-stages.png',fullPage:true});
+  assert.equal(await page.locator('#registered-exceptions h2').count(),0);
   const importFixture=fixture(),gradeTwoSlot=importFixture.teacherRows[2].indexOf('국어')+2;
+  const ambiguousSlot=importFixture.teacherRows[2].indexOf('가상과학A');
+  importFixture.teacherRows[3][ambiguousSlot]='미정';
   importFixture.teacherRows[2][gradeTwoSlot]='수학';importFixture.teacherRows[3][gradeTwoSlot]='2-1';
   const files=await page.evaluate(store=>{const book=rows=>{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Sheet1');return Array.from(new Uint8Array(XLSX.write(wb,{type:'array',bookType:'xlsx'})));};return {teacher:book(store.teacherRows),sections:book([['학년','선택반명','교과명','수업교실','축약과목명'],...store.sections.map(s=>[s.grade,s.code,s.subject,s.room,s.shortName])]),students:book([['학년','반','번호','이름','가상과학'],['3','1','1','가상학생하나','A1']]),extra:book([['학년','반','번호','이름','가상언어'],['3','1','1','가상학생하나','B1']]),grade2:book([['학년','반','번호','이름','가상선택'],['2','1','1','가상2','']])};},importFixture);
   const file=(name,data)=>({name,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(data)});
-  await page.locator('#import-teacher').setInputFiles(file('teacher.xlsx',files.teacher));await page.locator('form[data-form=preview-import] button[type=submit]').click();await button('commit-import').waitFor();await idle();assert(!(await button('commit-import').isDisabled()));
+  await page.locator('#import-teacher').setInputFiles(file('teacher.xlsx',files.teacher));await page.locator('form[data-form=preview-import] button[type=submit]').click();await button('commit-import').waitFor();await idle();assert(!(await button('commit-import').isDisabled()));assert.match(await page.locator('#import-preview section').innerText(),/예외 수업 확인[\s\S]*가상교사 · 금3 · 가상과학A · 미정/);
   let attempted=0;await page.route('**/api/commitImport',async r=>{attempted++;await r.abort('failed');});await button('commit-import').click();await idle();assert.equal(attempted,1);assert.match(await page.locator('#toast').innerText(),/입력 자료는 유지/);assert.equal(await page.locator('#import-teacher').evaluate(el=>el.files.length),1);assert(!(await button('commit-import').isDisabled()));await page.unroute('**/api/commitImport');
   await page.route('**/api/commitImport',r=>r.fulfill({status:503,contentType:'text/html',body:'Worker exceeded resource limits'}));await button('commit-import').click();await idle();assert.match(await page.locator('#toast').innerText(),/503/);assert.equal(await page.locator('#import-teacher').evaluate(el=>el.files.length),1);await page.unroute('**/api/commitImport');
-  await button('commit-import').click();await idle();await button('admin-tab').filter({hasText:'학생',exact:true}).click();await idle();
+  await button('commit-import').click();await idle();assert.match(await page.locator('#registered-exceptions section').innerText(),/예외 수업 확인[\s\S]*가상교사 · 금3/);await button('admin-tab').filter({hasText:'학생',exact:true}).click();await idle();
   await button('bulk-import').click();
   await page.locator('#import-students').setInputFiles([file('grade2.xlsx',files.grade2),file('grade3-3.xlsx',files.students),file('grade3-2.xlsx',files.extra)]);
   await page.locator('#modal form[data-form=preview-import] button[type=submit]').click();await button('commit-import').waitFor();await idle();
@@ -52,7 +55,7 @@ try{
  });
  await step('external term switch discards old cached lists and keeps data separated',async()=>{
   const old=(await h.api('bootstrap')).data;assert((await h.mutation('saveSettings',{settings:{...old.settings,semester:1}},admin.cookie)).ok);
-  await page.locator('.admin-nav [data-tab=settings]').click();await idle();await button('admin-tab').filter({hasText:'변경 이력'}).click();await idle();await button('admin-tab').filter({hasText:'학생',exact:true}).click();await idle();assert.equal(await page.locator('#student-table tbody tr').count(),0);
+  await page.locator('.admin-nav [data-tab=settings]').click();await idle();await button('admin-tab').filter({hasText:'자료 등록'}).click();await idle();await button('admin-tab').filter({hasText:'학생',exact:true}).click();await idle();assert.equal(await page.locator('#student-table tbody tr').count(),0);assert.equal(await page.locator('.school-heading .term-label').textContent(),'2026학년도 1학기');
   assert((await h.mutation('switchTerm',{term:'2026-2'},admin.cookie)).ok);await button('refresh-admin').click();await idle();assert((await page.locator('#student-table').innerText()).includes('브라우저보호값'));
  });
  await step('teacher timetable cell roster, course roster and A4 four-up class print',async()=>{

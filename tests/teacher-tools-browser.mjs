@@ -92,8 +92,8 @@ try{
  });
  await step('Term changes update the shared heading and keep unsaved class swap drafts per term',async()=>{
   await swap.locator('#reason').fill('이전 학기 초안');const settings={...sharedStore().settings,academicYear:2027,semester:1};assert((await h.mutation('saveSettings',{settings},cookieAdmin.cookie)).ok);
-  await swap.locator('#writeView [data-action=refresh]').click();await swapIdle();await idle();assert.match(await page.locator('#app .term-label').textContent(),/2027학년도 1학기/);assert.equal(await swap.locator('#reason').inputValue(),'');assert(await swap.locator('#noDataset').isVisible());
-  assert((await h.mutation('switchTerm',{term:'2026-2'},cookieAdmin.cookie)).ok);await swap.locator('#writeView [data-action=refresh]').click();await swapIdle();await idle();assert.equal(await swap.locator('#reason').inputValue(),'이전 학기 초안');assert.match(await page.locator('#app .term-label').textContent(),/2026학년도 2학기/);
+  await swap.locator('#writeView [data-action=refresh]').click();await swapIdle();await idle();assert.match(await page.locator('#header .term-label').textContent(),/2027학년도 1학기/);assert.equal(await swap.locator('#reason').inputValue(),'');assert(await swap.locator('#noDataset').isVisible());
+  assert((await h.mutation('switchTerm',{term:'2026-2'},cookieAdmin.cookie)).ok);await swap.locator('#writeView [data-action=refresh]').click();await swapIdle();await idle();assert.equal(await swap.locator('#reason').inputValue(),'이전 학기 초안');assert.match(await page.locator('#header .term-label').textContent(),/2026학년도 2학기/);
  });
  await step('Minimal monochrome mobile and desktop views preserve Pretendard and fit the page',async()=>{
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
