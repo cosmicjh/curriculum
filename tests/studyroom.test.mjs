@@ -96,7 +96,7 @@ test('D1 studyroom: shared roster, durable identity, teacher notes, archive and 
   assert.equal((await api('change',{change:'note',recordId:second.recordId,requestId:crypto.randomUUID()},teacher.cookie)).status,401);
  });
 });
-test('new term links require an explicit identity decision; historical month remains queryable',async t=>{
+test('new term links require an explicit identity decision; attendance and policy are isolated by active term',async t=>{
  const h=await harness({studyroom:true});t.after(()=>h.close());const {api,admin,teacher,revision}=await setupStudyroom(h);
  assert((await api('submit',{studentNumber:'30101',seat:'01',requestId:crypto.randomUUID()},'')).ok);
  const old=(await h.sql("SELECT person_id FROM student_person_links WHERE term_id='2026-2' AND student_id='student-one'")).results[0].person_id;
@@ -104,6 +104,10 @@ test('new term links require an explicit identity decision; historical month rem
  const created=await h.mutation('saveStudent',{student:{grade:'3',classNum:'1',number:'1',name:'가상학생하나',choices:{}}},admin.cookie);assert(created.ok);
  const id=created.data.result.id,newPerson=(await h.sql("SELECT person_id FROM student_person_links WHERE term_id='2027-1' AND student_id=?",id)).results[0].person_id;assert.notEqual(old,newPerson);
  assert((await api('linkStudent',{studentId:id,personId:old,expectedRevision:await revision()})).ok);
+ assert.equal((await api('query',{personId:old,from:today(),to:today()},teacher.cookie)).data.totals.records,0);
+ assert.equal((await api('dashboard')).data.enabled,false);
+ assert((await h.mutation('switchTerm',{term:'2026-2'},admin.cookie)).ok);
+ assert.equal((await api('dashboard')).data.enabled,true);
  assert.equal((await api('query',{personId:old,from:today(),to:today()},teacher.cookie)).data.totals.records,1);
 });
 test('schedule validation, Seoul boundaries, and feature-disabled production defaults',async t=>{

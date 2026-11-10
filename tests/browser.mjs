@@ -32,10 +32,10 @@ try{
   await page.unroute('**/api/saveStudent');await page.locator('form[data-form=save-student] button.primary').click();await page.waitForFunction(()=>!document.querySelector('#modal').open);await idle();assert((await page.locator('#student-table').innerText()).includes('브라우저보호값'));
  });
  await step('unsaved settings survive tab rerender and data loading',async()=>{
-  await button('admin-tab').filter({hasText:'설정',exact:true}).click();await idle();await page.locator('#set-school').fill('미저장설정보호');await button('admin-tab').filter({hasText:'변경 이력'}).click();await idle();await button('admin-tab').filter({hasText:'설정',exact:true}).click();await idle();assert.equal(await page.locator('#set-school').inputValue(),'미저장설정보호');
+  await page.locator('.admin-nav [data-tab=settings]').click();await idle();await page.locator('#set-school').fill('미저장설정보호');await button('admin-tab').filter({hasText:'변경 이력'}).click();await idle();await page.locator('.admin-nav [data-tab=settings]').click();await idle();assert.equal(await page.locator('#set-school').inputValue(),'미저장설정보호');
  });
  await step('five XLSX file registration and preview retain original UI and protect edits',async()=>{
-  await button('admin-tab').filter({hasText:'자료 등록'}).click();await idle();await page.evaluate(()=>TTAssets.load('xlsx'));
+  await page.locator('.admin-nav [data-tab=settings]').click();await idle();await button('admin-tab').filter({hasText:'자료 등록'}).click();await idle();await page.evaluate(()=>TTAssets.load('xlsx'));
   await page.screenshot({path:'test-results/import-stages.png',fullPage:true});
   const importFixture=fixture(),gradeTwoSlot=importFixture.teacherRows[2].indexOf('국어')+2;
   importFixture.teacherRows[2][gradeTwoSlot]='수학';importFixture.teacherRows[3][gradeTwoSlot]='2-1';
@@ -48,7 +48,7 @@ try{
  });
  await step('external term switch discards old cached lists and keeps data separated',async()=>{
   const old=(await h.api('bootstrap')).data;assert((await h.mutation('saveSettings',{settings:{...old.settings,semester:1}},admin.cookie)).ok);
-  await button('admin-tab').filter({hasText:'변경 이력'}).click();await idle();await button('admin-tab').filter({hasText:'학생',exact:true}).click();await idle();assert.equal(await page.locator('#student-table tbody tr').count(),0);
+  await page.locator('.admin-nav [data-tab=settings]').click();await idle();await button('admin-tab').filter({hasText:'변경 이력'}).click();await idle();await button('admin-tab').filter({hasText:'학생',exact:true}).click();await idle();assert.equal(await page.locator('#student-table tbody tr').count(),0);
   assert((await h.mutation('switchTerm',{term:'2026-2'},admin.cookie)).ok);await button('refresh-admin').click();await idle();assert((await page.locator('#student-table').innerText()).includes('브라우저보호값'));
  });
  await step('teacher timetable cell roster, course roster and A4 four-up class print',async()=>{

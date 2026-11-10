@@ -131,7 +131,12 @@ async function mutate(db,env,ctx,session,req,headers){
   for(const b of bs){statements.push(db.prepare('DELETE FROM blocks WHERE term_id=? AND grade=? AND day=? AND period=?',ctx.term,String(b.grade),b.day,Number(b.period)));if(b.block)statements.push(db.prepare('INSERT INTO blocks(term_id,grade,day,period,block) VALUES(?,?,?,?,?)',ctx.term,String(b.grade),b.day,Number(b.period),b.block));}parts=['blocks'];after=bs;
  }else if(action==='saveSettings'){
   const s=D.settings(req.settings);activeTerm=s.academicYear+'-'+s.semester;
-  statements.push(db.prepare('INSERT INTO terms(id,settings) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET settings=excluded.settings',activeTerm,JSON.stringify(s)));parts=['config'];result=s;before=ctx.settings;after=s;bootstrap=activeTerm!==ctx.term;
+  bootstrap=activeTerm!==ctx.term;
+  if(bootstrap){
+   const defaults=D.settings({...Core.defaultSettings(),schoolName:s.schoolName,title:s.title,academicYear:s.academicYear,semester:s.semester});
+   statements.push(db.prepare('INSERT OR IGNORE INTO terms(id,settings) VALUES(?,?)',activeTerm,JSON.stringify(defaults)));
+  }else statements.push(db.prepare('UPDATE terms SET settings=? WHERE id=?',JSON.stringify(s),activeTerm));
+  parts=['config'];result=s;before=ctx.settings;after=s;
  }else if(action==='switchTerm'){
   if(!await db.first('SELECT id FROM terms WHERE id=?',req.term||''))throw Error('학기 정보가 없습니다.');activeTerm=req.term;parts=['config'];bootstrap=true;
  }else if(action==='commitImport'||action==='restore'){
@@ -148,7 +153,7 @@ async function mutate(db,env,ctx,session,req,headers){
   try{statements=await Auth.passwordChangeStatements(db,env,req);}catch(e){if(e.code==='AUTH_REQUIRED'){await Auth.revoke(db,env.request,env);if(!pagesRequest(env.request,env)){headers.append('Set-Cookie',Auth.cookie('teacher'));headers.append('Set-Cookie',Auth.cookie('admin'));}}throw e;}
   target=req.role;historyOnly=true;
  }else Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
- if(action!=='switchTerm'&&parts.some(p=>p!=='students')){
+ if(action!=='switchTerm'&&!(action==='saveSettings'&&bootstrap)&&parts.some(p=>p!=='students')){
   const proposed=nextSwapStore||await S.load(db,{...ctx,term:activeTerm,settings:action==='saveSettings'?result:ctx.settings},['sections','teacherRows','overrides','blocks']);
   if(changedSection)proposed.sections=[...proposed.sections.filter(s=>s.id!==changedSection.id),changedSection];
   if(action==='saveOverride'){const o=req.override;proposed.overrides=proposed.overrides.filter(x=>Core.slotKey(x.teacher,x.day,x.period)!==Core.slotKey(o.teacher,o.day,o.period));if(o.sectionId)proposed.overrides.push(o);}
@@ -187,6 +192,10 @@ async function api(request,env){
    headers.set('Access-Control-Allow-Methods','POST');headers.set('Access-Control-Allow-Headers','Content-Type, Authorization');return new Response(null,{status:204,headers});
   }
   if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1',sharedTimetable:true}},{headers});}
+  if(path==='/api/courseAllocationPolicy'&&request.method==='GET'){
+   const ctx=await S.context(db);
+   return Response.json({ok:true,data:{term:ctx.term,teachers:ctx.settings.courseAllocationTeachers===true}},{headers});
+  }
   const action=path.slice(5);if(!reads.has(action)&&!writes.has(action)&&!['login','logout','passwordParameters'].includes(action)&&!(action==='studyroom'&&env.STUDYROOM_ENABLED==='true'))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
   if(request.method!=='POST')Auth.fail(405,'METHOD_NOT_ALLOWED','POST 요청을 사용하세요.');
   if(!allowedRequest(request,env))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');

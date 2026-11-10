@@ -5,6 +5,7 @@ export function settings(input){
  const s={...Core.defaultSettings(),...input},y=Number(s.academicYear),semester=Number(s.semester);
  if(!Number.isInteger(y)||y<2020||y>2100||![1,2].includes(semester))throw Error('학년도·학기를 확인하세요.');
  s.academicYear=y;s.semester=semester;s.schoolName=clean(s.schoolName,80);s.title=clean(s.title)||'개인 시간표';
+ if(s.courseAllocationTeachers!==true)delete s.courseAllocationTeachers;
  const periods={};for(const d of Core.DAYS){const n=Number(s.periods?.[d]);if(!Number.isInteger(n)||n<1||n>7)throw Error('요일별 교시를 확인하세요.');periods[d]=n;}s.periods=periods;
  if(!Array.isArray(s.fixedPeriods)||s.fixedPeriods.length>35)throw Error('창체 설정을 확인하세요.');
  s.fixedPeriods=s.fixedPeriods.map(f=>{if(!Core.DAYS.includes(f.day)||!Number.isInteger(Number(f.period))||f.period<1||f.period>periods[f.day])throw Error('창체 교시를 확인하세요.');return {day:f.day,period:Number(f.period),label:clean(f.label,30)||'창체'};});return s;
@@ -42,7 +43,7 @@ export function prepareImport(store,payload,preserve=true,revision=''){
  if(payload.teacherRows){next.teacherRows=payload.teacherRows;parts.push('teacherRows');}
  if(payload.sections){
   const natural=new Map(),source=new Map();for(const s of store.sections){natural.set(Core.sectionKey(s.grade,s.subject,s.code),s);if(s.sourceKey)source.set(s.sourceKey,s);}
-  const imported=payload.sections.map(raw=>{const key=Core.sectionKey(raw.grade,raw.subject,raw.code),old=source.get(key)||natural.get(key),s={id:old?.id||crypto.randomUUID(),sourceKey:old?.sourceKey||key,manualFields:old?.manualFields||[]};for(const k of ['grade','subject','code','shortName','room']){s[k]=preserve&&old?.manualFields?.includes(k)?old[k]:k==='grade'?Core.number(raw[k]):clean(raw[k]);if(s[k]!==raw[k]&&old?.manualFields?.includes(k))summary.preservedFields++;}return s;});
+  const imported=payload.sections.map(raw=>{const key=Core.sectionKey(raw.grade,raw.subject,raw.code),old=source.get(key)||natural.get(key),s={id:old?.id||crypto.randomUUID(),sourceKey:old?.sourceKey||key,manualFields:old?.manualFields||[]};for(const k of ['grade','subject','code','shortName','room']){s[k]=old&&(preserve&&old.manualFields?.includes(k)||['room','shortName'].includes(k)&&raw[k]===undefined)?old[k]:k==='grade'?Core.number(raw[k]):clean(raw[k]);if(s[k]!==raw[k]&&old?.manualFields?.includes(k))summary.preservedFields++;}return s;});
   // Preserve sections referenced by protected choices or manual links.
   const ids=new Set(imported.map(s=>s.id));for(const s of store.sections)if(!ids.has(s.id))imported.push(s);
   next.sections=imported;parts.push('sections');

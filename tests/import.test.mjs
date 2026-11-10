@@ -3,9 +3,22 @@ import assert from 'node:assert/strict';
 import {harness} from './harness.mjs';
 import {importScaleFixture} from './import-scale.fixture.mjs';
 import {fixture} from './fixture.mjs';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
 import {prepareImport} from '../src/domain.js';
 import Core from '../src/core.js';
 const empty=()=>({term:'2026-2',settings:Core.defaultSettings(),students:[],sections:[],teacherRows:[],overrides:[],blocks:[]});
+test('tab JSON imports preserve room metadata and reject a transfer from another term',async()=>{
+ const context={};vm.runInNewContext(await readFile('assets/import.js','utf8'),context);
+ const file=data=>({name:'example.json',size:100,text:async()=>JSON.stringify(data)});
+ const transfer={format:'school-course-allocation-transfer',schemaVersion:1,term:'2026-2',sections:[{grade:'3',subject:'가상과학',code:'A1',weeklyHours:3,teachers:[{name:'가상교사',hours:3}]}]};
+ const roster={format:'timetable-import',students:[{studentNumber:'30103',name:'가상 추가',choices:{가상과학:'A1'}}]};
+ const {payload}=await context.TTImport.files(null,file(transfer),[file(roster)],'2026-2');
+ const imported=prepareImport(fixture(),payload);
+ assert.equal(imported.store.sections.find(s=>s.code==='A1').room,'과학실');
+ assert.equal(imported.store.students.find(s=>s.number==='3').choices.가상과학,'A1');
+ await assert.rejects(context.TTImport.files(null,file(transfer),[],'2026-1'),/학기/);
+});
 test('student source/natural keys stay consistent as imported numbers change',()=>{
  const store=empty(),base={grade:'3',classNum:'1',name:'합성학생',status:'재학',note:'',choices:{},manualFields:[]};
  store.students=[{...base,id:'first',number:'2',sourceKey:'3-1-1'},{...base,id:'second',number:'3',sourceKey:'3-1-2'}];

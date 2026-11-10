@@ -8,7 +8,7 @@ const api=(op,args)=>TTApi.request('studyroom',{op,...args});
 form.addEventListener('submit',e=>{e.preventDefault();run(async()=>{const studentNumber=form.elements.grade.value+form.elements.classNum.value+form.elements.number.value;info=await api('studentInfo',{studentNumber,seat});document.querySelector('#student-name').textContent=info.studentNumber+' '+info.name;document.querySelector('#session').textContent=info.session.label;form.hidden=true;confirm.hidden=false;document.querySelector('#submit').focus();});});
 document.querySelector('#back').onclick=()=>{confirm.hidden=true;form.hidden=false;info=null;form.elements.grade.focus();};
 document.querySelector('#submit').onclick=()=>run(async()=>{
- const key='studyroom-request:'+seat+':'+info.studentNumber;let id;try{id=sessionStorage.getItem(key);}catch{}
+ const key='studyroom-request:'+info.session.id+':'+seat+':'+info.studentNumber;let id;try{id=sessionStorage.getItem(key);}catch{}
  if(!id)id=pendingRequest?.key===key?pendingRequest.id:crypto.randomUUID();pendingRequest={key,id};try{sessionStorage.setItem(key,id);}catch{}
- const result=await api('submit',{studentNumber:info.studentNumber,seat,requestId:id});document.querySelector('#session').textContent=result.session.label;submitted=true;status.textContent=result.name+' · '+result.seat+'번 출석 제출 완료';document.querySelector('#submit').textContent='제출 완료';try{sessionStorage.removeItem(key);}catch{}
+ const result=await api('submit',{studentNumber:info.studentNumber,seat,requestId:id,expectedSessionId:info.session.id});document.querySelector('#session').textContent=result.session.label;submitted=true;status.textContent=result.name+' · '+result.seat+'번 출석 제출 완료';document.querySelector('#submit').textContent='제출 완료';try{sessionStorage.removeItem(key);}catch{}
 });

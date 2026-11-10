@@ -104,3 +104,8 @@ body.workspace #class-swap-pane{max-width:none;margin:0;padding:0;width:100%}
 .import-step p,.import-step .field{max-width:100%;min-width:0}
 .import-step p{font-size:13px;line-height:1.6;color:var(--muted)}
 .import-step small{margin-left:5px}
+
+.admin-nav .workspace-link,.tabs .workspace-link{display:inline-flex;align-items:center;white-space:nowrap;padding:9px 2px;color:var(--muted);font-size:14px;line-height:1.2}
+.admin-nav .workspace-link:hover,.tabs .workspace-link:hover{text-decoration:underline;text-underline-offset:5px;color:var(--ui-ink)}
+@media(min-width:1100px){body.workspace .workspace-link{padding:7px 8px}}
+.settings-nav{margin-bottom:18px}

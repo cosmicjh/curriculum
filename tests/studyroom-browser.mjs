@@ -120,7 +120,7 @@ try{
   assert(await results.evaluate(e=>e.scrollWidth<=e.clientWidth));
   assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await teacher.screenshot({path:'.impeccable/review/mobile.png',fullPage:true});
-  await results.locator('[data-sr=readNote]').click();
+  await results.locator('[data-sr=readNote]').click({position:{x:1,y:1}});
   const note=sr.locator('dialog textarea[name=note]');
   assert.equal(await note.inputValue(),'가상 특이사항');
   assert.equal(await sr.locator('dialog [name=change]').count(),0);

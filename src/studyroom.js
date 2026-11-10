@@ -3,8 +3,9 @@ import * as S from './storage.js';
 import * as D from './studyroom-domain.js';
 import {digest} from './crypto.js';
 const uid=()=>crypto.randomUUID(),iso=()=>new Date().toISOString();
-const schedules=db=>db.all('SELECT * FROM sr_schedules ORDER BY effective_date DESC,version DESC');
+const schedules=(db,ctx)=>db.all('SELECT * FROM sr_schedules WHERE term_id=? ORDER BY effective_date DESC,version DESC',ctx.term);
 const state=db=>db.first('SELECT * FROM sr_state WHERE id=1');
+const enabled=async(db,ctx)=>Boolean((await db.first('SELECT enabled FROM sr_term_policy WHERE term_id=?',ctx.term))?.enabled);
 const recordColumns=['id','session_id','person_id','term_id','student_id','student_number','name','seat','state','first_at','last_at','confirmed_by','confirmed_name','confirmed_at','version','note'];
 function saveRecord(db,r){return db.prepare(`INSERT INTO sr_attendance(${recordColumns}) VALUES(${recordColumns.map(()=>'?')}) ON CONFLICT(id) DO UPDATE SET seat=excluded.seat,state=excluded.state,last_at=excluded.last_at,confirmed_by=excluded.confirmed_by,confirmed_name=excluded.confirmed_name,confirmed_at=excluded.confirmed_at,version=excluded.version,note=excluded.note`,...recordColumns.map(k=>r[k]??null));}
 function saveSession(db,s){const keys=['id','date','label','academic_year','schedule_id','starts_at','ends_at'];return db.prepare(`INSERT OR IGNORE INTO sr_sessions(${keys}) VALUES(${keys.map(()=>'?')})`,...keys.map(k=>s[k]));}
@@ -22,35 +23,36 @@ function requireRevision(st,req){if(req.expectedRevision!==st.revision)A.fail(40
 async function findStudent(db,ctx,n){
  return db.first(`SELECT s.*,l.person_id,coalesce(m.enabled,1) AS eligible FROM students s JOIN student_person_links l ON l.term_id=s.term_id AND l.student_id=s.id LEFT JOIN sr_members m ON m.person_id=l.person_id WHERE s.term_id=? AND s.grade=? AND s.class_num=? AND s.number=? AND s.status='재학'`,ctx.term,n[0],String(Number(n.slice(1,3))),String(Number(n.slice(3))));
 }
-async function openSession(db,ctx,st,now){
- if(!st.enabled)A.fail(409,'CLOSED','현재 출석 접수를 받지 않습니다.');
- const rule=await db.first('SELECT * FROM sr_schedules WHERE effective_date<=? ORDER BY effective_date DESC,version DESC LIMIT 1',D.localTime(now).date);
+async function openSession(db,ctx,now){
+ if(!await enabled(db,ctx))A.fail(409,'CLOSED','현재 출석 접수를 받지 않습니다.');
+ const rule=await db.first('SELECT * FROM sr_schedules WHERE term_id=? AND effective_date<=? ORDER BY effective_date DESC,version DESC LIMIT 1',ctx.term,D.localTime(now).date);
  const s=D.currentSession(rule?[rule]:[],ctx,now);if(!s)A.fail(409,'CLOSED','현재 접수할 회차가 없습니다.');return s;
 }
-async function replay(db,id,fingerprint){
- const e=await db.first('SELECT fingerprint,record FROM sr_events WHERE request_id=?',id);if(!e)return null;
- if(e.fingerprint!==fingerprint)A.fail(409,'REQUEST_REUSED','요청 내용이 달라졌습니다. 입력을 다시 확인하세요.');return JSON.parse(e.record);
+async function replay(db,id,fingerprint,term){
+ const e=await db.first('SELECT fingerprint,record,session_id FROM sr_events WHERE request_id=?',id);if(!e)return null;
+ if(e.fingerprint!==fingerprint||!e.session_id?.startsWith(term+':'))A.fail(409,'REQUEST_REUSED','요청 내용이나 학기가 달라졌습니다. 입력을 다시 확인하세요.');return JSON.parse(e.record);
 }
 async function student(db,ctx,req,submit){
  const n=D.number(req.studentNumber),seat=D.seat(req.seat),fingerprint=submit?await digest(JSON.stringify(['submit',n,seat])):null;
- if(submit){D.requestId(req.requestId);const prior=await replay(db,req.requestId,fingerprint);if(prior)return prior;}
+ if(submit){D.requestId(req.requestId);const prior=await replay(db,req.requestId,fingerprint,ctx.term);if(prior)return prior;}
  for(let attempt=0;attempt<3;attempt++){
-  const now=iso(),[st,person]=await Promise.all([state(db),findStudent(db,ctx,n)]),s=await openSession(db,ctx,st,now);
+  const now=iso(),[st,person]=await Promise.all([state(db),findStudent(db,ctx,n)]),s=await openSession(db,ctx,now);
   if(!person||!person.eligible)A.fail(404,'NOT_ELIGIBLE','이용 가능한 학생 정보가 없습니다. 교사에게 확인하세요.');
+  if(submit&&req.expectedSessionId&&req.expectedSessionId!==s.id)A.fail(409,'SESSION_CHANGED','학기 또는 회차가 변경되었습니다. 학생 정보를 다시 확인하세요.');
   const info={studentNumber:n,name:person.name,seat,session:{id:s.id,label:s.label,date:s.date,endsAt:s.ends_at}};if(!submit)return info;
   const previous=await db.first('SELECT * FROM sr_attendance WHERE session_id=? AND person_id=?',s.id,person.person_id);
   const r={id:previous?.id||uid(),session_id:s.id,person_id:person.person_id,term_id:ctx.term,student_id:person.id,student_number:n,name:person.name,seat,state:'active',first_at:previous?.first_at||now,last_at:now,confirmed_by:previous?.seat===seat&&previous.state==='active'?previous.confirmed_by:null,confirmed_name:previous?.seat===seat&&previous.state==='active'?previous.confirmed_name:null,confirmed_at:previous?.seat===seat&&previous.state==='active'?previous.confirmed_at:null,version:(previous?.version||0)+1,note:previous?.note||''};
   if(previous)for(const k of ['term_id','student_id','student_number','name'])r[k]=previous[k];
   const reply={...info,recordId:r.id,submittedAt:r.first_at};
   try{await commit(db,ctx,st,{kind:'student',record_id:previous?.id,record_version:previous?.version,session_id:s.id},[saveSession(db,s),saveRecord(db,r),event(db,{requestId:req.requestId,fingerprint,action:'submit',sessionId:s.id,personId:person.person_id,at:now,actor:'student',record:reply}),event(db,{action:'recordSnapshot',sessionId:s.id,personId:person.person_id,at:now,actor:'student',record:r})]);return reply;}
-  catch(e){const prior=await replay(db,req.requestId,fingerprint);if(prior)return prior;if(/sr_revision_conflict|sr_record_conflict|UNIQUE.*sr_attendance.session_id, sr_attendance.person_id/.test(e.message)&&attempt<2){ctx=await S.context(db);continue;}if(/UNIQUE.*sr_attendance.session_id, sr_attendance.seat/.test(e.message))A.fail(409,'SEAT_OCCUPIED','이미 사용 중인 좌석입니다. 교사에게 확인하세요.');throw e;}
+  catch(e){const prior=await replay(db,req.requestId,fingerprint,ctx.term);if(prior)return prior;if(/sr_revision_conflict|sr_record_conflict|UNIQUE.*sr_attendance.session_id, sr_attendance.person_id/.test(e.message)&&attempt<2){const next=await S.context(db);if(next.term!==ctx.term)A.fail(409,'TERM_CHANGED','학기가 변경되었습니다. 다시 접속하세요.');ctx=next;continue;}if(/UNIQUE.*sr_attendance.session_id, sr_attendance.seat/.test(e.message))A.fail(409,'SEAT_OCCUPIED','이미 사용 중인 좌석입니다. 교사에게 확인하세요.');throw e;}
  }
 }
 async function dashboard(db,ctx,env){
- const now=iso(),[st,rules]=await db.batch([db.prepare('SELECT * FROM sr_state WHERE id=1'),db.prepare('SELECT * FROM sr_schedules WHERE effective_date<=? ORDER BY effective_date DESC,version DESC LIMIT 1',D.localTime(now).date)]);
+ const now=iso(),[st,rules,policy]=await db.batch([db.prepare('SELECT * FROM sr_state WHERE id=1'),db.prepare('SELECT * FROM sr_schedules WHERE term_id=? AND effective_date<=? ORDER BY effective_date DESC,version DESC LIMIT 1',ctx.term,D.localTime(now).date),db.prepare('SELECT enabled FROM sr_term_policy WHERE term_id=?',ctx.term)]);
  const status=st.results[0],current=D.currentSession(rules.results,ctx,now);
  const rows=current?await db.all("SELECT * FROM sr_attendance WHERE session_id=? AND state='active' ORDER BY student_number",current.id):[];
- return {revision:status.revision,enabled:Boolean(status.enabled),current,rows,serverAt:now,lastRunAt:status.last_run_at,lastError:status.last_error,cronEnabled:env.STUDYROOM_CRON_ENABLED==='true',testLabel:env.STUDYROOM_TEST_MODE==='true'?'가상 검증':'',term:ctx.term,academicYear:ctx.settings.academicYear};
+ return {revision:status.revision,enabled:Boolean(policy.results[0]?.enabled),current,rows,serverAt:now,lastRunAt:status.last_run_at,lastError:status.last_error,cronEnabled:env.STUDYROOM_CRON_ENABLED==='true',testLabel:env.STUDYROOM_TEST_MODE==='true'?'가상 검증':'',term:ctx.term,academicYear:ctx.settings.academicYear};
 }
 async function students(db,ctx,req){
  const search=String(req.search||'').trim().slice(0,80),q='%'+search+'%';
@@ -59,10 +61,10 @@ async function students(db,ctx,req){
  if(search){const history=await db.all('SELECT person_id,name,student_number FROM sr_attendance WHERE name LIKE ? OR student_number LIKE ? ORDER BY last_at DESC LIMIT 100',q,q);for(const s of history)if(!seen.has(s.person_id)){seen.add(s.person_id);result.push({person_id:s.person_id,name:s.name,studentNumber:s.student_number,current:false});}}
  return {students:result};
 }
-async function query(db,req){
+async function query(db,ctx,req){
  const from=D.date(req.from),to=D.date(req.to);D.check(from<=to&&new Date(to)-new Date(from)<=366*86400000,'조회 기간은 1년 이내로 선택하세요.');
  const offset=req.offset||0;D.check(Number.isInteger(offset)&&offset>=0&&offset<=100000,'조회 위치를 확인하세요.');
- const conditions=['s.date BETWEEN ? AND ?'],args=[from,to];
+ const conditions=['a.term_id=?','s.date BETWEEN ? AND ?'],args=[ctx.term,from,to];
  if(req.personId){D.check(typeof req.personId==='string'&&req.personId.length<=220,'학생을 선택하세요.');conditions.push('a.person_id=?');args.push(req.personId);}
  const label="CASE s.label WHEN '아침' THEN '오전' ELSE s.label END";
  if(req.sessionLabel){
@@ -86,17 +88,17 @@ async function changeAttendance(db,ctx,req,session){
  D.check(note.length<=200&&reason.length<=200,'비고와 변경 사유는 200자 이내로 입력하세요.');
  const actor='role:'+session.role;
  const fingerprint=await digest(JSON.stringify(['change',actor,req.change,req.recordId||'',req.studentNumber||'',req.seat||'',reason,note,req.expectedRecordVersion??null,req.expectedSessionId??null]));
- const prior=await replay(db,req.requestId,fingerprint);if(prior)return prior;
+ const prior=await replay(db,req.requestId,fingerprint,ctx.term);if(prior)return prior;
  const st=await state(db),now=iso();let r,s,expectedRecord=null;
  if(req.change==='manual'){
-  s=await openSession(db,ctx,st,now);if(req.expectedSessionId!==s.id)A.fail(409,'SESSION_CHANGED','회차가 변경되었습니다. 현재 회차를 확인하고 다시 등록하세요.');
+  s=await openSession(db,ctx,now);if(req.expectedSessionId!==s.id)A.fail(409,'SESSION_CHANGED','회차가 변경되었습니다. 현재 회차를 확인하고 다시 등록하세요.');
   const person=await findStudent(db,ctx,D.number(req.studentNumber));D.check(person?.eligible,'이용 가능한 학생을 선택하세요.');D.seat(req.seat);
   const old=await db.first('SELECT * FROM sr_attendance WHERE session_id=? AND person_id=?',s.id,person.person_id);D.check(!old||old.state==='cancelled','이미 제출한 학생입니다.');
   r={id:old?.id||uid(),session_id:s.id,person_id:person.person_id,term_id:ctx.term,student_id:person.id,student_number:req.studentNumber,name:person.name,seat:req.seat,state:'active',first_at:old?.first_at||now,last_at:now,version:(old?.version||0)+1,confirmed_by:null,confirmed_name:null,confirmed_at:null,note};
   if(old){for(const k of ['term_id','student_id','student_number','name'])r[k]=old[k];if(req.note==null)r.note=old.note;}
   expectedRecord=old;
  }else{
-  r=await db.first('SELECT * FROM sr_attendance WHERE id=?',req.recordId||'');D.check(r,'출석 기록이 없습니다.');
+  r=await db.first('SELECT * FROM sr_attendance WHERE id=? AND term_id=?',req.recordId||'',ctx.term);D.check(r,'출석 기록이 없습니다.');
   if(req.expectedRecordVersion!==r.version)A.fail(409,'SR_RECORD_CHANGED','이 학생의 출석이 변경되었습니다. 입력을 보관하고 기록을 다시 열어 확인하세요.');
   expectedRecord={id:r.id,version:r.version};
   if(req.change==='cancel'){r.state='cancelled';Object.assign(r,{confirmed_by:null,confirmed_name:null,confirmed_at:null});}
@@ -110,11 +112,12 @@ async function changeAttendance(db,ctx,req,session){
 }
 async function configure(db,ctx,req,session){
  const st=await state(db);requireRevision(st,req);D.check(typeof req.enabled==='boolean','접수 상태를 확인하세요.');const statements=[];
- if(req.schedule){const today=D.localTime(iso()).date,r=D.schedule(req.schedule,today);if((await schedules(db)).some(s=>s.effective_date<=today)&&r.effectiveDate===today)A.fail(409,'SCHEDULE_IN_USE','기존 회차를 보존하도록 새 시정은 내일 이후 적용하세요.');
-  statements.push(db.prepare('INSERT INTO sr_schedules VALUES(?,?,?,?,?,?)',uid(),r.effectiveDate,JSON.stringify(r.definitions),st.revision+1,iso(),'role:admin'));
+ const existing=await schedules(db,ctx);
+ if(req.schedule){const today=D.localTime(iso()).date,r=D.schedule(req.schedule,today);if(existing.some(s=>s.effective_date<=today)&&r.effectiveDate===today)A.fail(409,'SCHEDULE_IN_USE','기존 회차를 보존하도록 새 시정은 내일 이후 적용하세요.');
+  statements.push(db.prepare('INSERT INTO sr_schedules(id,effective_date,definitions,version,created_at,actor,term_id) VALUES(?,?,?,?,?,?,?)',uid(),r.effectiveDate,JSON.stringify(r.definitions),st.revision+1,iso(),'role:admin',ctx.term));
  }
- if(req.enabled)D.check(req.schedule||(await schedules(db)).length,'시정을 먼저 입력하세요.');
- statements.push(db.prepare('UPDATE sr_state SET enabled=? WHERE id=1',req.enabled?1:0),event(db,{action:'configuration',actor:'role:admin',record:{enabled:req.enabled,schedule:req.schedule||null}}));
+ if(req.enabled)D.check(req.schedule||existing.length,'시정을 먼저 입력하세요.');
+ statements.push(db.prepare('INSERT INTO sr_term_policy(term_id,enabled) VALUES(?,?) ON CONFLICT(term_id) DO UPDATE SET enabled=excluded.enabled',ctx.term,req.enabled?1:0),event(db,{action:'configuration',actor:'role:admin',record:{term:ctx.term,enabled:req.enabled,schedule:req.schedule||null}}));
  await commit(db,ctx,st,adminActor(session),statements);return true;
 }
 export async function runStudyroomSchedule(db,now=iso()){
@@ -136,13 +139,14 @@ export async function studyroom(db,ctx,env,req,request){
  if(['studentInfo','submit'].includes(op)){await A.rateLimit(db,request,'sr-student',600);return student(db,ctx,req,op==='submit');}
  const adminOps=new Set(['configuration','setMember','linkStudent','export','closeDue']);
  const session=await A.authenticate(db,request,adminOps.has(op)?'admin':'teacher',env);
+ if(req.viewTerm&&req.viewTerm!==ctx.term)A.fail(409,'TERM_CHANGED','활성 학기가 변경되었습니다.');
  if(op==='dashboard')return dashboard(db,ctx,env);
  if(op==='students')return students(db,ctx,req);
- if(op==='query')return query(db,req);
- if(op==='history'){D.check(typeof req.recordId==='string','출석 기록을 선택하세요.');return {events:await db.all('SELECT id,action,at,actor,reason,record FROM sr_events WHERE session_id=(SELECT session_id FROM sr_attendance WHERE id=?) AND person_id=(SELECT person_id FROM sr_attendance WHERE id=?) ORDER BY seq',req.recordId,req.recordId)};}
+ if(op==='query')return query(db,ctx,req);
+ if(op==='history'){D.check(typeof req.recordId==='string','출석 기록을 선택하세요.');return {events:await db.all('SELECT e.id,e.action,e.at,e.actor,e.reason,e.record FROM sr_events e JOIN sr_attendance a ON a.session_id=e.session_id AND a.person_id=e.person_id WHERE a.id=? AND a.term_id=? ORDER BY e.seq',req.recordId,ctx.term)};}
  if(op==='change')return changeAttendance(db,ctx,req,session);
  if(op==='configuration')return configure(db,ctx,req,session);
- if(op==='settings')return {revision:(await state(db)).revision,schedules:await schedules(db)};
+ if(op==='settings')return {revision:(await state(db)).revision,schedules:await schedules(db,ctx)};
  if(op==='setMember'){
   const st=await state(db);requireRevision(st,req);D.check(typeof req.enabled==='boolean'&&await db.first('SELECT id FROM student_people WHERE id=?',req.personId||''),'학생·이용 상태를 확인하세요.');
   await commit(db,ctx,st,adminActor(session),[db.prepare('INSERT INTO sr_members VALUES(?,?) ON CONFLICT(person_id) DO UPDATE SET enabled=excluded.enabled',req.personId,req.enabled?1:0),event(db,{action:'membership',actor:'role:admin',personId:req.personId,record:{enabled:req.enabled}})]);return true;
@@ -157,7 +161,7 @@ export async function studyroom(db,ctx,env,req,request){
  }
  if(op==='closeDue')return runStudyroomSchedule(db);
  if(op==='export'){
-  const data={};for(const table of ['student_people','student_person_links','sr_state','sr_members','sr_schedules','sr_sessions','sr_attendance','sr_events','sr_archives'])data[table]=await db.all('SELECT * FROM '+table);
+  const data={};for(const table of ['student_people','student_person_links','sr_state','sr_term_policy','sr_members','sr_schedules','sr_sessions','sr_attendance','sr_events','sr_archives'])data[table]=await db.all('SELECT * FROM '+table);
   const after=await state(db),tt=await S.context(db);D.check(data.sr_state[0].revision===after.revision&&tt.revision===ctx.revision&&tt.term===ctx.term,'자료가 변경되었습니다. 다시 내보내세요.');return {format:'school-studyroom-export',schemaVersion:1,exportedAt:iso(),data,sha256:await digest(JSON.stringify(data))};
  }
  A.fail(404,'NOT_FOUND','스터디룸 요청을 찾을 수 없습니다.');

@@ -44,7 +44,6 @@
  .sr-table th:nth-child(4){width:19%}
 }
 
-.sr-query-note{position:relative}
+.sr-query-note{cursor:pointer}
 .studyroom .sr-query-note button{display:block;width:100%;min-height:24px;margin:0;padding:0;text-align:left;line-height:1.6;overflow-wrap:anywhere;white-space:pre-wrap}
-.sr-query-note button::after{content:'';position:absolute;inset:0}
 .sr-query-note:hover{background:var(--ui-subtle)}
