@@ -69,13 +69,13 @@ try{
  });
  await step('home menu keeps its layout while the authenticated teacher workspace loads',async()=>{
   await page.locator('#header .brand').click();
-  const menu=page.getByRole('navigation',{name:'사용자 메뉴'});await menu.waitFor();await idle();
+  const menu=page.locator('.entry-list');await menu.waitFor();await idle();
   const before=await menu.boundingBox();
-  let release,requested;
-  const gate=new Promise(resolve=>{release=resolve;}),requestStarted=new Promise(resolve=>{requested=resolve;});
-  await page.route('**/api/teacherBootstrap',async route=>{requested();await gate;await route.continue();},{times:1});
+  let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  await page.route('**/api/teacherBootstrap',async route=>{await gate;await route.continue();},{times:1});
   try{
-   await menu.getByRole('link',{name:'교사',exact:true}).click();await requestStarted;
+   await Promise.all([page.waitForRequest('**/api/teacherBootstrap'),menu.getByRole('link',{name:'교사',exact:true}).click()]);
    assert(!await page.evaluate(()=>document.body.classList.contains('workspace')));
    assert.deepEqual(await menu.boundingBox(),before);
   }finally{release();}
