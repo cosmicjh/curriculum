@@ -48,7 +48,7 @@ export function mountStudyroom(root,{request,admin=false}){
    const record='data-id="'+esc(r.id)+'"';
    const name=query&&!state.person?button('studentCalendar',esc(r.name),record+' class="sr-student-link"'):esc(r.name);
    const cells=[esc(r.student_number),name,esc(r.seat),time(r.first_at)].map(value=>'<td>'+value+'</td>').join('');
-   if(query)return '<tr>'+cells+'<td class="sr-note sr-query-note" data-sr="readNote" '+record+'><button type="button" aria-label="'+esc(r.student_number+' '+r.name+' 비고 편집'+(r.note?' · '+r.note:''))+'" title="비고 편집">'+esc(r.note)+'</button></td></tr>';
+   if(query)return '<tr>'+cells+'<td class="sr-note sr-query-note"><button type="button" data-sr="readNote" '+record+' aria-label="'+esc(r.student_number+' '+r.name+' 비고 편집'+(r.note?' · '+r.note:''))+'" title="비고 편집">'+esc(r.note)+'</button></td></tr>';
    const status=r.state==='cancelled'?'<span>취소</span>':'';
    return '<tr>'+cells+'<td class="sr-note"><div class="sr-table-actions">'+
     button('edit','변경',record)+button('history','이력',record)+status+'</div>'+(r.note?'<p class="sr-note-text">'+esc(r.note)+'</p>':'')+'</td></tr>';
@@ -77,11 +77,14 @@ export function mountStudyroom(root,{request,admin=false}){
  }
  function renderQuery(){
   const month=localDate().slice(0,7);
-  content.innerHTML='<div class="sr-query-person" data-sr-person hidden><h3 tabindex="-1"></h3>'+button('allStudents','전체 학생')+'</div><div class="sr-toolbar sr-attendance-toolbar sr-calendar-toolbar"><input type="month" name="month" aria-label="월 달력" value="'+month+'">'+
+  content.innerHTML='<form data-sr-form="search" class="sr-student-search">'+field('학생 검색','<input type="search" name="search" placeholder="이름 또는 학번" maxlength="80" required>')+'<button type="submit">검색</button><button type="reset">검색 초기화</button></form><div data-sr-search-results aria-live="polite"></div><div class="sr-query-person" data-sr-person hidden><h3 tabindex="-1"></h3>'+button('allStudents','전체 학생')+'</div><div class="sr-toolbar sr-attendance-toolbar sr-calendar-toolbar"><input type="month" name="month" aria-label="월 달력" value="'+month+'">'+
    toggleGroup('session','회차',[['','전체'],['오전','오전'],['오후','오후'],['야간','야간']])+
    '</div><table class="sr-calendar" data-sr-calendar aria-label="출석 달력"></table><div data-sr-results></div><div class="sr-toolbar" data-sr-pages hidden>'+button('previous','이전')+button('next','다음')+'</div>';
-  state.sessionLabel='';state.queryDay=null;state.person=null;
+  state.sessionLabel='';state.queryDay=null;state.person=null;state.matches=[];
   return loadCalendar();
+ }
+ function clearSearch(){
+  $('[name="search"]').value='';$('[data-sr-search-results]').replaceChildren();state.matches=[];
  }
  function pressButton(button){
   for(const other of content.querySelectorAll('[data-sr="'+button.dataset.sr+'"]'))other.setAttribute('aria-pressed',String(other===button));
@@ -96,7 +99,7 @@ export function mountStudyroom(root,{request,admin=false}){
   state.person=person;state.queryMonth=month;
   const personHeading=$('[data-sr-person]');
   personHeading.hidden=!person;
-  personHeading.querySelector('h3').textContent=person?person.student_number+' '+person.name:'';
+  personHeading.querySelector('h3').textContent=person?(person.student_number||person.studentNumber)+' '+person.name:'';
   const counts=new Map(q.calendar.map(x=>[x.date,x.records]));
   const weekdays=['일','월','화','수','목','금','토'];
   function dateCell(date){
@@ -157,7 +160,12 @@ export function mountStudyroom(root,{request,admin=false}){
    const person=state.query.rows.find(r=>r.id===b.dataset.id);
    if(person){await loadCalendar(person);$('[data-sr-person] h3').focus();}
   }
+  if(a==='searchStudent'){
+   const person=state.matches[Number(b.dataset.index)];
+   if(person){await loadCalendar(person);$('[data-sr-search-results]').replaceChildren();state.matches=[];$('[data-sr-person] h3').focus();}
+  }
   if(a==='allStudents'){
+   clearSearch();
    await loadCalendar(null);
    ($('[data-sr=day][aria-pressed=true]')||$('[name="month"]')).focus();
   }
@@ -165,8 +173,19 @@ export function mountStudyroom(root,{request,admin=false}){
   if(a==='previous')return loadRecords(Math.max(0,state.query.offset-200));
   if(a==='export'){const data=await api('export'),blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='studyroom-'+localDate()+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
  });});
+ root.addEventListener('reset',e=>{
+  if(e.target.dataset.srForm!=='search')return;
+  e.preventDefault();run(()=>{clearSearch();return loadCalendar(null);});
+ });
  root.addEventListener('submit',e=>{const f=e.target;if(!f.dataset.srForm)return;e.preventDefault();e.stopPropagation();run(async()=>{
   const kind=f.dataset.srForm;
+  if(kind==='search'){
+   const search=f.elements.search.value.trim();
+   if(!search){clearSearch();return;}
+   const result=await api('students',{search});state.matches=result.students;
+   $('[data-sr-search-results]').innerHTML=state.matches.length?'<ul class="sr-search-results">'+state.matches.map((person,index)=>'<li>'+button('searchStudent',esc(person.studentNumber+' '+person.name),'data-index="'+index+'"')+'</li>').join('')+'</ul>':'<p class="sr-empty">검색 결과가 없습니다.</p>';
+   return;
+  }
   if(kind==='change'){
    const args={change:f.elements.change?.value||(f.dataset.id?'note':'manual'),recordId:f.dataset.id,studentNumber:f.elements.studentNumber?.value,seat:f.elements.seat?.value,note:e.submitter?.value==='delete'?'':f.elements.note.value};
    const signature=JSON.stringify(args);
