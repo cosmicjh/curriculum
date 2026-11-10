@@ -21,7 +21,8 @@ try{
   await login('admin');let frame;
   assert.equal(await page.locator('.admin-nav [data-tab=links]').count(),0);
   assert.deepEqual(await page.locator('.admin-nav').locator('button,a').allTextContents(),['학생','시수배당표','이동수업 배치표','결보강','설정']);
-  assert.equal(await page.locator('.admin-nav a').getAttribute('target'),'_blank');
+  await page.locator('.admin-nav [data-action=course-allocation]').click();await page.getByText('관리자 설정에서 시수배당표 사용을 허용한 뒤 열 수 있습니다.').waitFor();
+  await page.locator('#modal [data-action=close-modal]').last().click();
   for(const tab of ['students','allocation','settings','sections','imports','history']){
    await page.locator('[data-action=admin-tab][data-tab='+tab+']').click();await idle();
    const current=await page.locator('#admin-content').evaluate(el=>{const content=el.getBoundingClientRect(),nav=document.querySelector('.admin-nav').getBoundingClientRect();return [content.x,content.y,content.width,nav.x,nav.y];});

@@ -6,7 +6,8 @@ import * as Auth from './auth.js';
 import {allowedRequest,pagesRequest,cors} from './origin.js';
 import {prepareAllocation} from './allocations.js';
 import {studyroom,runStudyroomSchedule} from './studyroom.js';
-const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup']);
+import {launchCourse,bridgeCourse} from './course-bridge.js';
+const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup','courseTransfer']);
 const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','backup','restore','changePassword']);
 const teacherActions=new Set(['allocation','classSwap','teacherBootstrap','teacher','roster','classBatch']);
 async function teacherBoot(db,ctx,req={}){
@@ -29,6 +30,7 @@ async function links(db,ctx,includeSections=true){const {store:st,rt}=await S.sc
 async function read(db,ctx,req){
  const a=req.action;
  if(a==='bootstrap')return S.meta(ctx);
+ if(a==='courseTransfer'){const row=await db.first('SELECT content,saved_at FROM course_transfers WHERE term_id=?',ctx.term);return row?{transfer:JSON.parse(row.content),savedAt:row.saved_at}:null;}
  if(a==='allocation'){const st=await S.load(db,ctx,['sections','allocation']);return {board:st.allocation||null,sections:st.sections,meta:S.meta(ctx)};}
  if(a==='adminBootstrap')return adminBoot(db,ctx,req);
  if(a==='teacherBootstrap')return teacherBoot(db,ctx,req);
@@ -196,18 +198,20 @@ async function api(request,env){
    const ctx=await S.context(db);
    return Response.json({ok:true,data:{term:ctx.term,teachers:ctx.settings.courseAllocationTeachers===true}},{headers});
   }
-  const action=path.slice(5);if(!reads.has(action)&&!writes.has(action)&&!['login','logout','passwordParameters'].includes(action)&&!(action==='studyroom'&&env.STUDYROOM_ENABLED==='true'))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
+  const action=path.slice(5);if(!reads.has(action)&&!writes.has(action)&&!['login','logout','passwordParameters','courseLaunch','courseBridge'].includes(action)&&!(action==='studyroom'&&env.STUDYROOM_ENABLED==='true'))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
   if(request.method!=='POST')Auth.fail(405,'METHOD_NOT_ALLOWED','POST 요청을 사용하세요.');
-  if(!allowedRequest(request,env))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
+  if(action!=='courseBridge'&&!allowedRequest(request,env))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
   if(!request.headers.get('Content-Type')?.startsWith('application/json'))Auth.fail(415,'INVALID_REQUEST','JSON 요청을 사용하세요.');
   if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');
-  const maxBody=['classSwap','studyroom'].includes(action)?256*1024:10*1024*1024;
+  const maxBody=['classSwap','studyroom','courseBridge'].includes(action)?256*1024:10*1024*1024;
   const length=Number(request.headers.get('Content-Length')||0);if(length>maxBody)Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');
   const reader=request.body?.getReader(),chunks=[];let size=0;if(reader){while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>maxBody){await reader.cancel();Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');}chunks.push(value);}}
   const bytes=new Uint8Array(size);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.length;}
   let req;try{req=JSON.parse(new TextDecoder().decode(bytes));}catch{Auth.fail(400,'INVALID_REQUEST','JSON 형식을 확인하세요.');}if(!req||typeof req!=='object'||Array.isArray(req))Auth.fail(400,'INVALID_REQUEST','요청을 확인하세요.');req.action=action;
   let data;
-  if(action==='passwordParameters')data=await Auth.parameters(db,env,req.role);
+  if(action==='courseLaunch')data=await launchCourse(db,await S.context(db),env,request,req.role);
+  else if(action==='courseBridge')data=await bridgeCourse(db,env,req);
+  else if(action==='passwordParameters')data=await Auth.parameters(db,env,req.role);
   else if(action==='logout'){await Auth.revoke(db,request,env);if(!pagesRequest(request,env)){headers.append('Set-Cookie',Auth.cookie('teacher'));headers.append('Set-Cookie',Auth.cookie('admin'));}data=true;}
   else if(action==='login'){
    data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx):await teacherBoot(db,ctx);}
