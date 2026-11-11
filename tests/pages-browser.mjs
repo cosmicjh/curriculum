@@ -51,7 +51,8 @@ try{
   assert(await selected.locator('.nav-label').isHidden());assert(await panel.locator('.sidebar-credit').isHidden());
   await page.reload();await idle();assert.equal(await toggle.getAttribute('aria-label'),'메뉴 펼치기');await toggle.click();await login();
   await page.setViewportSize({width:390,height:844});await opener.waitFor();
-  assert.equal(await panel.getAttribute('aria-hidden'),'true');assert(await page.locator('.compact-program-title').isVisible());
+  await page.waitForFunction(()=>document.getElementById('sidebar').getAttribute('aria-hidden')==='true');
+  assert(await page.locator('.compact-program-title').isVisible());
   await opener.click();assert.equal(await panel.getAttribute('aria-modal'),'true');
   assert(await page.locator('#workspace').evaluate(el=>el.inert));assert.equal(await page.evaluate(()=>document.body.style.position),'fixed');
   assert(await toggle.evaluate(el=>el===document.activeElement));assert.equal(await panel.locator('.sidebar-credit').innerText(),credit);
