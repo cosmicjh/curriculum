@@ -8,7 +8,7 @@ await rm(output,{recursive:true,force:true,maxRetries:5,retryDelay:250});
 await cp(resolve(root,'dist'),output,{recursive:true});
 await rm(resolve(output,'_headers'),{force:true});
 const apiBase='https://school-timetable.cosmicjh.workers.dev/api/';
-const source=await Promise.all(['studyroom.js','studyroom-layout.js','studyroom-student.js','studyroom.css','font.css','app.js','allocations.js','allocation-import.js','transport.js','assets.js','import.js','password.js','style.css','xlsx.full.min.js','html2canvas.min.js'].map(name=>readFile(resolve(output,'assets',name),'utf8')));
+const source=await Promise.all(['studyroom.js','studyroom-layout.js','studyroom-student.js','studyroom.css','font.css','app.js','navigation.js','allocations.js','allocation-import.js','transport.js','assets.js','import.js','password.js','style.css','xlsx.full.min.js','html2canvas.min.js'].map(name=>readFile(resolve(output,'assets',name),'utf8')));
 for(const name of ['timetable-ui.woff2','pretendard.woff2'])source.push(createHash('sha256').update(await readFile(resolve(output,'assets',name))).digest('hex'));
 source.push(...await Promise.all(['app.js','view.html'].map(name=>readFile(resolve(output,'class-swap',name),'utf8'))));
 for(const file of (await readdir(resolve(output,'section-assignment'))).sort())source.push(await readFile(resolve(output,'section-assignment',file),'utf8'));
@@ -25,5 +25,5 @@ for(const name of ['index.html','student.html','teacher.html','admin.html','stud
 const sectionView=resolve(output,'section-assignment/view.html');
 await writeFile(sectionView,(await readFile(sectionView,'utf8')).replace(/.css(?=")/g,'.css?v='+version));
 await writeFile(resolve(output,'.nojekyll'),'');
-await writeFile(resolve(output,'404.html'),'<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>개인 시간표</title><p>페이지를 찾을 수 없습니다. <a href="/timetable/">개인 시간표로 이동</a></p></html>');
+await writeFile(resolve(output,'404.html'),'<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>교육과정 편성·운영 지원 도구</title><p>페이지를 찾을 수 없습니다. <a href="/curriculum/">교육과정 편성·운영 지원 도구로 이동</a></p></html>');
 console.log('GitHub Pages application build complete: .cache/pages-site/');

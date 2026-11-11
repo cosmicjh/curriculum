@@ -6,12 +6,12 @@
 
 ## 운영 구성
 
-- 저장소: [cosmicjh/timetable · main](https://github.com/cosmicjh/timetable/tree/main)
+- 저장소: [cosmicjh/curriculum · main](https://github.com/cosmicjh/curriculum/tree/main)
 - 서비스: [school-timetable.cosmicjh.workers.dev](https://school-timetable.cosmicjh.workers.dev)
 - Worker: school-timetable, ASSETS → dist/, DB → 기존 school-timetable-db.
 - D1 ID: c4c3186c-bcfa-4bb9-959f-5086151abce8. 새 DB를 만들거나 기존 DB를 초기화하지 않습니다.
 - 기존 Secret·계정·학기·운영 자료·서버 백업을 보존합니다. 스키마 변경이나 운영 자료 수정 SQL을 실행하지 않습니다.
-- 기존 https://cosmicjh.github.io/timetable 주소는 연결 전용 Pages workflow로 보존합니다. 학생·교사·관리자 경로와 query/hash를 새 서비스로 연결하고, 과거 Apps Script 연결 화면을 이중 운영하지 않습니다.
+- 당시 Pages는 학생·교사·관리자 경로와 query/hash를 Worker에 연결하는 전용 workflow를 사용했습니다. 현재 화면 주소는 [GitHub Pages 구성](GITHUB_PAGES_2026-11-02.md)을 따릅니다.
 
 ## 정리 범위
 

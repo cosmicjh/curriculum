@@ -90,7 +90,7 @@
   }
   window.courseAllocationRequest=async(source,path,method,data)=>{
     const role=[...courseFrames].find(([,frame])=>frame.contentWindow===source)?.[0];
-    if(!role||!token(role))throw Error('통합시간표에 다시 로그인하세요.');
+    if(!role||!token(role))throw Error('교육과정 편성·운영 지원 도구에 다시 로그인하세요.');
     try{
       const result=await TTApi.request('courseWorkspace',{role,path,method,data});
       if(path==='/timetable-transfer'&&state.admin?.loaded)state.admin.loaded.settings=false;
@@ -156,11 +156,12 @@
   }
   window.addEventListener('beforeunload',event=>{if(swapDirty()||allocationDirty()||sectionFrame?.contentWindow?.hasSectionAssignmentWork?.()||[...courseFrames.values()].some(frame=>frame.contentWindow?.hasUnsavedCourseChanges?.())){event.preventDefault();event.returnValue='';}});
 
-  const surfaces=[$('#header'),app,modal,swapPane,coursePane,sectionPane],lockedControls=new Map();
+  const surfaces=[$('#header'),app,modal,swapPane,coursePane,sectionPane,TTNavigation.menu],lockedControls=new Map();
   let loadingFocus=null;
   function lockControls(){surfaces.forEach(root=>root.querySelectorAll('input,select,textarea,button').forEach(el=>{if(!lockedControls.has(el))lockedControls.set(el,el.disabled);el.disabled=true;}));}
   const loadingObserver=new MutationObserver(()=>{if(busyCount)lockControls();});
   function setLoading(loading){
+    TTNavigation.setBusy(loading);
     document.body.dataset.loading=String(loading);
     if(loading){loadingFocus=document.activeElement;surfaces.forEach(root=>{root.inert=true;root.setAttribute('aria-busy','true');loadingObserver.observe(root,{childList:true,subtree:true});});lockControls();}
     else{loadingObserver.disconnect();lockedControls.forEach((disabled,el)=>{el.disabled=disabled;});lockedControls.clear();surfaces.forEach(root=>{root.inert=false;root.setAttribute('aria-busy','false');});const root=modal.open?modal:app;const focus=loadingFocus&&loadingFocus.isConnected&&!loadingFocus.disabled&&(!modal.open||modal.contains(loadingFocus))?loadingFocus:root.querySelector('[autofocus]:not(:disabled)')||(modal.open?root.querySelector('button:not(:disabled),input:not(:disabled),select:not(:disabled)'):null);loadingFocus=null;if(focus&&focus!==document.body)focus.focus({preventScroll:true});}
@@ -182,13 +183,14 @@
   async function run(fn,button,block=true){if(block&&++busyCount===1)setLoading(true);try{return await fn();}catch(e){if(e.code==='TERM_CHANGED'){rememberForms();if(modal.open)modal.close();modal.innerHTML='';state.teacherBoot=null;state.admin=null;state.timetable=null;state.roster=null;await renderRoute();}if(e.code==='AUTH_REQUIRED'){rememberForms();if(modal.open)modal.close();modal.innerHTML='';state.timetable=null;state.roster=null;clearSessions();sectionPane.replaceChildren();sectionFrame=null;coursePane.replaceChildren();courseFrames.clear();state.teacherBoot=null;state.admin=null;renderLogin(roles[state.route]?state.route:'');}toast(e.message||'처리하지 못했습니다.');}finally{if(block){busyCount--;if(!busyCount){setLoading(false);if(state.route!==route())run(renderRoute);}}}}
   function header(){
     const settings=state.meta&&state.meta.settings||{}, school=settings.schoolName||(window.TIMETABLE_CONFIG||{}).schoolName||'개인 시간표';
-    document.title=(settings.title||'개인 시간표')+' · '+school;
+    document.title=TTNavigation.title;
     const term=state.meta?'<span class="term-label">'+esc(settings.academicYear+'학년도 '+settings.semester+'학기')+'</span>':'';
-    $('#header').innerHTML='<div class="school-heading"><a class="brand" href="'+href('home')+'">'+esc(school)+'</a>'+term+'</div><div class="top-actions">'+(state.route!=='home'?'<a class="quiet" href="'+href('home')+'">처음</a>':'')+(roles[state.route]&&token(state.route)?'<button class="quiet" data-action="logout">로그아웃</button>':'')+'</div>';
+    $('#header').innerHTML=TTNavigation.opener()+'<div class="school-heading"><a class="brand" href="'+href('home')+'"><span class="school-name">'+esc(school)+'</span><span class="compact-program-title">'+TTNavigation.title+'</span></a>'+term+'</div><div class="top-actions">'+(state.route!=='home'?'<a class="quiet" href="'+href('home')+'">처음</a>':'')+(roles[state.route]&&token(state.route)?'<button class="quiet" data-action="logout">로그아웃</button>':'')+'</div>';TTNavigation.sync();
   }
   function head(title,actions=''){return '<div class="view-head"><div>'+(title?'<h1>'+esc(title)+'</h1>':'')+'</div>'+actions+'</div>';}
   function showScreen(html,workspace=false){hideCourse();sectionPane.hidden=true;document.body.classList.remove('section-assignment-workspace');app.innerHTML=html;document.body.classList.toggle('workspace',workspace);}
   function renderLogin(role=''){
+    TTNavigation.render([],'','');
     hideSwap();header();
     const choices=Object.entries(roles).map(([value,label])=>({value,label}));
     showScreen('<div class="auth"><h1>로그인</h1><form data-form="login">'+
@@ -203,7 +205,7 @@
     return '<div class="capture"><h2>'+esc(name)+'</h2><table class="tt"><thead><tr><th></th>'+days.map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
   }
   function resultHTML(){return state.timetable?'<div id="capture-area" class="panel">'+timetableHTML(state.timetable)+'</div><div class="result-tools"><button data-action="save-image">이미지 저장</button><button data-action="print-single">인쇄</button></div>':'';}
-  function renderStudent(){showScreen('<div class="lookup">'+head('학생 시간표')+'<form class="lookup-form" data-form="student">'+field('학번','student-number',input('student-number','','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off" required'))+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+(state.timetable&&state.timetable.kind==='student'?resultHTML():'')+'</div></div>');}
+  function renderStudent(){TTNavigation.render([],'','');showScreen('<div class="lookup">'+head('학생 시간표')+'<form class="lookup-form" data-form="student">'+field('학번','student-number',input('student-number','','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off" required'))+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+(state.timetable&&state.timetable.kind==='student'?resultHTML():'')+'</div></div>');}
   async function loadTeacher(force=false){
     const cached=state.teacherBoot,data=await call('teacherBootstrap',cached&&!force?{knownRevision:cached.meta.revision,sectionsRevision:cached.meta.sectionsRevision}:{},'teacher');
     if(!data.unchanged){if(state.timetable?.meta?.revision!==data.meta.revision){state.timetable=null;state.roster=null;}if(!data.sections&&cached&&cached.meta.term===data.meta.term)data.sections=cached.sections;state.teacherBoot=data;}
@@ -214,7 +216,8 @@
     const boot=state.teacherBoot;if(!boot)return;
     if(state.teacherTab==='hours'&&!boot.meta.settings.courseAllocationTeachers)state.teacherTab='timetable';
     const tabs=[['timetable','개인시간표'],['roster','교과 명렬표'],['allocation','이동수업 배치표'],['classSwap','결보강'],['batch','학급별 시간표 인쇄'],['hours','시수배당표'],...(boot.meta.features?.studyroom?[['studyroom','스터디룸']]:[])];
-    let html='<div class="lookup"><nav class="tabs" aria-label="교사 메뉴">'+tabs.map(([v,l])=>'<button data-action="teacher-tab" data-tab="'+v+'"'+(state.teacherTab===v?' class="active" aria-current="page"':'')+'>'+l+'</button>').join('')+'</nav>';
+    TTNavigation.render(tabs,'teacher',state.teacherTab);
+    let html='<div class="lookup">';
     if(state.teacherTab==='timetable')html+='<form class="lookup-form" data-form="teacher">'+field('교사명','teacher-name','<input id="teacher-name" list="teacher-list" value="'+esc(state.teacherName||'')+'" autocomplete="off" required><datalist id="teacher-list">'+boot.teachers.map(n=>'<option value="'+esc(n)+'"></option>').join('')+'</datalist>')+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+(state.timetable&&state.timetable.kind==='teacher'?resultHTML():'')+'</div>';
     if(state.teacherTab==='roster')html+='<form data-form="roster" class="lookup-form">'+field('학년','roster-grade',select('roster-grade',Object.keys(boot.meta.classes),'','선택'))+field('과목','roster-subject',select('roster-subject',[],'','선택'))+field('분반','roster-section',select('roster-section',[],'','선택'))+'<button class="primary" type="submit">조회</button></form><div id="roster-result"></div>';
     if(state.teacherTab==='batch')html+='<form data-form="batch" class="lookup-form">'+field('학년','batch-grade',select('batch-grade',Object.keys(boot.meta.classes),'','선택'))+field('학급','batch-class',select('batch-class',[],'','선택'))+'<button class="primary" type="submit">일괄 인쇄</button></form>';
@@ -274,7 +277,7 @@
     }
     useMeta(state.admin.meta);await ensureAdminTab(state.adminTab);renderAdmin();
   }
-  function renderAdmin(){if(!token('admin')){renderLogin('admin');return;}const tabs=[['sectionAssignment','분반배정'],['students','학생'],['hours','시수배당표'],['allocation','이동수업 배치표'],['classSwap','결보강'],...(state.admin.meta.features?.studyroom?[['studyroom','스터디룸']]:[]),['settings','설정']];showScreen(head('',['sectionAssignment','allocation','hours'].includes(state.adminTab)?'':'<button data-action="refresh-admin">새로고침</button>')+'<div class="admin-layout"><nav class="admin-nav" aria-label="관리 메뉴">'+tabs.map(([v,l])=>'<button data-action="admin-tab" data-tab="'+v+'" '+((state.adminTab===v||v==='settings'&&['links','imports','sections'].includes(state.adminTab))?'class="active" aria-current="page"':'')+'>'+l+'</button>').join('')+'</nav><div id="admin-content" class="admin-content"></div></div>',true);renderAdminContent();}
+  function renderAdmin(){if(!token('admin')){renderLogin('admin');return;}const tabs=[['sectionAssignment','분반배정'],['students','학생'],['hours','시수배당표'],['allocation','이동수업 배치표'],['classSwap','결보강'],...(state.admin.meta.features?.studyroom?[['studyroom','스터디룸']]:[]),['settings','설정']];TTNavigation.render(tabs,'admin',['links','imports','sections'].includes(state.adminTab)?'settings':state.adminTab);showScreen(head('',['sectionAssignment','allocation','hours'].includes(state.adminTab)?'':'<button data-action="refresh-admin">새로고침</button>')+'<div class="admin-layout"><div id="admin-content" class="admin-content"></div></div>',true);renderAdminContent();}
   function renderAdminContent(){const root=$('#admin-content');if(!root||!state.admin)return;if(state.adminTab==='sectionAssignment')showSectionAssignment();if(state.adminTab==='hours')showCourse('admin');if(state.adminTab==='allocation')run(()=>showAllocation(root,'admin'));if(state.adminTab==='classSwap')run(()=>showSwap('admin',root));if(state.adminTab==='studyroom')run(()=>showStudyroom(root,'admin'));if(state.adminTab==='students')renderStudents(root);if(state.adminTab==='sections')renderSections(root);if(state.adminTab==='imports')renderImports(root);if(state.adminTab==='links')renderLinks(root);if(state.adminTab==='settings')renderSettings(root);
     if(['settings','links','imports','sections'].includes(state.adminTab)){
       const nav=document.createElement('nav');nav.className='tabs settings-nav';nav.setAttribute('aria-label','설정 메뉴');

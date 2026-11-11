@@ -13,7 +13,7 @@ import legacyRedirect from '../src/legacy-class-swap.js';
 test('vendored rules retain their locked upstream hashes',async()=>{const manifest=JSON.parse(await readFile('vendor/class-swap/manifest.json'));for(const [file,hash]of Object.entries(manifest.files))assert.equal(createHash('sha256').update(await readFile('vendor/class-swap/'+file)).digest('hex'),hash,file);});
 test('migration output parsing and old address redirect have no independent data entry',async()=>{
  assert.deepEqual(parseWranglerJSON('├ Checking upload\n[{"success":true,"results":[]}]'),[{success:true,results:[]}]);
- const moved=legacyRedirect.fetch(new Request('https://old.test/'));assert.equal(moved.status,302);assert.equal(moved.headers.get('Location'),'https://cosmicjh.github.io/timetable/#/teacher');assert.equal(legacyRedirect.fetch(new Request('https://old.test/api',{method:'POST'})).status,410);
+ const moved=legacyRedirect.fetch(new Request('https://old.test/'));assert.equal(moved.status,302);assert.equal(moved.headers.get('Location'),'https://cosmicjh.github.io/curriculum/#/teacher');assert.equal(legacyRedirect.fetch(new Request('https://old.test/api',{method:'POST'})).status,410);
 });
 
 test('shared data preserves elective, duty, consecutive-class protection and stable teacher IDs',()=>{

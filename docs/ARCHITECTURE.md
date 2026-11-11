@@ -4,7 +4,7 @@
 
 ## 확인한 원본
 
-- 실제 작업 원본: `https://github.com/cosmicjh/timetable`, 커밋 `bd6e7db`.
+- 실제 작업 원본: `https://github.com/cosmicjh/curriculum`, 커밋 `bd6e7db`.
 - 화면: index/student/teacher/admin.html, assets/app.js·import.js·assets.js·style.css.
 - 첨부 Code.gs: Apps Script API, Google 시트의 학기별 저장·수정 보호·이력·백업·인증.
 - 첨부 Core.gs: 교사 엑셀 열 자동 감지, 분반 자동 연결, 시간블록 추론, 학생·교사 시간표, 명렬표, 검증.

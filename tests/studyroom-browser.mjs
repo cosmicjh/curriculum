@@ -1,3 +1,4 @@
+import {clickMenu} from './navigation-helper.mjs';
 import {chromium,webkit} from 'playwright';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
@@ -41,7 +42,7 @@ try{
  const requests=[];teacher.on('request',request=>{if(request.url().endsWith('/api/studyroom'))requests.push(request.postDataJSON());});
  const sr=teacher.locator('.studyroom'),idle=()=>sr.locator('[data-sr="refresh"]').waitFor().then(()=>teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false'));
  await step('common teacher login can add a note and all 99 seats fit without horizontal scrolling',async()=>{
-  await teacher.goto(url+'/teacher.html');await teacher.locator('#password').fill('1234');await teacher.locator('form[data-form=login] button').click();await teacher.locator('[data-action=teacher-tab][data-tab=studyroom]').click();await idle();assert.equal(await sr.locator('[data-sr=seat]').count(),99);assert.match(await sr.locator('[data-seat="99"]').textContent(),/30101.*가상학생하나/);
+  await teacher.goto(url+'/teacher.html');await teacher.locator('#password').fill('1234');await teacher.locator('form[data-form=login] button').click();await clickMenu(teacher,teacher.locator('[data-action=teacher-tab][data-tab=studyroom]'));await idle();assert.equal(await sr.locator('[data-sr=seat]').count(),99);assert.match(await sr.locator('[data-seat="99"]').textContent(),/30101.*가상학생하나/);
   assert.equal(await sr.locator('[data-sr-identity]').count(),0);
   assert.equal(await sr.locator('input[type=search], [data-sr-view]').count(),0);
   assert.equal(await sr.locator('[data-sr=manual]').count(),0);
@@ -233,7 +234,7 @@ try{
   await teacher.unroute('**/api/studyroom');
  });
  await step('administrator schedule form is functional, preserve shared roster editing',async()=>{
-  const manager=await ctx.newPage();await manager.goto(url+'/admin.html');await manager.locator('#password').fill('1234');await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=studyroom]').click();const m=manager.locator('.studyroom');await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');await m.locator('[data-sr=view][data-view=settings]').click();await m.locator('[data-sr-form=schedule]').waitFor();await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal(await m.locator('.sr-rule').count(),1);
+  const manager=await ctx.newPage();await manager.goto(url+'/admin.html');await manager.locator('#password').fill('1234');await manager.locator('form[data-form=login] button').click();await clickMenu(manager,manager.locator('[data-action=admin-tab][data-tab=studyroom]'));const m=manager.locator('.studyroom');await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');await m.locator('[data-sr=view][data-view=settings]').click();await m.locator('[data-sr-form=schedule]').waitFor();await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal(await m.locator('.sr-rule').count(),1);
   assert.equal(await m.locator('[data-sr-form=staff]').count(),0);
   assert.equal(await m.getByRole('button',{name:'이용 학생',exact:true}).count(),0);
   await m.locator('[data-sr-form=schedule] button:not([type=button])').click();await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal((await h.sql('SELECT count(*) n FROM sr_schedules')).results[0].n,2);

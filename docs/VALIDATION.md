@@ -4,7 +4,7 @@
 
 ## 작업 위치와 보존 범위
 
-처음 열린 저장소는 다른 서비스인 교과 시수배당 `course-allocation`이었습니다. 사용자가 알려 준 `cosmicjh/timetable`을 작업 폴더의 `timetable-cloudflare/`에 별도 복제하고 `codex/workers-d1` 브랜치에서 구현했습니다. 원본은 bd6e7db입니다. 시수배당 코드·배포·DB와 기존 개인시간표 GitHub Pages·Apps Script·스프레드시트를 수정하거나 삭제하지 않았습니다. 이 문서의 초기 로컬 검증 후, 후속 작업에서 원격 브랜치 푸시와 Cloudflare 배포를 수행했습니다. main 병합은 하지 않았습니다. [실제 배포 결과](DEPLOYED_2026-10-30.md)를 함께 확인하세요.
+처음 열린 저장소는 다른 서비스인 교과 시수배당 `course-allocation`이었습니다. 현재 `cosmicjh/curriculum`인 저장소를 작업 폴더의 `timetable-cloudflare/`에 별도 복제하고 `codex/workers-d1` 브랜치에서 구현했습니다. 원본은 bd6e7db입니다. 시수배당 코드·배포·DB와 기존 개인시간표 GitHub Pages·Apps Script·스프레드시트를 수정하거나 삭제하지 않았습니다. 이 문서의 초기 로컬 검증 후, 후속 작업에서 원격 브랜치 푸시와 Cloudflare 배포를 수행했습니다. main 병합은 하지 않았습니다. [실제 배포 결과](DEPLOYED_2026-10-30.md)를 함께 확인하세요.
 
 ## 실행 환경
 

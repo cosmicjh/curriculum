@@ -1,3 +1,4 @@
+import {clickMenu} from './navigation-helper.mjs';
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
 import {readFile,mkdir,writeFile} from 'node:fs/promises';
@@ -19,7 +20,7 @@ try{
  await context.route('**/*',async route=>{
   const req=route.request(),url=new URL(req.url());
   if(url.origin===pages){
-   const relative=url.pathname.replace(/^\/timetable\/?/,'')||'index.html',path=resolve('.cache/pages-site',relative);
+   const relative=url.pathname.replace(/^\/curriculum\/?/,'')||'index.html',path=resolve('.cache/pages-site',relative);
    if(!path.startsWith(resolve('.cache/pages-site')))return route.abort();
    try{let body=await readFile(path);if(relative==='config.js'){const config=JSON.parse(body.toString().replace(/^window.TIMETABLE_CONFIG=/,'').replace(/;\s*$/,''));config.apiBase=api+'/api/';body=Buffer.from('window.TIMETABLE_CONFIG='+JSON.stringify(config)+';');}return await route.fulfill({status:200,contentType:({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[extname(path)]||'application/octet-stream',body});}catch{return route.fulfill({status:404,body:'Not found'});}
   }
@@ -32,14 +33,14 @@ try{
   return route.abort();
  });
  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
- const login=async()=>{await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('[data-action=teacher-tab][data-tab=classSwap]').waitFor();await idle();};
+ const login=async()=>{await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('[data-action=teacher-tab][data-tab=classSwap]').waitFor({state:'attached'});await idle();};
  const swap=page.locator('#class-swap-pane');
  const swapIdle=()=>swap.locator('#uiLock:not([disabled])').waitFor();
  await step('Class swap is a native timetable view with no login screen even while its data is delayed',async()=>{
-  await page.goto(pages+'/timetable/teacher.html');await idle();await login();
+  await page.goto(pages+'/curriculum/teacher.html');await idle();await login();
   await page.locator('#teacher-name').fill('가교사');await page.locator('form[data-form=teacher] button').click();await page.locator('.tt').waitFor();await idle();
   let release;swapGate=new Promise(resolve=>release=resolve);
-  await page.locator('[data-tab=classSwap]').click();await page.waitForFunction(()=>document.body.dataset.loading==='true');
+  await clickMenu(page,page.locator('[data-tab=classSwap]'));await page.waitForFunction(()=>document.body.dataset.loading==='true');
   assert.equal(await page.locator('input[type=password]').count(),0);assert.equal(await page.locator('iframe').count(),0);
   release();swapGate=null;await swap.locator('#appView').waitFor({state:'visible'});await idle();await swapIdle();
   assert.equal(await swap.locator('input[type=password],#loginView,.topbar,.footbar').count(),0);
@@ -53,12 +54,12 @@ try{
   await swap.locator('#weekB').fill(plan.items[0].dateA);await swap.locator('#weekB').dispatchEvent('change');
   await swap.locator('[data-action=cellA][data-day="0"][data-period="1"]').click();await swap.locator('#teacherB').selectOption(ids.b);await swap.locator('[data-action=cellB][data-day="1"][data-period="2"]').click();await swap.locator('[data-action=add]').click();
   assert.equal(await swap.locator('#itemCount').textContent(),'1건');
-  await page.locator('[data-tab=timetable]').click();assert.equal(await page.locator('#app .tt').count(),1);await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();assert.equal(await swap.locator('#reason').inputValue(),'통합 검증');assert.equal(await swap.locator('#itemCount').textContent(),'1건');
+  await clickMenu(page,page.locator('[data-tab=timetable]'));assert.equal(await page.locator('#app .tt').count(),1);await clickMenu(page,page.locator('[data-tab=classSwap]'));await idle();await swapIdle();assert.equal(await swap.locator('#reason').inputValue(),'통합 검증');assert.equal(await swap.locator('#itemCount').textContent(),'1건');
   assert(!(await swap.locator('[data-action=printReceipt]').isVisible()));
   await swap.locator('[data-action=save]').click();
   assert.equal((await h.sql('SELECT count(*) n FROM swap_reservations')).results[0].n,0);
   assert.equal((await h.sql('SELECT count(*) n FROM swap_plans')).results[0].n,0);
-  await page.reload();await idle();await login();await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();
+  await page.reload();await idle();await login();await clickMenu(page,page.locator('[data-tab=classSwap]'));await idle();await swapIdle();
   await swap.locator('[data-action=nav][data-view=history]').click();
   assert.match(await swap.locator('#historyList').textContent(),/통합 검증/);await swap.locator('[data-action=openPlan]').click();
   page.once('dialog',d=>d.accept());await swap.locator('[data-action=submit]').click();await swapIdle();
@@ -68,8 +69,8 @@ try{
   await page.setViewportSize({width:794,height:1123});await page.emulateMedia({media:'print'});assert(await page.locator('#print-root .print-page').isVisible());await page.screenshot({path:'test-results/class-swap-print.png',fullPage:true});await page.emulateMedia({media:'screen'});await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
   await swap.locator('[data-action=noticeReceipt]').click();await page.waitForFunction(()=>document.querySelector('#print-root > style')?.textContent.includes('landscape'));assert.equal(await page.locator('#print-root .notice-page').count(),1);await page.evaluate(()=>window.dispatchEvent(new Event('afterprint')));
   await swap.locator('[data-action=nav][data-view=history]').click();assert.doesNotMatch(await swap.locator('#historyList').textContent(),/통합 검증/);
-  const manager=await context.newPage();await manager.goto(pages+'/timetable/admin.html');await manager.locator('#password').fill('1234');
-  await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=classSwap]').click();
+  const manager=await context.newPage();await manager.goto(pages+'/curriculum/admin.html');await manager.locator('#password').fill('1234');
+  await manager.locator('form[data-form=login] button').click();await clickMenu(manager,manager.locator('[data-action=admin-tab][data-tab=classSwap]'));
   const history=manager.locator('#admin-content');
   const planRows=history.locator('#historyList tbody tr');
   await planRows.first().waitFor();
@@ -92,12 +93,12 @@ try{
   assert.equal(await page.locator('#class-swap-pane > div').count(),1);assert.equal(await swap.locator('input[type=password]').count(),0);
  });
  await step('One administrator XLSX update changes both the teacher timetable and class swap',async()=>{
-  const manager=await context.newPage();await manager.goto(pages+'/timetable/admin.html');await manager.waitForFunction(()=>document.body.dataset.loading==='false');await manager.locator('#password').fill('1234');await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=settings]').click();await manager.locator('[data-action=admin-tab][data-tab=imports]').click();await manager.waitForFunction(()=>document.body.dataset.loading==='false');
+  const manager=await context.newPage();await manager.goto(pages+'/curriculum/admin.html');await manager.waitForFunction(()=>document.body.dataset.loading==='false');await manager.locator('#password').fill('1234');await manager.locator('form[data-form=login] button').click();await clickMenu(manager,manager.locator('[data-action=admin-tab][data-tab=settings]'));await clickMenu(manager,manager.locator('[data-action=admin-tab][data-tab=imports]'));await manager.waitForFunction(()=>document.body.dataset.loading==='false');
   await manager.evaluate(()=>TTAssets.load('xlsx'));const store=sharedStore();store.teacherRows[2][2]='공통 수정 과학';store.teacherRows.push(['4','추가교사'],['','']);
   const bytes=await manager.evaluate(rows=>{const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet(rows),'교사시간표');return Array.from(new Uint8Array(XLSX.write(book,{type:'array',bookType:'xlsx'})));},store.teacherRows);
   await manager.locator('#import-teacher').setInputFiles({name:'shared-teachers.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(bytes)});await manager.locator('form[data-form=preview-import] button[type=submit]').click();await manager.locator('[data-action=commit-import]').waitFor();await manager.waitForFunction(()=>document.body.dataset.loading==='false');await manager.locator('[data-action=commit-import]').click();await manager.waitForFunction(()=>document.body.dataset.loading==='false');
   await swap.locator('#writeView [data-action=refresh]').click();await swapIdle();assert.match(await swap.locator('#teacherA').textContent(),/추가교사/);await swap.locator('#teacherA').selectOption(ids.a);assert.match(await swap.locator('#tableA').textContent(),/공통 수정 과학/);
-  await page.locator('[data-tab=timetable]').click();await page.locator('#teacher-name').fill('가교사');await page.locator('form[data-form=teacher] button').click();await idle();assert.match(await page.locator('#app .tt').textContent(),/공통 수정 과학/);await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();await manager.close();
+  await clickMenu(page,page.locator('[data-tab=timetable]'));await page.locator('#teacher-name').fill('가교사');await page.locator('form[data-form=teacher] button').click();await idle();assert.match(await page.locator('#app .tt').textContent(),/공통 수정 과학/);await clickMenu(page,page.locator('[data-tab=classSwap]'));await idle();await swapIdle();await manager.close();
  });
  await step('Term changes update the shared heading and keep unsaved class swap drafts per term',async()=>{
   await swap.locator('#reason').fill('이전 학기 초안');const settings={...sharedStore().settings,academicYear:2027,semester:1};assert((await h.mutation('saveSettings',{settings},cookieAdmin.cookie)).ok);
@@ -113,24 +114,24 @@ try{
  await step('teacher menus retain the same FHD frame and native class-swap draft',async()=>{
   await page.setViewportSize({width:1920,height:1080});let frame;
   for(const tab of ['timetable','classSwap','allocation','roster','batch']){
-   await page.locator('[data-action=teacher-tab][data-tab='+tab+']').click();await idle();if(tab==='classSwap')await swapIdle();
+   await clickMenu(page,page.locator('[data-action=teacher-tab][data-tab='+tab+']'));await idle();if(tab==='classSwap')await swapIdle();
    const current=await page.locator('.tabs').evaluate(el=>{const r=el.getBoundingClientRect(),main=document.querySelector('#app').getBoundingClientRect();return [r.x,r.y,r.width,main.x,main.width];});
    frame??=current;assert.deepEqual(current,frame,tab);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
    if(tab==='timetable'){await page.locator('#teacher-name').fill('가교사');await page.locator('form[data-form=teacher] button').click();await idle();await page.locator('.tt').waitFor();}
    if(tab==='classSwap')await swap.locator('#toast').waitFor({state:'hidden'});
    if(['timetable','classSwap'].includes(tab))await page.screenshot({path:'test-results/workspace-teacher-'+tab+'.png',fullPage:true});
   }
-  await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();assert.equal(await swap.locator('#reason').inputValue(),'이전 학기 초안');
+  await clickMenu(page,page.locator('[data-tab=classSwap]'));await idle();await swapIdle();assert.equal(await swap.locator('#reason').inputValue(),'이전 학기 초안');
  });
  await step('First-grade subject roster selects a homeroom and prints its students',async()=>{
-  await page.locator('[data-tab=roster]').click();await idle();
+  await clickMenu(page,page.locator('[data-tab=roster]'));await idle();
   await page.locator('#roster-grade').selectOption('1');await page.locator('#roster-subject').selectOption('공통 수정 과학');
   assert.equal(await page.locator('label[for=roster-section]').textContent(),'학급');
   await page.locator('#roster-section').selectOption('1');await page.locator('form[data-form=roster] button').click();await idle();
   assert.match(await page.locator('#modal').textContent(),/공통 수정 과학.*1학년 1반.*가상학생하나/);
   await page.locator('[data-action=print-roster]').click();await idle();
   assert.match(await page.locator('#print-root').textContent(),/1학년 1반/);await page.locator('[data-action=close-modal]').click();
-  await page.locator('[data-tab=classSwap]').click();await idle();await swapIdle();
+  await clickMenu(page,page.locator('[data-tab=classSwap]'));await idle();await swapIdle();
  });
  await step('Explicit logout confirms discard and removes the native view',async()=>{
   page.once('dialog',d=>d.dismiss());await page.locator('[data-action=logout]').click();await idle();assert.equal(await page.locator('#class-swap-pane > div').count(),1);

@@ -1,3 +1,4 @@
+import {clickMenu} from './navigation-helper.mjs';
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
 import {readFile,mkdir} from 'node:fs/promises';
@@ -46,7 +47,7 @@ try{
   await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();
   assert.equal(await page.getByText('분반배정',{exact:true}).count(),0);
   await logout();
-  await login('teacher');await page.locator('[data-action=teacher-tab]').first().waitFor();
+  await login('teacher');await page.locator('[data-action=teacher-tab]').first().waitFor({state:'attached'});
   assert.equal(await page.getByText('분반배정',{exact:true}).count(),0);
   await logout();
   assert(!requests.some(url=>url.includes('/section-assignment/')));
@@ -84,15 +85,15 @@ try{
   await hours.locator('.hours-import-dialog').waitFor();
   assert.match(await hours.locator('.hours-import-dialog').textContent(),/신규 가상 과목/);
   await page.reload();await idle();
-  await page.locator('.admin-nav [data-tab=hours]').click();
+  await clickMenu(page,page.locator('.admin-nav [data-tab=hours]'));
   await hours.getByRole('button',{name:'서버 분반배정',exact:true}).click();
   await hours.locator('.hours-import-dialog').waitFor();
   assert.match(await hours.locator('.hours-import-dialog').textContent(),/신규 가상 과목/);
-  await page.locator('.admin-nav [data-tab=students]').click();await idle();
+  await clickMenu(page,page.locator('.admin-nav [data-tab=students]'));await idle();
   await page.getByRole('button',{name:'서버 분반배정',exact:true}).click();
   await page.locator('[data-assignment-preview]').waitFor();
   await page.locator('#modal [data-action=close-modal]').click();
-  await page.locator('.admin-nav [data-tab=settings]').click();await idle();
+  await clickMenu(page,page.locator('.admin-nav [data-tab=settings]'));await idle();
   await page.getByText('새 학기 만들기',{exact:true}).click();
   await page.locator('#create-year').fill('2027');
   await page.locator('#create-semester').selectOption('1');

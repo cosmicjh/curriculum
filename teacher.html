@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <meta name="color-scheme" content="light">
-<title>개인 시간표</title>
+<title>교육과정 편성·운영 지원 도구</title>
 <!-- 
 Copyright (c) 2021, Kil Hyung-jin (https://github.com/orioncactus/pretendard),
 with Reserved Font Name Pretendard.
@@ -108,12 +108,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 <script defer src="config.js"></script>
 <script defer src="assets/transport.js?v=2.1.0-inline-font"></script>
 <script defer src="assets/assets.js?v=2.1.0"></script>
+<script defer src="assets/navigation.js"></script>
 <script defer src="assets/app.js?v=2.1.0-inline-font"></script>
 <link rel="stylesheet" href="assets/studyroom.css">
 </head>
 <body data-page="teacher" data-loading="true">
+<div id="workspace">
 <header id="header" class="topbar" inert aria-busy="true"></header>
-<main id="app" class="shell" inert aria-busy="true"></main>
+<main id="app" class="shell" tabindex="-1" inert aria-busy="true"></main>
+</div>
 <dialog id="modal" inert aria-busy="true"></dialog>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="print-root" class="print-root"></div>

@@ -25,13 +25,13 @@ export async function launchCourse(db,ctx,env,request,role){
  return {token:'tt.'+encode(iv)+encode(ciphertext)};
 }
 async function courseSession(db,env,token){
- if(!/^tt\.(?:[a-f0-9]{2}){36,256}$/.test(token||''))Auth.fail(401,'AUTH_REQUIRED','통합시간표에서 시수배당표를 다시 열어 주세요.');
+ if(!/^tt\.(?:[a-f0-9]{2}){36,256}$/.test(token||''))Auth.fail(401,'AUTH_REQUIRED','교육과정 편성·운영 지원 도구에서 시수배당표를 다시 열어 주세요.');
  const bytes=decode(token.slice(3)),secret=await key(env);
  let grant;
  try{grant=JSON.parse(decoder.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes.slice(0,12)},secret,bytes.slice(12))));}
- catch{Auth.fail(401,'AUTH_REQUIRED','통합시간표에서 시수배당표를 다시 열어 주세요.');}
+ catch{Auth.fail(401,'AUTH_REQUIRED','교육과정 편성·운영 지원 도구에서 시수배당표를 다시 열어 주세요.');}
  const session=await db.first('SELECT s.role FROM sessions s JOIN credentials c ON c.role=s.role AND c.epoch=s.epoch WHERE s.token_hash=? AND s.expires_at>?',grant.session,Date.now());
- if(!session||grant.role==='admin'&&session.role!=='admin')Auth.fail(401,'AUTH_REQUIRED','통합시간표에서 시수배당표를 다시 열어 주세요.');
+ if(!session||grant.role==='admin'&&session.role!=='admin')Auth.fail(401,'AUTH_REQUIRED','교육과정 편성·운영 지원 도구에서 시수배당표를 다시 열어 주세요.');
  if(grant.role==='teacher')requireEnabled(await S.context(db));
  return {role:grant.role};
 }

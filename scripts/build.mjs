@@ -6,7 +6,7 @@ const root=resolve(import.meta.dirname,'..'),dist=resolve(root,'dist');
 if(dist!==resolve(root,'dist'))throw Error('Invalid output path');
 await rm(dist,{recursive:true,force:true,maxRetries:5,retryDelay:250});await mkdir(resolve(dist,'assets'),{recursive:true});
 for(const file of ['index.html','student.html','teacher.html','admin.html','studyroom-student.html','config.js'])await copyFile(resolve(root,file),resolve(dist,file));
-for(const file of ['studyroom.js','studyroom-layout.js','studyroom-student.js','studyroom.css','font.css','timetable-ui.woff2','pretendard.woff2','app.js','allocations.js','allocation-import.js','transport.js','import.js','assets.js','style.css','xlsx.full.min.js','html2canvas.min.js','LICENSE-SheetJS.txt','LICENSE-Pretendard.txt','LICENSE-html2canvas.txt'])await copyFile(resolve(root,'assets',file),resolve(dist,'assets',file));
+for(const file of ['studyroom.js','studyroom-layout.js','studyroom-student.js','studyroom.css','font.css','timetable-ui.woff2','pretendard.woff2','app.js','navigation.js','allocations.js','allocation-import.js','transport.js','import.js','assets.js','style.css','xlsx.full.min.js','html2canvas.min.js','LICENSE-SheetJS.txt','LICENSE-Pretendard.txt','LICENSE-html2canvas.txt'])await copyFile(resolve(root,'assets',file),resolve(dist,'assets',file));
 const sectionAssignment=resolve(root,'assets/section-assignment'),sectionDist=resolve(dist,'section-assignment');
 await mkdir(sectionDist,{recursive:true});
 for(const name of ['view.html','style.css'])await copyFile(resolve(sectionAssignment,name),resolve(sectionDist,name));

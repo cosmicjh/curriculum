@@ -7,7 +7,7 @@ export function createTransport(){
     let status=0;
     try{
       if(window.parent===window||typeof window.parent.courseAllocationRequest!=='function')
-        throw new Error('통합시간표의 시수배당표 메뉴에서 열어 주세요.');
+        throw new Error('교육과정 편성·운영 지원 도구의 시수배당표 메뉴에서 열어 주세요.');
       if(method==='PUT'){
         const {operationId:ignored,...content}=data;
         const fingerprint=JSON.stringify(content);

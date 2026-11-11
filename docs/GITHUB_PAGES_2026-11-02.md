@@ -1,16 +1,16 @@
 # GitHub Pages 주소에서 직접 사용 · 2026-11-02
 
-사용자 요청에 따라 접속 주소를 [cosmicjh.github.io/timetable](https://cosmicjh.github.io/timetable/)로 전환합니다. 이 주소에서 실제 시간표 화면을 표시하며 Workers 주소로 이동시키거나 iframe으로 감싸지 않습니다.
+2026-11-02에 GitHub Pages에서 화면을 직접 게시하기 시작했습니다. 현재 화면은 [cosmicjh.github.io/curriculum](https://cosmicjh.github.io/curriculum/)에서 제공합니다.
 
 | 구성 | 위치 |
 | --- | --- |
-| 학생·교사 진입 | https://cosmicjh.github.io/timetable/ |
-| 학생 화면 | https://cosmicjh.github.io/timetable/student.html |
-| 교사 화면 | https://cosmicjh.github.io/timetable/teacher.html |
-| 관리자 | https://cosmicjh.github.io/timetable/admin.html |
+| 학생·교사 진입 | https://cosmicjh.github.io/curriculum/ |
+| 학생 화면 | https://cosmicjh.github.io/curriculum/student.html |
+| 교사 화면 | https://cosmicjh.github.io/curriculum/teacher.html |
+| 관리자 | https://cosmicjh.github.io/curriculum/admin.html |
 | API | https://school-timetable.cosmicjh.workers.dev/api/* |
 | 데이터 | 기존 school-timetable-db, DB 바인딩·ID 유지 |
-| 소스·운영 브랜치 | cosmicjh/timetable, main |
+| 소스·운영 브랜치 | cosmicjh/curriculum, main |
 
 ## 화면 게시
 
