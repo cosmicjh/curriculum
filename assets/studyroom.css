@@ -49,10 +49,11 @@
 .sr-query-table{table-layout:fixed}
 .studyroom .sr-query-note button{display:block;width:100%;min-height:24px;margin:0;padding:0;border:0;border-radius:0;background:transparent;text-align:left;line-height:24px;overflow-wrap:anywhere;white-space:pre-wrap}
 .studyroom .sr-query-note button::after{content:"";position:absolute;inset:0}
-.studyroom .sr-query-note button:hover{background:transparent}
-.sr-query-note:hover,.sr-query-note:focus-within{background:var(--ui-subtle)}
+.studyroom .sr-query-note button{-webkit-tap-highlight-color:transparent}
+.studyroom .sr-query-note button:hover{background:transparent;text-decoration:none}
 .studyroom .sr-query-note:has(button:focus-visible){outline:2px solid var(--ink);outline-offset:-2px}
 .studyroom .sr-query-note button:focus-visible{outline:0}
+.sr-note-bytes{font-size:12px;color:var(--muted);font-weight:400;text-align:right}
 .sr-student-search{position:relative;display:flex;align-items:flex-end;flex-wrap:wrap;gap:8px;margin:18px 0}
 .sr-student-search label{flex:0 1 360px;min-width:170px;margin:0}
 .sr-search-actions{display:flex;gap:8px;align-items:center}

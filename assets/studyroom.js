@@ -67,26 +67,32 @@ export function mountStudyroom(root,{request,admin=false}){
  function showDialog(html){dialog.innerHTML='<div class="sr-dialog-head"><h2 id="sr-dialog-title">'+html.title+'</h2>'+button('closeDialog','닫기')+'</div>'+html.body;if(!dialog.open)dialog.showModal();}
  function edit(r,seat='',noteOnly=false){
   const manual=!r;state.pending=null;state.editRevision=state.dashboard.revision;state.editRecordVersion=r?.version;state.editSessionId=state.dashboard.current?.id;
-  const note=field('비고','<textarea name="note" rows="3" maxlength="200">'+esc(r?.note||'')+'</textarea>');
+  const note=field('비고','<textarea name="note" rows="3" aria-describedby="sr-note-bytes">'+esc(r?.note||'')+'</textarea><span id="sr-note-bytes" class="sr-note-bytes" aria-live="polite"></span>');
   const seatField=field('좌석','<input name="seat" value="'+esc(r?.seat||seat)+'" pattern="(0[1-9]|[1-9][0-9])" maxlength="2" required>');
   const operations=field('작업','<select name="change"><option value="note">비고만 수정</option><option value="move">좌석 이동</option>'+(r?.state==='cancelled'?'<option value="restore">출석 복원</option>':'<option value="cancel">출석 취소</option>')+'</select>')+seatField;
   showDialog({title:manual?'수동 등록':esc(r.student_number+' '+r.name+' · 좌석 '+r.seat),body:'<form data-sr-form="change" data-id="'+esc(r?.id||'')+'">'+
    (manual?field('학번','<input name="studentNumber" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" required>')+seatField:'')+
    note+(manual||noteOnly?'':'<details class="sr-correction"><summary>출석 정정</summary>'+operations+'</details>')+
-   '<button class="primary">저장</button>'+(noteOnly&&r.note?'<button value="delete">삭제</button>':'')+'</form>'});
+   '<button class="primary">저장</button>'+(noteOnly&&r.note?'<button value="delete" formnovalidate>삭제</button>':'')+'</form>'});
+  validateNote($('textarea[name="note"]'));
+ }
+ function validateNote(input){
+  const bytes=new TextEncoder().encode(input.value.trim()).length;
+  input.setCustomValidity(bytes>150?'비고는 150byte 이내로 입력하세요.':'');
+  $('#sr-note-bytes').textContent=bytes+' / 150 byte';
  }
  function renderQuery(){
   const month=localDate().slice(0,7);
   content.innerHTML='<form data-sr-form="search" class="sr-student-search">'+field('학생 검색','<input type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sr-search-options" name="search" placeholder="이름 또는 학번" maxlength="80" required>')+'<div class="sr-search-actions"><button type="submit">검색</button><button type="reset">초기화</button></div><div id="sr-search-options" data-sr-search-results role="listbox" aria-label="학생 검색 결과" hidden></div></form><div class="sr-query-person" data-sr-person hidden><h3 tabindex="-1"></h3>' + '</div><div class="sr-toolbar sr-attendance-toolbar sr-calendar-toolbar"><input type="month" name="month" aria-label="월 달력" value="'+month+'">'+
    toggleGroup('session','회차',[['','전체'],['오전','오전'],['오후','오후'],['야간','야간']])+
    '</div><table class="sr-calendar" data-sr-calendar aria-label="출석 달력"></table><div data-sr-results></div><div class="sr-toolbar" data-sr-pages hidden>'+button('previous','이전')+button('next','다음')+'</div>';
-  state.sessionLabel='';state.queryDay=null;state.person=null;state.matches=[];
+  state.sessionLabel='';state.queryDay=null;state.person=null;state.selectedPerson=null;state.matches=[];
   return loadCalendar();
  }
  function clearSearch(){
   clearTimeout(searchTimer);searchTicket++;
   $('[name="search"]').setAttribute('aria-expanded','false');$('[data-sr-search-results]').hidden=true;
-  $('[name="search"]').value='';$('[data-sr-search-results]').replaceChildren();state.matches=[];
+  $('[name="search"]').value='';$('[data-sr-search-results]').replaceChildren();state.matches=[];state.selectedPerson=null;
  }
  async function searchStudents(){
   clearTimeout(searchTimer);
@@ -102,7 +108,9 @@ export function mountStudyroom(root,{request,admin=false}){
   }catch(error){if(ticket===searchTicket)$('[data-sr-error]').textContent=error.message;}
  }
  root.addEventListener('input',e=>{
+  if(e.target.name==='note'){validateNote(e.target);return;}
   if(e.target.name!=='search')return;
+  state.selectedPerson=null;
   clearTimeout(searchTimer);searchTicket++;
   $('[data-sr-search-results]').hidden=true;e.target.setAttribute('aria-expanded','false');
   if(!e.target.value.trim()){clearSearch();return;}
@@ -157,7 +165,7 @@ export function mountStudyroom(root,{request,admin=false}){
   const day=state.queryDay;
   const scope=state.person?{...monthRange(state.queryMonth),personId:state.person.person_id}:{from:day,to:day};
   const {from,to,personId}=scope;
-  renderRecords(await api('query',{from,to,personId,sessionLabel:state.sessionLabel,offset}));
+  renderRecords(await api('query',{from,to,personId,sessionLabel:state.sessionLabel,offset,recordsOnly:true}));
  }
  function renderRecords(q){
   state.query=q;
@@ -177,7 +185,13 @@ export function mountStudyroom(root,{request,admin=false}){
   if(!e.target.value)e.target.value=localDate().slice(0,7);
   state.queryDay=null;return loadCalendar();
  });});
- root.addEventListener('click',e=>{const b=e.target.closest('[data-sr]');if(!b)return;e.stopPropagation();const selectedPerson=b.dataset.sr==='searchStudent'?state.matches[Number(b.dataset.index)]:null;if(b.dataset.sr==='closeDialog'){dialog.close();return;}run(async()=>{
+ root.addEventListener('click',e=>{const b=e.target.closest('[data-sr]');if(!b)return;e.stopPropagation();if(b.dataset.sr==='searchStudent'){
+  const person=state.matches[Number(b.dataset.index)];if(!person)return;
+  clearTimeout(searchTimer);searchTicket++;state.selectedPerson=person;
+  $('[name="search"]').value=person.studentNumber+' '+person.name;
+  $('[data-sr-search-results]').hidden=true;$('[name="search"]').setAttribute('aria-expanded','false');
+  $('[data-sr-form="search"] button[type="submit"]').focus();return;
+ }if(b.dataset.sr==='closeDialog'){dialog.close();return;}run(async()=>{
   const a=b.dataset.sr;if(a==='view')return show(b.dataset.view);if(a==='refresh')return refresh();if(a==='closeDialog')return dialog.close();if(a==='addRule')return addRule();if(a==='removeRule')return b.closest('.sr-rule').remove();
   if(a==='display'){pressButton(b);$('.sr-seat-scroll').hidden=b.dataset.value!=='seats';$('[data-sr-list]').hidden=b.dataset.value!=='list';return paintCurrent();}
   if(a==='session'){pressButton(b);state.sessionLabel=b.dataset.value;return loadCalendar();}
@@ -197,26 +211,27 @@ export function mountStudyroom(root,{request,admin=false}){
    const person=state.query.rows.find(r=>r.id===b.dataset.id);
    if(person){await loadCalendar(person);$('[data-sr-person] h3').focus();}
   }
-  if(a==='searchStudent'){
-   const person=selectedPerson;
-   if(person){await loadCalendar(person);$('[data-sr-search-results]').replaceChildren();state.matches=[];$('[data-sr-search-results]').hidden=true;$('[name="search"]').setAttribute('aria-expanded','false');$('[data-sr-person] h3').focus();}
-  }
   if(a==='next')return loadRecords(state.query.next);
   if(a==='previous')return loadRecords(Math.max(0,state.query.offset-200));
   if(a==='export'){const data=await api('export'),blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='studyroom-'+localDate()+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
- },['view','session','day','next','previous','searchStudent','studentCalendar','display'].includes(b.dataset.sr));});
+ },['view','session','day','next','previous','studentCalendar','display'].includes(b.dataset.sr));});
  root.addEventListener('reset',e=>{
   if(e.target.dataset.srForm!=='search')return;
   e.preventDefault();clearSearch();run(()=>loadCalendar(null),true);
  });
- root.addEventListener('submit',e=>{const f=e.target;if(!f.dataset.srForm)return;e.preventDefault();e.stopPropagation();if(f.dataset.srForm==='search'){searchStudents();return;}if(busy){$('[data-sr-error]').textContent='처리 중입니다. 잠시 후 다시 실행하세요.';return;}run(async()=>{
+ root.addEventListener('submit',e=>{const f=e.target;if(!f.dataset.srForm)return;e.preventDefault();e.stopPropagation();if(f.dataset.srForm==='search'){
+  const person=state.selectedPerson;
+  if(!person){searchStudents();return;}
+  run(async()=>{await loadCalendar(person);$('[data-sr-person] h3').focus();},true);return;
+ }if(busy){$('[data-sr-error]').textContent='처리 중입니다. 잠시 후 다시 실행하세요.';return;}run(async()=>{
   const kind=f.dataset.srForm;
   if(kind==='change'){
    const args={change:f.elements.change?.value||(f.dataset.id?'note':'manual'),recordId:f.dataset.id,studentNumber:f.elements.studentNumber?.value,seat:f.elements.seat?.value,note:e.submitter?.value==='delete'?'':f.elements.note.value};
    const signature=JSON.stringify(args);
    if(state.pending?.signature!==signature)state.pending={signature,id:crypto.randomUUID()};
-   await api('change',{...args,requestId:state.pending.id,expectedRevision:state.editRevision,expectedRecordVersion:state.editRecordVersion,expectedSessionId:state.editSessionId});
+   const saved=await api('change',{...args,requestId:state.pending.id,expectedRevision:state.editRevision,expectedRecordVersion:state.editRecordVersion,expectedSessionId:state.editSessionId});
    state.pending=null;dialog.close();
+   if(state.view==='query'&&args.change==='note')return renderRecords({...state.query,rows:state.query.rows.map(row=>row.id===saved.id?{...row,...saved}:row)});
    return state.view==='query'?loadRecords(state.query.offset):refresh();
   }
   if(kind==='enabled'){await api('configuration',{enabled:f.elements.enabled.checked,expectedRevision:state.dashboard.revision});return refresh();}

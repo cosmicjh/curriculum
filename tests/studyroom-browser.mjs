@@ -38,6 +38,7 @@ try{
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert(await page.evaluate(()=>document.fonts.check('16px "Timetable UI"','한글')));await page.screenshot({path:'test-results/studyroom/student-mobile.png',fullPage:true});
  });
  const teacher=await ctx.newPage();teacher.on('pageerror',e=>errors.push(e.message));await teacher.setViewportSize({width:1440,height:1000});
+ const requests=[];teacher.on('request',request=>{if(request.url().endsWith('/api/studyroom'))requests.push(request.postDataJSON());});
  const sr=teacher.locator('.studyroom'),idle=()=>sr.locator('[data-sr="refresh"]').waitFor().then(()=>teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false'));
  await step('common teacher login can add a note and all 99 seats fit without horizontal scrolling',async()=>{
   await teacher.goto(url+'/teacher.html');await teacher.locator('#password').fill('1234');await teacher.locator('form[data-form=login] button').click();await teacher.locator('[data-action=teacher-tab][data-tab=studyroom]').click();await idle();assert.equal(await sr.locator('[data-sr=seat]').count(),99);assert.match(await sr.locator('[data-seat="99"]').textContent(),/30101.*가상학생하나/);
@@ -98,11 +99,18 @@ try{
   await search.fill('학생둘');await sr.getByRole('option',{name:'30102 가상학생둘',exact:true}).waitFor();
   const matches=sr.locator('[data-sr-search-results]');
   assert.equal(await matches.getByRole('option').count(),1);
+  const beforeSelection=requests.filter(r=>r.op==='query').length;
   await matches.getByRole('option',{name:'30102 가상학생둘',exact:true}).click();await queryIdle();
+  assert(await sr.locator('[data-sr-person]').isHidden());assert.equal(await sr.locator('[data-sr-results] tbody tr').count(),0);
+  assert.equal(requests.filter(r=>r.op==='query').length,beforeSelection,'selecting a candidate does not fetch attendance');
+  assert.equal(await search.inputValue(),'30102 가상학생둘');
+  await searchForm.getByRole('button',{name:'검색',exact:true}).click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-person] h3').textContent(),'30102 가상학생둘');
   assert.equal(await sr.locator('[data-sr-results] tbody tr').count(),1);
   await search.fill('30101');await searchForm.getByRole('button',{name:'검색',exact:true}).click();await queryIdle();
   await matches.getByRole('option',{name:'30101 가상학생하나',exact:true}).click();await queryIdle();
+  assert.equal(await sr.locator('[data-sr-person] h3').textContent(),'30102 가상학생둘','the previous result remains until search is submitted');
+  await searchForm.getByRole('button',{name:'검색',exact:true}).click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-person] h3').textContent(),'30101 가상학생하나');
   await search.fill('없는가상학생');await searchForm.getByRole('button',{name:'검색',exact:true}).click();await queryIdle();
   await matches.getByText('검색 결과가 없습니다.',{exact:true}).waitFor();
@@ -157,14 +165,25 @@ try{
    });
   };
   assert(await noteFillsCell(),'the note button fills its entire table cell');
+  const noteCell=results.locator('.sr-query-note').first();await noteCell.hover();
+  assert.equal(await noteCell.evaluate(el=>getComputedStyle(el).backgroundColor),'rgba(0, 0, 0, 0)');
+  assert.equal(await noteCell.locator('button').evaluate(el=>getComputedStyle(el).textDecorationLine),'none');
   await teacher.screenshot({path:'test-results/studyroom/query-search-note-mobile.png',fullPage:true});
   await teacher.screenshot({path:'.impeccable/review/mobile.png',fullPage:true});
   await results.locator('[data-sr=readNote]').click({position:{x:1,y:1}});
   const note=sr.locator('dialog textarea[name=note]');
   assert.equal(await note.inputValue(),'가상 특이사항');
   assert.equal(await sr.locator('dialog [name=change]').count(),0);
-  const editedNote=('가상 비고 수정\n'+'긴 비고 '.repeat(20)).trim();
+  for(const text of ['가'.repeat(51),'🙂'.repeat(38),'a'.repeat(151)]){
+   await note.fill(text);assert.equal(await note.evaluate(el=>el.checkValidity()),false);
+  }
+  await sr.locator('dialog button.primary').click();assert(await sr.locator('dialog').isVisible(),'overlong notes cannot be submitted');
+  await note.fill('가'.repeat(50));assert.equal(await note.evaluate(el=>el.checkValidity()),true);
+  assert.equal(await sr.locator('#sr-note-bytes').textContent(),'150 / 150 byte');
+  const editedNote=('가상 비고 수정\n'+'긴 비고 '.repeat(7)).trim();
+  const beforeSave=requests.length;
   await note.fill(editedNote);await sr.locator('dialog button.primary').click();await queryIdle();
+  assert.deepEqual(requests.slice(beforeSave).map(r=>r.op),['change'],'note saves update the returned row without rereading the list');
   assert(await noteFillsCell(),'a multiline note retains the full-cell click target');
   assert(await results.locator('[data-sr=readNote]').evaluate(el=>el.scrollHeight<=el.clientHeight+1),'a multiline note is fully visible');
   await results.locator('[data-sr=readNote]').click();assert.equal(await note.inputValue(),editedNote);
@@ -190,6 +209,9 @@ try{
   assert.deepEqual(await matches.getByRole('option').allTextContents(),['30101 가상학생하나','30102 가상학생하나']);
   assert(await sr.locator('[data-sr-person]').isHidden());
   await matches.getByRole('option',{name:'30102 가상학생하나',exact:true}).click();await queryIdle();
+  assert(await sr.locator('[data-sr-person]').isHidden());
+  await searchForm.getByRole('button',{name:'검색',exact:true}).click();await queryIdle();
+  assert.equal(await sr.locator('[data-sr-person] h3').textContent(),'30102 가상학생하나');
   await h.sql("UPDATE students SET name='가상학생둘' WHERE id='student-two'");
   await searchForm.getByRole('button',{name:'초기화',exact:true}).click();await queryIdle();
   await teacher.setViewportSize({width:1280,height:900});

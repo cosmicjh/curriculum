@@ -28,6 +28,10 @@ test('D1 studyroom: shared roster, durable identity, teacher notes, archive and 
  });
  await t.test('teacher notes, cancellation, restore and audit are retained',async()=>{
   const change=async(change,recordId=first.recordId,extra={})=>api('change',{change,recordId,reason:'가상 정정',requestId:crypto.randomUUID(),expectedRevision:await revision(),expectedRecordVersion:(await h.sql('SELECT version FROM sr_attendance WHERE id=?',recordId)).results[0].version,...extra},teacher.cookie);
+  for(const note of ['a'.repeat(150),'가'.repeat(50),'🙂'.repeat(37)+'ab'])assert((await change('note',first.recordId,{note})).ok);
+  for(const note of ['a'.repeat(151),'가'.repeat(50)+'a','🙂'.repeat(37)+'abc']){
+   const rejected=await change('note',first.recordId,{note});assert.equal(rejected.status,400);assert.match(rejected.error,/150byte/);
+  }
   const noted=await change('note',first.recordId,{note:'가상 특이사항',actor:'위조교사'});assert(noted.ok,JSON.stringify(noted));assert.equal(noted.data.note,'가상 특이사항');
   assert((await change('cancel')).ok);assert((await change('restore')).ok);
   const hist=await api('history',{recordId:first.recordId},teacher.cookie);assert(hist.data.events.some(e=>e.action==='cancel'));assert(hist.data.events.some(e=>e.action==='restore'));
@@ -96,6 +100,24 @@ test('D1 studyroom: shared roster, durable identity, teacher notes, archive and 
   assert.equal((await api('change',{change:'note',recordId:second.recordId,requestId:crypto.randomUUID()},teacher.cookie)).status,401);
  });
 });
+test('lightweight attendance reads preserve filters, ordering and the 200-row page boundary',async t=>{
+ const h=await harness({studyroom:true});t.after(()=>h.close());const {api,teacher}=await setupStudyroom(h);
+ const schedule=(await h.sql('SELECT id FROM sr_schedules LIMIT 1')).results[0].id;
+ const person=(await h.sql("SELECT person_id FROM student_person_links WHERE student_id='student-one'")).results[0].person_id;
+ await h.sql("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<201) INSERT INTO sr_sessions(id,date,label,academic_year,schedule_id,starts_at,ends_at) SELECT 'page-'||i,'2026-10-01','아침',2026,?,'2026-10-01T00:00:00Z','2026-10-01T10:00:00Z' FROM n",schedule);
+ await h.sql("INSERT INTO sr_attendance(id,session_id,person_id,term_id,student_id,student_number,name,seat,state,first_at,last_at,version,note) SELECT id,id,?,'2026-2','student-one','30101','가상학생','01','active',starts_at,starts_at,1,'' FROM sr_sessions WHERE id LIKE 'page-%'",person);
+ for(const scope of [{},{personId:person}])for(const offset of [0,200]){
+  const args={from:'2026-10-01',to:'2026-10-01',sessionLabel:'오전',offset,...scope};
+  const full=await api('query',args,teacher.cookie),light=await api('query',{...args,recordsOnly:true},teacher.cookie);
+  assert(full.ok&&light.ok);assert.deepEqual(light.data.rows,full.data.rows);assert.equal(light.data.next,offset===0?200:null);assert.equal(light.data.offset,offset);
+  assert.equal(light.data.calendar,undefined);assert.equal(light.data.totals,undefined);
+ }
+ assert.equal((await api('query',{from:'2026-10-01',to:'2026-10-01',sessionLabel:'야간',recordsOnly:true},teacher.cookie)).data.rows.length,0);
+ await h.sql("UPDATE sr_attendance SET state='cancelled' WHERE id='page-1'");
+ assert.equal((await api('query',{from:'2026-10-01',to:'2026-10-01',recordsOnly:true},teacher.cookie)).data.next,null);
+ assert.equal((await api('query',{from:'2026-10-01',to:'2026-10-01',recordsOnly:true,includeCancelled:true},teacher.cookie)).data.next,200);
+});
+
 test('new term links require an explicit identity decision; attendance and policy are isolated by active term',async t=>{
  const h=await harness({studyroom:true});t.after(()=>h.close());const {api,admin,teacher,revision}=await setupStudyroom(h);
  assert((await api('submit',{studentNumber:'30101',seat:'01',requestId:crypto.randomUUID()},'')).ok);

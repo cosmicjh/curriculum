@@ -72,11 +72,17 @@ async function query(db,ctx,req){
   conditions.push(label+'=?');args.push(req.sessionLabel);
  }
  if(!req.includeCancelled)conditions.push("a.state='active'");
- const where=conditions.join(' AND '),base=' FROM sr_attendance a JOIN sr_sessions s ON s.id=a.session_id WHERE '+where;
+ // Date lookups start with the indexed sessions instead of scanning a whole term's attendance.
+ const where=conditions.join(' AND '),base=(req.personId?' FROM sr_attendance a JOIN sr_sessions s ON s.id=a.session_id':' FROM sr_sessions s CROSS JOIN sr_attendance a ON a.session_id=s.id')+' WHERE '+where;
+ const records='SELECT a.*,s.date,'+label+' AS label,s.academic_year'+base+' ORDER BY s.date DESC,s.starts_at,s.id,a.student_number';
+ if(req.recordsOnly===true){
+  const rows=await db.all(records+' LIMIT 201 OFFSET ?',...args,offset);
+  return {rows:rows.slice(0,200),offset,next:rows.length>200?offset+200:null};
+ }
  const calendar="SELECT s.date,count(*) AS records,count(DISTINCT a.person_id) AS students"+base+' GROUP BY s.date ORDER BY s.date';
  if(req.calendarOnly===true)return {calendar:await db.all(calendar,...args)};
  const [rows,days,totals]=await db.batch([
-  db.prepare('SELECT a.*,s.date,'+label+' AS label,s.academic_year'+base+' ORDER BY s.date DESC,s.starts_at,s.id,a.student_number LIMIT 200 OFFSET ?',...args,offset),
+  db.prepare(records+' LIMIT 200 OFFSET ?',...args,offset),
   db.prepare(calendar,...args),
   db.prepare('SELECT count(*) AS records,count(DISTINCT s.date) AS days,count(DISTINCT a.person_id) AS students'+base,...args)
  ]);
@@ -85,7 +91,8 @@ async function query(db,ctx,req){
 async function changeAttendance(db,ctx,req,session){
  D.requestId(req.requestId);D.check(['note','cancel','restore','move','manual'].includes(req.change),'변경 작업을 확인하세요.');
  const reason=String(req.reason||'').trim(),note=String(req.note||'').trim();
- D.check(note.length<=200&&reason.length<=200,'비고와 변경 사유는 200자 이내로 입력하세요.');
+ D.check(new TextEncoder().encode(note).length<=150,'비고는 150byte 이내로 입력하세요.');
+ D.check(reason.length<=200,'변경 사유는 200자 이내로 입력하세요.');
  const actor='role:'+session.role;
  const fingerprint=await digest(JSON.stringify(['change',actor,req.change,req.recordId||'',req.studentNumber||'',req.seat||'',reason,note,req.expectedRecordVersion??null,req.expectedSessionId??null]));
  const prior=await replay(db,req.requestId,fingerprint,ctx.term);if(prior)return prior;
