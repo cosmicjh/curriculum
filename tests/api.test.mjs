@@ -111,6 +111,9 @@ test('Workers + actual local D1: authorization, migration, edits, term isolation
  const studentCookie=(await h.login('student')).cookie;
  const samples=[];
  await t.test('anonymous access, teacher/admin boundaries, strict Origin and cookies',async()=>{
+  assert.equal((await h.api('student',{studentNumber:'30101'})).status,401);
+  assert.equal((await h.api('passwordParameters',{role:'student'})).status,400);
+  assert.equal((await h.mutation('changePassword',{role:'student'},admin)).status,400);
   assert.equal((await h.api('adminBootstrap')).status,401);assert.equal((await h.api('adminBootstrap',{},teacher)).status,401);
   assert.equal((await h.api('teacherBootstrap',{},teacher)).status,200);assert.equal((await h.api('saveStudent',{},teacher)).status,401);
   assert.equal((await h.api('bootstrap',{},'',{Origin:'https://evil.example'})).status,403);
@@ -120,6 +123,7 @@ test('Workers + actual local D1: authorization, migration, edits, term isolation
   const r=await h.mutation('restore',{backup:backup()},admin);assert(r.ok,JSON.stringify(r));
   for(const [table,count] of [['students',2],['sections',3],['assignments',3],['teachers',1],['lessons',35]])assert.equal((await h.sql('SELECT count(*) AS n FROM '+table)).results[0].n,count);
   const s=await h.api('student',{studentNumber:'30101'},studentCookie);assert(s.ok,JSON.stringify(s));assert.deepEqual(s.data.cells,Core.studentTimetable(Core.runtime(fixture()),fixture().students[0]).cells);assert.equal(s.data.name,'가상학생하나');assert(!JSON.stringify(s.data).includes('가상학생둘'));assert(!('id' in s.data));
+  for(const cookie of [teacher,admin])assert.deepEqual((await h.api('student',{studentNumber:'30101'},cookie)).data,s.data);
   const r2=await h.api('roster',{query:{kind:'elective',sectionId:'section-one'}},teacher);assert.deepEqual(r2.data,Core.roster(Core.runtime(fixture()),{kind:'elective',sectionId:'section-one'}));
   assert.equal(s.data.cells.filter(c=>c.subject==='가상과학').length,3);assert(s.data.cells.some(c=>!c.subject));
   const exported=await h.mutation('backup',{},admin);assert.deepEqual(summarize(exported.data.result.backup),summarize(backup()));

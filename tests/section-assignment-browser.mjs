@@ -28,7 +28,8 @@ try{
   const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
   async function login(role,password='1234'){
     await page.locator('#login-role').selectOption(role);
-    await page.locator('#password').fill(password);
+    if(role==='student')assert(await page.locator('#password').isHidden());
+    else await page.locator('#password').fill(password);
     await page.getByRole('button',{name:'로그인',exact:true}).click();
     await idle();
   }
@@ -36,12 +37,12 @@ try{
     await page.getByRole('button',{name:'로그아웃',exact:true}).click();
     await idle();
     assert.equal(await page.locator('#login-role').inputValue(),'');
+    assert(await page.locator('#sidebar').isHidden());
   }
   await mkdir('test-results',{recursive:true});
   await page.goto(base);await idle();
   await page.screenshot({path:'test-results/role-login-desktop.png',fullPage:true});
-  await login('student','0000');
-  assert.match(await page.locator('#login-error').textContent(),/비밀번호/);
+  assert(await page.locator('#sidebar').isHidden());
   await login('student');
   await page.locator('#student-number').fill('30101');
   await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();
@@ -55,7 +56,7 @@ try{
   assert(await page.locator('#access').isVisible());assert(await page.locator('main').isHidden());
   await page.goto(base);await idle();
   await login('admin');
-  assert.equal(await page.locator('.admin-nav button').first().textContent(),'분반배정');
+  assert.deepEqual((await page.locator('.admin-nav button').allTextContents()).slice(0,2),['학생 시간표','분반배정']);
   const loginPerf=await page.evaluate(()=>TIMETABLE_PERF.find(entry=>entry.action==='login'));
   assert(!requests.includes('/api/adminBootstrap'));
   const frame=page.frameLocator('#section-assignment-pane iframe');
@@ -110,14 +111,9 @@ try{
   const student=await h.login('student');
   assert.equal((await h.api('teacherBootstrap',{},student.cookie)).status,401);
   assert.equal((await h.api('adminBootstrap',{},student.cookie)).status,401);
-  await page.getByRole('button',{name:'학생 비밀번호 변경',exact:true}).click();
-  await page.locator('#password-current').fill('1234');
-  await page.locator('#password-new').fill('7890');
-  await page.locator('#password-confirm').fill('7890');
-  await page.locator('form[data-form=password] button.primary').click();await idle();
-  assert.equal((await h.api('student',{studentNumber:'30101'},student.cookie)).status,401);
-  await logout();await login('student','7890');
+  assert.equal(await page.getByRole('button',{name:'학생 비밀번호 변경',exact:true}).count(),0);
+  await logout();await login('student');
   assert(await page.locator('#student-number').isVisible());
   assert.deepEqual(errors,[]);
-  console.log('PASS section assignment, role login/logout, student password and transfer',loginPerf);
+  console.log('PASS section assignment, role login/logout, passwordless student login and transfer',loginPerf);
 }finally{await browser?.close();await h.close();}

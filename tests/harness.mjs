@@ -25,7 +25,9 @@ export async function harness({frontendOrigin='https://cosmicjh.github.io',study
   const raw=await response.text();let payload;try{payload=JSON.parse(raw);}catch{throw Error(raw);}return {status:response.status,headers:response.headers,elapsed:performance.now()-start,bytes:Buffer.byteLength(raw),...payload};
  }
  async function login(role='admin',password='1234',cookie=''){
-  const p=await api('passwordParameters',{role}),r=await api('login',{role,password:await stretchPassword(password,p.data),credentialEpoch:p.data.epoch,initialize:true},cookie);
+  const args={role,initialize:true};
+  if(role!=='student'){const p=await api('passwordParameters',{role});args.password=await stretchPassword(password,p.data);args.credentialEpoch=p.data.epoch;}
+  const r=await api('login',args,cookie);
   if(!r.ok)throw Error(JSON.stringify(r));return {cookie:r.headers.getSetCookie().map(c=>c.split(';')[0]).join('; '),data:r.data};
  }
  async function mutation(action,data,cookie){const ctx=await api('bootstrap');return api(action,{expectedTerm:ctx.data.term,expectedRevision:ctx.data.revision,patch:true,...data},cookie);}

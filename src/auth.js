@@ -2,7 +2,7 @@ import {validHash,passwordMatches,publicParameters,randomToken,digest,credential
 import {pagesRequest} from './origin.js';
 export function fail(status,code,message){const e=Error(message);Object.assign(e,{status,code});throw e;}
 export const roles=['student','teacher','admin'];
-const allowedRole=(actual,required)=>actual===required||actual==='admin'&&required==='teacher';
+const allowedRole=(actual,required)=>actual===required||required==='student'&&roles.includes(actual)||actual==='admin'&&required==='teacher';
 export const cookieName=role=>'__Host-tt_'+role;
 export function cookie(role,token='',ttl=0){return `${cookieName(role)}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${ttl}`;}
 export async function credentials(db,env){
@@ -12,9 +12,9 @@ export async function credentials(db,env){
   const missing=roles.filter(role=>!rows.some(row=>row.role===role));
   const statements=[];
   for(const role of missing){
-   // The initial student password is public. Stretch it offline to keep Worker CPU low.
-   const hash=role==='student'?await credentialFromProof('32bb4118f1416498ab04e5e86eac61d01d2ecf8145a818e70259493b2108e5af','e19da162133c4c42bac77adf26201c97',role,env.PASSWORD_PEPPER):env['BOOTSTRAP_'+role.toUpperCase()+'_HASH'];
-   if(!validHash(hash))fail(503,'SETUP_REQUIRED','서버 초기 계정 설정이 필요합니다.');
+   // Student sessions still reference this role row for their epoch.
+   const hash=role==='student'?'':env['BOOTSTRAP_'+role.toUpperCase()+'_HASH'];
+   if(role!=='student'&&!validHash(hash))fail(503,'SETUP_REQUIRED','서버 초기 계정 설정이 필요합니다.');
    statements.push(db.prepare('INSERT OR IGNORE INTO credentials(role,password_hash) VALUES(?,?)',role,hash));
   }
   await db.batch(statements);
@@ -34,7 +34,7 @@ export async function authenticate(db,request,role='teacher',env={}){
   fail(401,'AUTH_REQUIRED','다시 로그인하세요.');
  }
  const jar=tokens(request);
- for(const r of (role==='teacher'?['admin','teacher']:[role])){
+ for(const r of (role==='student'?['admin','teacher','student']:role==='teacher'?['admin','teacher']:[role])){
   const token=jar[cookieName(r)];if(!/^[a-f0-9]{64}$/.test(token||''))continue;
   const s=await db.first('SELECT s.* FROM sessions s JOIN credentials c ON c.role=s.role AND c.epoch=s.epoch WHERE s.token_hash=? AND s.expires_at>?',await digest(token),Date.now());if(s&&allowedRole(s.role,role))return s;
  }fail(401,'AUTH_REQUIRED','다시 로그인하세요.');
@@ -48,7 +48,7 @@ export async function rateLimit(db,request,scope,limit=10,windowMs=60000){
 export async function login(db,env,request,req,headers){
  if(!roles.includes(req.role))fail(400,'INVALID_REQUEST','권한을 확인하세요.');
  await rateLimit(db,request,'login:'+req.role,req.role==='student'?120:10);const cred=(await credentials(db,env))[req.role];
- if(req.credentialEpoch!==cred.epoch||!await passwordMatches(req.password,cred.password_hash,env.PASSWORD_PEPPER,req.role)){
+ if(req.role!=='student'&&(req.credentialEpoch!==cred.epoch||!await passwordMatches(req.password,cred.password_hash,env.PASSWORD_PEPPER,req.role))){
   await revoke(db,request,env);if(!pagesRequest(request,env)){for(const role of roles)headers.append('Set-Cookie',cookie(role));}fail(401,'AUTH_REQUIRED','비밀번호가 다르거나 변경되었습니다.');
  }
  const token=randomToken(),ttl=req.role==='admin'?7200:21600,expiresAt=Date.now()+ttl*1000;
@@ -71,11 +71,12 @@ export async function login(db,env,request,req,headers){
  }
  return {token:pages?token:'cookie',role:req.role,expiresAt};
 }
-export async function parameters(db,env,role){if(!roles.includes(role))fail(400,'INVALID_REQUEST','권한을 확인하세요.');return publicParameters((await credentials(db,env))[role]);}
+export async function parameters(db,env,role){if(!['teacher','admin'].includes(role))fail(400,'INVALID_REQUEST','비밀번호를 사용하는 유형을 선택하세요.');return publicParameters((await credentials(db,env))[role]);}
 export async function passwordChangeStatements(db,env,req){
+ if(!['teacher','admin'].includes(req.role))fail(400,'INVALID_REQUEST','비밀번호를 사용하는 유형을 선택하세요.');
  const cred=(await credentials(db,env)).admin;
  if(req.currentEpoch!==cred.epoch||!await passwordMatches(req.currentPassword,cred.password_hash,env.PASSWORD_PEPPER,'admin'))fail(401,'AUTH_REQUIRED','현재 관리자 비밀번호가 다릅니다.');
- if(!roles.includes(req.role)||!Number.isInteger(req.passwordLength)||req.passwordLength<4||req.passwordLength>128)fail(400,'INVALID_REQUEST','새 비밀번호는 4–128자로 입력하세요.');
+ if(!Number.isInteger(req.passwordLength)||req.passwordLength<4||req.passwordLength>128)fail(400,'INVALID_REQUEST','새 비밀번호는 4–128자로 입력하세요.');
  const hash=await credentialFromProof(req.passwordProof,req.passwordSalt,req.role,env.PASSWORD_PEPPER);
  return [db.prepare('UPDATE credentials SET password_hash=?,epoch=epoch+1 WHERE role=?',hash,req.role),db.prepare('DELETE FROM sessions WHERE role=?',req.role)];
 }

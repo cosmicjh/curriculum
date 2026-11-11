@@ -6,7 +6,7 @@
  let memorySession=null;
  const loginPreparations=new Map();
  function prepareLogin(role){
-  if(!['student','teacher','admin'].includes(role))return Promise.reject(Error('사용자 유형을 선택하세요.'));
+  if(!['teacher','admin'].includes(role))return Promise.reject(Error('사용자 유형을 선택하세요.'));
   let entry=loginPreparations.get(role);
   if(!entry||Date.now()-entry.at>30000){
    entry={at:Date.now(),promise:Promise.all([import('./password.js'),request('passwordParameters',{role})])};
@@ -28,7 +28,7 @@
    }catch(e){if(e.name==='AbortError')throw Error(quickRead?'조회 응답이 지연되었습니다. 다시 조회해 주세요.':'응답을 확인하지 못했습니다. 입력값을 보관하고 새로고침하여 저장 결과를 확인하세요.');if(e instanceof TypeError&&/fetch|network|load failed/i.test(e.message)){const error=Error('서버에 연결하지 못했습니다. 입력 자료는 유지됩니다. 재시도 전에 자료 목록에서 저장 여부를 확인하세요.');error.code='NETWORK_ERROR';throw error;}throw e;}finally{clearTimeout(timer);}
   }
   let data;
-  if(action==='login'){
+  if(action==='login'&&payload.role!=='student'){
    const password=payload.password,[{stretchPassword},p]=await prepareLogin(payload.role);loginPreparations.delete(payload.role);
    payload.password=await stretchPassword(password,p);payload.credentialEpoch=p.epoch;
    try{data=await send(action,payload);}catch(error){

@@ -21,7 +21,7 @@ try{
  await step('administrator menus keep the same navigation and content frame',async()=>{
   await login('admin');let frame;
   assert.equal(await page.locator('.admin-nav [data-tab=links]').count(),0);
-  assert.deepEqual(await page.locator('.admin-nav').locator('button,a').allTextContents(),['분반배정','학생','시수배당표','이동수업 배치표','결보강','설정']);
+  assert.deepEqual(await page.locator('.admin-nav').locator('button,a').allTextContents(),['학생 시간표','분반배정','학생','시수배당표','이동수업 배치표','결보강','설정']);
   for(const tab of ['students','allocation','settings','sections','imports']){
    await clickMenu(page,page.locator('[data-action=admin-tab][data-tab='+tab+']'));await idle();
    const current=await page.locator('#admin-content').evaluate(el=>{const content=el.getBoundingClientRect(),nav=document.querySelector('.admin-nav').getBoundingClientRect();return [content.x,content.y,content.width,nav.x,nav.y];});
