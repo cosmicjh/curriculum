@@ -210,7 +210,7 @@ async function api(request,env){
   if(request.method==='OPTIONS'){
    const requested=(request.headers.get('Access-Control-Request-Headers')||'').toLowerCase().split(',').map(x=>x.trim()).filter(Boolean);
    if(!pagesRequest(request,env)||request.headers.get('Access-Control-Request-Method')!=='POST'||requested.some(h=>!['content-type','authorization'].includes(h)))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
-   headers.set('Access-Control-Allow-Methods','POST');headers.set('Access-Control-Allow-Headers','Content-Type, Authorization');return new Response(null,{status:204,headers});
+   headers.set('Access-Control-Allow-Methods','POST');headers.set('Access-Control-Allow-Headers','Content-Type, Authorization');headers.set('Access-Control-Max-Age','600');return new Response(null,{status:204,headers});
   }
   if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1',sharedTimetable:true}},{headers});}
   if(path==='/api/courseAllocationPolicy'&&request.method==='GET'){
@@ -245,9 +245,8 @@ async function api(request,env){
   }else if(action==='studyroom')data=await studyroom(db,await S.context(db),env,req,request);
   else{
    const requiresAdmin=!teacherActions.has(action)||action==='classSwap'&&req.swapScope==='admin';
-   const session=action==='bootstrap'?null:await Auth.authenticate(db,request,action==='student'?'student':requiresAdmin?'admin':'teacher',env);
+   const [session,ctx]=await Promise.all([action==='bootstrap'?null:Auth.authenticate(db,request,action==='student'?'student':requiresAdmin?'admin':'teacher',env),S.context(db)]);
    if(action==='student')await Auth.rateLimit(db,request,'student',60);
-   const ctx=await S.context(db);
    if(req.viewTerm&&req.viewTerm!==ctx.term)Auth.fail(409,'TERM_CHANGED','활성 학기가 변경되어 해당 학기 자료를 다시 불러옵니다. 이전 입력값은 이전 학기의 초안으로 보관합니다.');
    if(action==='classSwap'){
     data=await classSwap(db,ctx,session,req);

@@ -1,4 +1,26 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {harness} from './harness.mjs';import {backup,fixture,allocationFixture} from './fixture.mjs';
+import {validateSchedule} from '../src/class-swap.js';
+import {performanceFixture} from './performance-fixture.mjs';
+
+test('class timetable lookup reads the selected class instead of every student assignment',async t=>{
+ const h=await harness();t.after(()=>h.close());const {cookie}=await h.login(),{store}=performanceFixture();
+ assert((await h.mutation('restore',{backup:{format:'school-timetable-backup',schemaVersion:1,store}},cookie)).ok);
+ const args={grade:'3',classNum:'1'};assert((await h.api('classBatch',args,cookie)).ok);
+ const batch=await h.api('classBatch',args,cookie);
+ assert(batch.ok);assert.equal(batch.data.timetables.length,30);
+ assert(batch.data.timetables.every(s=>s.grade==='3'&&s.classNum==='1'));
+ assert(Number(batch.headers.get('x-d1-rows-read'))<1000,'selected-class reads stay bounded with 7,200 assignments');
+ const detail=await h.api('adminStudent',{id:'student-3-1-1'},cookie);assert.equal(Object.keys(detail.data.student.choices).length,8);
+});
+
+test('schedule writes only rebuild the conflict dataset when active future plans need validation',async()=>{
+ const store={term:'2026-2',get settings(){throw Error('dataset rebuilt');}},db={all:async()=>[]};
+ await validateSchedule(db,store);
+ db.all=async()=>[{content:JSON.stringify({status:'cancelled',items:[{dateA:'2099-01-01'}]})},{content:JSON.stringify({status:'active',items:[{dateA:'2000-01-01'}]})}];
+ await validateSchedule(db,store);
+ db.all=async()=>[{content:JSON.stringify({status:'active',items:[{dateA:'2099-01-01'}]})}];
+ await assert.rejects(validateSchedule(db,store),/dataset rebuilt/);
+});
 test('versioned schedule cache stays fresh, isolates students and never bypasses authentication',async t=>{
  const h=await harness();t.after(()=>h.close());const admin=await h.login(),teacher=await h.login('teacher');assert((await h.mutation('restore',{backup:backup()},admin.cookie)).ok);
  const cold=await h.api('teacher',{teacher:'가상교사'},teacher.cookie),warm=await h.api('teacher',{teacher:'가상교사'},teacher.cookie);assert(cold.ok&&warm.ok);assert.deepEqual(warm.data,cold.data);assert(Number(warm.headers.get('x-d1-rows-read'))<Number(cold.headers.get('x-d1-rows-read')));

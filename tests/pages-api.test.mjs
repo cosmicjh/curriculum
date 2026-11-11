@@ -9,8 +9,9 @@ test('GitHub Pages API: exact CORS allowlist, cookie-independent authentication,
  async function login(role='admin',password='1234',previous){const p=await h.api('passwordParameters',{role},'',headers());const r=await h.api('login',{role,password:await stretchPassword(password,p.data),credentialEpoch:p.data.epoch,initialize:true},'',headers(previous));assert(r.ok);assert.match(r.data.token,/^[a-f0-9]{64}$/);assert.equal(r.headers.get('Set-Cookie'),null);return r.data.token;}
  await t.test('only the configured origin and safe preflight method/headers are allowed',async()=>{
   const r=await h.mf.dispatchFetch('http://localhost/api/login',{method:'OPTIONS',headers:{Origin:origin,'Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'authorization,content-type'}});assert.equal(r.status,204);assert.equal(r.headers.get('Access-Control-Allow-Origin'),origin);assert.equal(r.headers.get('Access-Control-Allow-Credentials'),null);assert.equal(r.headers.get('Cache-Control'),'no-store');
+  assert.equal(r.headers.get('Access-Control-Max-Age'),'600');
   for(const bad of ['https://evil.github.io','https://cosmicjh.github.io.evil.example','null']){const p=await h.api('bootstrap',{},'',{Origin:bad});assert.equal(p.status,403);assert.equal(p.headers.get('Access-Control-Allow-Origin'),null);}
-  const unsafe=await h.mf.dispatchFetch('http://localhost/api/login',{method:'OPTIONS',headers:{Origin:origin,'Access-Control-Request-Method':'DELETE'}});assert.equal(unsafe.status,403);
+  const unsafe=await h.mf.dispatchFetch('http://localhost/api/login',{method:'OPTIONS',headers:{Origin:origin,'Access-Control-Request-Method':'DELETE'}});assert.equal(unsafe.status,403);assert.equal(unsafe.headers.get('Access-Control-Max-Age'),null);
  });
  const admin=await login();
  await t.test('Pages tokens are hash-stored and cannot be used as native cookies or from another origin',async()=>{

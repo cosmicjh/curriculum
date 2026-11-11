@@ -8,7 +8,7 @@ import '../scripts/build-pages.mjs';
 // Reserved test hosts only. Every browser request is fulfilled locally or aborted.
 const pages='https://timetable-pages.test',api='https://timetable-api.test',h=await harness({frontendOrigin:pages,course:true});
 const cookieAdmin=await h.login();assert((await h.mutation('restore',{backup:backup()},cookieAdmin.cookie)).ok);
-let browser;const errors=[],requests=[],steps=[];await mkdir('test-results',{recursive:true});
+let browser,bootstrapGate;const errors=[],requests=[],steps=[];await mkdir('test-results',{recursive:true});
 async function step(name,fn){await fn();steps.push(name);console.log('PASS '+name);}
 try{
  browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'msedge'}:{})});
@@ -23,6 +23,7 @@ try{
    try{let body=await readFile(path);if(relative==='config.js'){const config=JSON.parse(body.toString().replace(/^window.TIMETABLE_CONFIG=/,'').replace(/;\s*$/,''));config.apiBase=api+'/api/';body=Buffer.from('window.TIMETABLE_CONFIG='+JSON.stringify(config)+';');}return await route.fulfill({status:200,contentType:({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[extname(path)]||'application/octet-stream',body});}catch{return route.fulfill({status:404,body:'Not found'});}
   }
   if(url.origin===api&&url.pathname.startsWith('/api/')){
+   if(url.pathname==='/api/bootstrap'&&bootstrapGate)await bootstrapGate;
    assert.equal(req.headers().cookie,undefined);requests.push({action:url.pathname.slice(5),method:req.method(),origin:req.headers().origin,authorized:Boolean(req.headers().authorization)});
    const response=await h.mf.dispatchFetch(req.url(),{method:req.method(),headers:req.headers(),...(['GET','OPTIONS'].includes(req.method())?{}:{body:req.postData()||'{}'})});
    return route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:Buffer.from(await response.arrayBuffer())});
@@ -31,6 +32,19 @@ try{
  });
  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
  const login=async()=>{await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('.admin-nav [data-tab=students]').click();await page.locator('[data-action=new-student]').waitFor();await idle();};
+ await step('a slow public bootstrap never blocks typing or login; prepared credentials are used once',async()=>{
+  let release;bootstrapGate=new Promise(resolve=>release=resolve);
+  await page.goto(pages+'/timetable/teacher.html');await idle();
+  assert(await page.locator('#password').isEnabled());
+  await page.waitForFunction(()=>window.TIMETABLE_PERF?.some(r=>r.action==='passwordParameters'));
+  const prepared=requests.filter(r=>r.action==='passwordParameters').length;
+  await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();
+  await page.locator('[data-action=teacher-tab]').first().waitFor();await idle();
+  assert.equal(requests.filter(r=>r.action==='passwordParameters').length,prepared,'login consumes the prefetched public parameters');
+  release();bootstrapGate=null;
+  await page.waitForFunction(()=>window.TIMETABLE_PERF?.some(r=>r.action==='bootstrap'));
+  assert(await page.locator('[data-action=teacher-tab]').first().isVisible());
+ });
  await step('Pages displays the mobile student timetable without leaving its own origin',async()=>{
   await page.goto(pages+'/timetable/student.html');await idle();await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('#student-number').fill('30101');await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();await idle();assert.equal(new URL(page.url()).origin,pages);assert.equal(await page.locator('.tt tbody tr').count(),7);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  });
@@ -57,6 +71,9 @@ try{
   await login();await page.locator('[data-action=admin-tab]').filter({hasText:'설정',exact:true}).click();await idle();
   assert.equal(await page.locator('#password-role').count(),0);assert.equal(await page.locator('[data-action=password-dialog]').count(),3);
   const teacher=await h.login('teacher');
+  const preparedTeacher=await context.newPage();
+  await preparedTeacher.goto(pages+'/timetable/teacher.html');
+  await preparedTeacher.waitForFunction(()=>window.TIMETABLE_PERF?.some(r=>r.action==='passwordParameters'));
   await page.locator('#set-school').fill('비밀번호 변경 중 설정 유지');
   await page.getByRole('button',{name:'교사 비밀번호 변경',exact:true}).click();
   assert.equal(await page.locator('#modal h2').textContent(),'교사 비밀번호 변경');
@@ -71,6 +88,10 @@ try{
   await page.locator('form[data-form=password] button.primary').click();await page.waitForFunction(()=>!document.querySelector('#modal').open);await idle();
   assert.equal(await page.locator('#set-school').inputValue(),'비밀번호 변경 중 설정 유지');assert.equal(await page.locator('#password-new').count(),0);
   assert.equal((await h.api('teacherBootstrap',{},teacher.cookie)).status,401);await h.login('teacher','교사5678');assert.equal((await h.api('adminBootstrap',{},cookieAdmin.cookie)).status,200);
+  await preparedTeacher.locator('#password').fill('교사5678');await preparedTeacher.locator('form[data-form=login] button').click();
+  await preparedTeacher.locator('[data-action=teacher-tab]').first().waitFor();
+  assert.equal(await preparedTeacher.evaluate(()=>TIMETABLE_PERF.filter(r=>r.action==='login').length),2,'changed credentials refresh the prepared epoch and retry once');
+  await preparedTeacher.close();
  });
  await step('Admin password button requires a fresh login and revokes existing admin sessions',async()=>{
   const teacher=await h.login('teacher','교사5678');

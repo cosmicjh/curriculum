@@ -28,7 +28,8 @@ export async function load(db,ctx,parts=['students','sections','teacherRows','ov
  function add(kind,sql,...params){jobs.push({kind,stmt:db.prepare(sql,...params)});}
  if(parts.includes('students')){
   add('students','SELECT * FROM students WHERE term_id=? '+where,ctx.term,...args);
-  add('assignments','SELECT a.* FROM assignments a JOIN students s ON s.term_id=a.term_id AND s.id=a.student_id WHERE s.term_id=? '+where.replaceAll(/(?<![\w.])(id|status|grade|class_num|number)(?=\s*[=?])/g,'s.$1'),ctx.term,...args);
+  // Filter students first so a class lookup does not scan every assignment in the term.
+  add('assignments','SELECT a.* FROM students s CROSS JOIN assignments a ON a.term_id=s.term_id AND a.student_id=s.id WHERE s.term_id=? '+where.replaceAll(/(?<![\w.])(id|status|grade|class_num|number)(?=\s*[=?])/g,'s.$1'),ctx.term,...args);
  }
  if(parts.includes('sections'))add('sections','SELECT * FROM sections WHERE term_id=? ORDER BY grade,subject,code',ctx.term);
  if(parts.includes('teacherRows'))add('teacherRows','SELECT cells FROM teacher_rows WHERE term_id=? ORDER BY row_number',ctx.term);

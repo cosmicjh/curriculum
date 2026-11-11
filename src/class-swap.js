@@ -16,10 +16,10 @@ async function readReservedSlots(db,term){
  return [...byTeacher.values()];
 }
 export async function validateSchedule(db,store){
- const dataset=datasetFromStore(store);
  const cutoff=today();
  const pending=(await readPlans(db,store.term)).filter(p=>p.status==='active'&&p.items.some(i=>i.dateA>=cutoff||i.dateB>=cutoff));
  if(!pending.length)return;
+ const dataset=datasetFromStore(store);
  if(!dataset)fail(409,'PLAN_CONFLICT','제출된 결보강 계획서를 먼저 취소한 뒤 시간표를 비워 주세요.');
  C.validateExisting(dataset,pending,cutoff);
 }

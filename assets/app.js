@@ -195,6 +195,7 @@
       field('사용자 유형','login-role','<select id="login-role" required'+(!role?' autofocus':'')+'>'+options(choices,role,'선택하세요')+'</select>')+
       field('비밀번호','password','<input id="password" type="password" required maxlength="128" autocomplete="current-password"'+(role?' autofocus':'')+'>')+
       '<p id="login-error" class="error" role="alert" hidden></p><button class="primary" type="submit">로그인</button></form></div>');
+    if(role)TTApi.prepareLogin(role).catch(()=>{});
   }
   function timetableHTML(tt){
     const name=tt.kind==='student'?tt.studentNumber+' '+tt.name:tt.name+' 선생님';
@@ -448,6 +449,7 @@
     }
   },el.tagName==='BUTTON'?el:null,!['close-modal','password-dialog','teacher-tab','student-page','new-section','edit-section','restore-file'].includes(action));});
   document.addEventListener('change',e=>{const el=e.target;run(async()=>{
+    if(el.id==='login-role'&&el.value)TTApi.prepareLogin(el.value).catch(()=>{});
     if(['filter-grade','filter-class','filter-status'].includes(el.id)){const k={'filter-grade':'grade','filter-class':'classNum','filter-status':'status'}[el.id];state.filters[k]=el.value;state.page=0;if(k==='grade'){state.filters.classNum='';renderStudents($('#admin-content'));}else renderStudentTable();}
     if(el.id==='section-grade')renderSectionTable();
     if(el.id==='edit-grade'){const choices={};$('#student-choices').querySelectorAll('select').forEach(s=>choices[s.dataset.subject]=s.value);renderStudentChoices(el.value,choices);}
@@ -466,7 +468,7 @@
     state.route=route();
     await renderRoute();
     if(!roles[state.route]||!token(state.route)){
-      try{useMeta(await call('bootstrap'));}catch(e){toast(e.message);}
+      call('bootstrap').then(meta=>{if(!state.meta)useMeta(meta);}).catch(e=>{if(!state.meta)toast(e.message);});
     }
   }
   renderStudent=withDrafts(renderStudent);renderTeacher=withDrafts(renderTeacher);renderAdmin=withDrafts(renderAdmin);renderSettings=withDrafts(renderSettings);renderImports=withDrafts(renderImports);renderSections=withDrafts(renderSections);renderStudents=withDrafts(renderStudents);renderLogin=withDrafts(renderLogin);openDialog=withDrafts(openDialog);
