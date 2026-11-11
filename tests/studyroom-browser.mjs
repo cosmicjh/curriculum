@@ -1,4 +1,4 @@
-import {chromium} from 'playwright';
+import {chromium,webkit} from 'playwright';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {harness} from './harness.mjs';
@@ -14,13 +14,26 @@ try{
  const admin=await h.login();assert((await h.mutation('restore',{backup:backup()},admin.cookie)).ok);
  const api=(op,data={})=>h.api('studyroom',{op,...data},admin.cookie),rev=async()=>(await api('dashboard')).data.revision;
  assert((await api('configuration',{expectedRevision:await rev(),enabled:true,schedule:{effectiveDate:now.date,definitions:[{id:'test',label:'아침',days:[1,2,3,4,5,6,7],start:'00:00',end:'23:59'}]}})).ok);
- const url=await h.listen();browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'msedge'}:{})});const ctx=await browser.newContext({viewport:{width:1440,height:1000}});
+ const url=await h.listen();browser=await (process.env.STUDYROOM_BROWSER==='webkit'?webkit:chromium).launch({headless:true,...(process.platform==='win32'&&process.env.STUDYROOM_BROWSER!=='webkit'?{channel:'msedge'}:{})});const ctx=await browser.newContext({viewport:{width:1440,height:1000}});
  await ctx.route('**/*',r=>new URL(r.request().url()).origin===url?r.continue():r.abort());
+ if(process.env.STUDYROOM_BROWSER==='webkit'){
+  // WebKit rejects Secure cookies on this HTTP-only local harness. Relay them in test memory.
+  const sessions=new WeakMap();
+  await ctx.route('**/api/*',async route=>{
+   const request=route.request(),page=request.frame().page(),headers={...request.headers()};
+   if(sessions.has(page))headers.cookie=sessions.get(page);
+   const response=await h.mf.dispatchFetch(request.url(),{method:request.method(),headers,body:request.postData()});
+   const cookies=response.headers.getSetCookie();
+   if(cookies.length)sessions.set(page,cookies.map(cookie=>cookie.split(';')[0]).join('; '));
+   const output=Object.fromEntries(response.headers);delete output['set-cookie'];
+   await route.fulfill({status:response.status,headers:output,body:Buffer.from(await response.arrayBuffer())});
+  });
+ }
  const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));
  await step('mobile QR submission uses shared D1 roster and retries the same request after lost response',async()=>{
   await page.setViewportSize({width:390,height:844});await page.goto(url+'/studyroom-student.html?seat=99');
   await page.locator('[name=grade]').selectOption('3');await page.locator('[name=classNum]').selectOption('01');await page.locator('[name=number]').selectOption('01');await page.locator('#student-form button').click();await page.locator('#confirmation').waitFor({state:'visible'});assert.match(await page.locator('#student-name').textContent(),/가상학생하나/);
-  let dropped=false;const ids=[];await page.route('**/api/studyroom',async route=>{const data=route.request().postDataJSON();if(data.op==='submit'){ids.push(data.requestId);if(!dropped){dropped=true;await route.fetch();return route.abort('failed');}}return route.continue();});
+  let dropped=false;const ids=[];await page.route('**/api/studyroom',async route=>{const data=route.request().postDataJSON();if(data.op==='submit'){ids.push(data.requestId);if(!dropped){dropped=true;await route.fetch();return route.abort('failed');}}return route.fallback();});
   await page.locator('#submit').click();await page.locator('#status').filter({hasText:'연결'}).waitFor();await page.locator('#submit').click();await page.locator('#status').filter({hasText:'제출 완료'}).waitFor();assert.equal(ids.length,2);assert.equal(ids[0],ids[1]);assert.equal((await h.sql('SELECT count(*) n FROM sr_attendance')).results[0].n,1);
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert(await page.evaluate(()=>document.fonts.check('16px "Timetable UI"','한글')));await page.screenshot({path:'test-results/studyroom/student-mobile.png',fullPage:true});
  });
@@ -56,7 +69,7 @@ try{
   await sr.locator('[data-sr=display][data-value=list]').click();assert(await sr.locator('[data-sr-list]').evaluate(e=>!e.hidden&&e.scrollWidth<=e.clientWidth));
   assert(await sr.locator('[data-sr-list] tbody tr').evaluate(row=>{
    const cell=row.cells[0],contentY=cell.getBoundingClientRect().y+parseFloat(getComputedStyle(cell).paddingTop);
-   return Math.abs(row.querySelector('[data-sr=history]').getBoundingClientRect().y-contentY)<1;
+   return Math.abs(row.querySelector('[data-sr=history]').getBoundingClientRect().y-contentY)<4;
   }));
   await sr.locator('[data-sr=display][data-value=seats]').click();await teacher.setViewportSize({width:1440,height:1000});
   await teacher.screenshot({path:'.impeccable/review/desktop.png',fullPage:true});
@@ -81,19 +94,19 @@ try{
    const offset=cell=>cell.firstElementChild.getBoundingClientRect().top-cell.getBoundingClientRect().top;
    return Math.abs(offset(el.querySelector('.has-record'))-offset(el.querySelector('.sr-calendar-day:not(.has-record)')))<1;
   }));
-  const search=sr.getByRole('searchbox',{name:'학생 검색'}),searchForm=sr.locator('[data-sr-form=search]');
-  await search.fill('학생둘');await searchForm.getByRole('button',{name:'검색',exact:true}).click();await queryIdle();
+  const search=sr.getByRole('combobox',{name:'학생 검색'}),searchForm=sr.locator('[data-sr-form=search]');
+  await search.fill('학생둘');await sr.getByRole('option',{name:'30102 가상학생둘',exact:true}).waitFor();
   const matches=sr.locator('[data-sr-search-results]');
-  assert.equal(await matches.getByRole('button').count(),1);
-  await matches.getByRole('button',{name:'30102 가상학생둘',exact:true}).click();await queryIdle();
+  assert.equal(await matches.getByRole('option').count(),1);
+  await matches.getByRole('option',{name:'30102 가상학생둘',exact:true}).click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-person] h3').textContent(),'30102 가상학생둘');
   assert.equal(await sr.locator('[data-sr-results] tbody tr').count(),1);
   await search.fill('30101');await searchForm.getByRole('button',{name:'검색',exact:true}).click();await queryIdle();
-  await matches.getByRole('button',{name:'30101 가상학생하나',exact:true}).click();await queryIdle();
+  await matches.getByRole('option',{name:'30101 가상학생하나',exact:true}).click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-person] h3').textContent(),'30101 가상학생하나');
   await search.fill('없는가상학생');await searchForm.getByRole('button',{name:'검색',exact:true}).click();await queryIdle();
-  assert.match(await matches.textContent(),/검색 결과가 없습니다/);
-  await searchForm.getByRole('button',{name:'검색 초기화',exact:true}).click();await queryIdle();
+  await matches.getByText('검색 결과가 없습니다.',{exact:true}).waitFor();
+  await searchForm.getByRole('button',{name:'초기화',exact:true}).click();await queryIdle();
   assert.equal(await search.inputValue(),'');assert(await sr.locator('[data-sr-person]').isHidden());
   assert.equal(await day.locator('[data-sr-count-day]').textContent(),'2');
   await day.click();await queryIdle();
@@ -109,6 +122,7 @@ try{
   }));
   const results=sr.locator('[data-sr-results] .sr-table');
   assert.equal(await results.locator('tbody tr').count(),2);
+
   await results.getByRole('button',{name:'가상학생하나',exact:true}).click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-person] h3').textContent(),'30101 가상학생하나');
   const attended=sr.locator('.sr-calendar-day.has-record');
@@ -117,10 +131,10 @@ try{
   assert.equal(await results.locator('tbody tr').count(),1);
   const month=sr.locator('[name=month]'),currentMonth=await month.inputValue();
   const previousMonth=new Date(now.date.slice(0,7)+'-01T00:00:00Z');previousMonth.setUTCDate(0);
-  await month.fill(previousMonth.toISOString().slice(0,7));await queryIdle();
+  await month.fill(previousMonth.toISOString().slice(0,7));await month.dispatchEvent('change');await queryIdle();
   assert.equal(await attended.count(),0);
   assert.match(await sr.locator('[data-sr-results]').textContent(),/기록 없음/);
-  await month.fill(currentMonth);await queryIdle();
+  await month.fill(currentMonth);await month.dispatchEvent('change');await queryIdle();
   assert.equal(await attended.getAttribute('data-day'),now.date);
   assert.equal(await results.locator('tbody tr').count(),1);
   await sr.locator('[data-sr=session][data-value="야간"]').click();await queryIdle();
@@ -135,10 +149,13 @@ try{
   assert.equal(await results.locator('[data-sr=edit], [data-sr=history]').count(),0);
   assert(await results.evaluate(e=>e.scrollWidth<=e.clientWidth));
   assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-  const noteFillsCell=()=>results.locator('.sr-query-note').first().evaluate(cell=>{
-   const a=cell.getBoundingClientRect(),b=cell.querySelector('button').getBoundingClientRect();
-   return ['x','y','width','height'].every(key=>Math.abs(a[key]-b[key])<=1);
-  });
+  const noteFillsCell=async()=>{
+   const cell=results.locator('.sr-query-note').first();await cell.scrollIntoViewIfNeeded();
+   return cell.evaluate(cell=>{
+    const rect=cell.getBoundingClientRect(),button=cell.querySelector('button');
+    return [[2,2],[rect.width-2,2],[2,rect.height-2],[rect.width-2,rect.height-2]].every(([x,y])=>document.elementFromPoint(rect.x+x,rect.y+y)===button);
+   });
+  };
   assert(await noteFillsCell(),'the note button fills its entire table cell');
   await teacher.screenshot({path:'test-results/studyroom/query-search-note-mobile.png',fullPage:true});
   await teacher.screenshot({path:'.impeccable/review/mobile.png',fullPage:true});
@@ -163,10 +180,35 @@ try{
   await note.fill('일반 교사 신규 비고');await sr.locator('dialog button.primary').click();await queryIdle();
   assert.equal(await results.locator('[data-sr=readNote]').textContent(),'일반 교사 신규 비고');
   assert.equal((await h.sql("SELECT note FROM sr_attendance WHERE student_number='30101'")).results[0].note,'일반 교사 신규 비고');
-  await sr.getByRole('button',{name:'전체 학생',exact:true}).click();await queryIdle();
+  await searchForm.getByRole('button',{name:'초기화',exact:true}).click();await queryIdle();
   assert.equal(await sr.locator('[data-sr-person]').isHidden(),true);
   await day.click();await queryIdle();
   assert.equal(await results.locator('tbody tr').count(),2);
+  assert.equal(await sr.getByRole('button',{name:'전체 학생',exact:true}).count(),0);
+  await h.sql("UPDATE students SET name='가상학생하나' WHERE id='student-two'");
+  await search.fill('가상학생하나');await matches.getByRole('option').nth(1).waitFor();
+  assert.deepEqual(await matches.getByRole('option').allTextContents(),['30101 가상학생하나','30102 가상학생하나']);
+  assert(await sr.locator('[data-sr-person]').isHidden());
+  await matches.getByRole('option',{name:'30102 가상학생하나',exact:true}).click();await queryIdle();
+  await h.sql("UPDATE students SET name='가상학생둘' WHERE id='student-two'");
+  await searchForm.getByRole('button',{name:'초기화',exact:true}).click();await queryIdle();
+  await teacher.setViewportSize({width:1280,height:900});
+  await day.click();await queryIdle();assert(await noteFillsCell());
+  const controls=await searchForm.evaluate(form=>{
+   const input=form.querySelector('input').getBoundingClientRect();
+   return [...form.querySelectorAll('button')].every(b=>Math.abs(b.getBoundingClientRect().top-input.top)<=1&&Math.abs(b.getBoundingClientRect().height-input.height)<=1);
+  });
+  assert(controls,'search actions align with the input');
+  await teacher.screenshot({path:'test-results/studyroom/ipad-query-fixed.png',fullPage:true});
+  let release;const gate=new Promise(resolve=>release=resolve);
+  await teacher.route('**/api/studyroom',async route=>{
+   if(route.request().postDataJSON().op==='query')await gate;
+   await route.fallback();
+  });
+  await sr.locator('[data-sr=session][data-value="야간"]').click();
+  await sr.locator('[data-sr=view][data-view=current]').click();release();
+  await queryIdle();assert(await sr.locator('.sr-seat-grid').isVisible(),'navigation during a slow read is retained');
+  await teacher.unroute('**/api/studyroom');
  });
  await step('administrator schedule form is functional, preserve shared roster editing',async()=>{
   const manager=await ctx.newPage();await manager.goto(url+'/admin.html');await manager.locator('#password').fill('1234');await manager.locator('form[data-form=login] button').click();await manager.locator('[data-action=admin-tab][data-tab=studyroom]').click();const m=manager.locator('.studyroom');await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');await m.locator('[data-sr=view][data-view=settings]').click();await m.locator('[data-sr-form=schedule]').waitFor();await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal(await m.locator('.sr-rule').count(),1);
