@@ -74,7 +74,7 @@ try{
   await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>document.body.style.position),'');
   await page.setViewportSize({width:820,height:760});await opener.click();
   await page.setViewportSize({width:1920,height:1080});
-  assert(await page.locator('#workspace').evaluate(el=>!el.inert));assert.equal(await page.evaluate(()=>document.body.style.position),'');
+  await page.waitForFunction(()=>!document.getElementById('workspace').inert&&document.body.style.position==='');
   await page.setViewportSize({width:390,height:844});
  });
  await step('a slow public bootstrap never blocks typing or login; prepared credentials are used once',async()=>{
