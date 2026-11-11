@@ -36,7 +36,7 @@ try{
   async function logout(){
     await page.getByRole('button',{name:'로그아웃',exact:true}).click();
     await idle();
-    assert.equal(await page.locator('#login-role').inputValue(),'');
+    assert.equal(await page.locator('#login-role').inputValue(),'student');
     assert(await page.locator('#sidebar').isHidden());
   }
   await mkdir('test-results',{recursive:true});

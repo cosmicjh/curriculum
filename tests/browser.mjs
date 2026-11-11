@@ -92,6 +92,6 @@ try{
   await page.getByRole('navigation',{name:'교사 메뉴'}).waitFor();await idle();
   assert(await page.evaluate(()=>document.body.classList.contains('workspace')));
  });
- await step('logout revokes server session and protected page requires login again',async()=>{await button('logout').click();await page.locator('#password').waitFor();await idle();const r=await page.evaluate(async()=>{const r=await fetch('/api/teacherBootstrap',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});return r.status;});assert.equal(r,401);});
+ await step('logout revokes server session and protected page requires login again',async()=>{await button('logout').click();await page.locator('#login-role').waitFor();await idle();assert.equal(await page.locator('#login-role').inputValue(),'student');const r=await page.evaluate(async()=>{const r=await fetch('/api/teacherBootstrap',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});return r.status;});assert.equal(r,401);});
  assert.deepEqual(errors,[]);await writeFile('test-results/browser.json',JSON.stringify({steps,errors},null,2)+'\n');
 }finally{await browser?.close();await h.close();}

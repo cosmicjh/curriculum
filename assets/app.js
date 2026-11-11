@@ -138,7 +138,7 @@
     const [module,response,initial]=await Promise.all([import(new URL('app.js?v='+version,base)),fetch(new URL('view.html?v='+version,base)),request('resume')]);
     if(!response.ok)throw Error('결보강 화면을 불러오지 못했습니다. 다시 선택해 주세요.');
     const html=await response.text(),host=document.createElement('div'),root=host.attachShadow({mode:'open'});root.innerHTML=html;
-    const view=module.mountClassSwap(root,initial,{request,admin:role==='admin',cachePrefix:swapCachePrefix,selectedTeacher:()=>state.teacherName||'',print:(html,css,page)=>run(()=>printClassSwap(html,css,page),null,false)});
+    const view=module.mountClassSwap(root,initial,{request,notify:toast,admin:role==='admin',cachePrefix:swapCachePrefix,selectedTeacher:()=>state.teacherName||'',print:(html,css,page)=>run(()=>printClassSwap(html,css,page),null,false)});
     swapViews.set(role,{view,host});target.replaceChildren(host);
   }
   function discardSwap(){
@@ -196,17 +196,18 @@
     password.required=!student;
     if(student)password.value='';
   }
-  function renderLogin(role=''){
+  function renderLogin(role='student'){
+    role=role||'student';
     state.studentTimetable=null;
     TTNavigation.render([],'','');
     hideSwap();header();
     const choices=Object.entries(roles).map(([value,label])=>({value,label}));
     showScreen('<div class="auth"><h1>로그인</h1><form data-form="login">'+
-      field('사용자 유형','login-role','<select id="login-role" required'+(!role||role==='student'?' autofocus':'')+'>'+options(choices,role,'선택하세요')+'</select>')+
-      field('비밀번호','password','<input id="password" type="password" required maxlength="128" autocomplete="current-password"'+(role&&role!=='student'?' autofocus':'')+'>')+
+      field('사용자 유형','login-role','<select id="login-role"'+(role==='student'?' autofocus':'')+'>'+options(choices,role)+'</select>')+
+      field('비밀번호','password','<input id="password" type="password" required maxlength="128" autocomplete="current-password"'+(role!=='student'?' autofocus':'')+'>')+
       '<p id="login-error" class="error" role="alert" hidden></p><button class="primary" type="submit">로그인</button></form></div>');
     syncLoginPassword(role);
-    if(role&&role!=='student')TTApi.prepareLogin(role).catch(()=>{});
+    if(role!=='student')TTApi.prepareLogin(role).catch(()=>{});
   }
   function timetableHTML(tt){
     const name=tt.kind==='student'?tt.studentNumber+' '+tt.name:tt.name+' 선생님';
@@ -214,8 +215,8 @@
     return '<div class="capture"><h2>'+esc(name)+'</h2><table class="tt"><thead><tr><th></th>'+days.map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
   }
   function resultHTML(timetable=state.timetable){return timetable?'<div id="capture-area" class="panel">'+timetableHTML(timetable)+'</div><div class="result-tools"><button data-action="save-image">이미지 저장</button><button data-action="print-single">인쇄</button></div>':'';}
-  function studentContent(){return '<div class="lookup">'+head('학생 시간표')+'<form class="lookup-form" data-form="student">'+field('학번','student-number',input('student-number','','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off" required'))+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+resultHTML(state.studentTimetable)+'</div></div>';}
-  function renderStudent(){TTNavigation.render([studentMenu],'student',studentMenu[0]);showScreen(studentContent());}
+  function studentContent(focus=false){return '<div class="lookup">'+head('학생 시간표')+'<form class="lookup-form" data-form="student">'+field('학번','student-number',input('student-number','','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off" required'+(focus?' autofocus':'')))+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+resultHTML(state.studentTimetable)+'</div></div>';}
+  function renderStudent(focus=false){TTNavigation.render([studentMenu],'student',studentMenu[0]);showScreen(studentContent(focus));}
   function visibleTimetable(){return $('#student-number')?state.studentTimetable:state.timetable;}
   async function loadTeacher(force=false){
     const cached=state.teacherBoot,data=await call('teacherBootstrap',cached&&!force?{knownRevision:cached.meta.revision,sectionsRevision:cached.meta.sectionsRevision}:{},'teacher');
@@ -399,7 +400,7 @@
         useMeta(result.initial.meta);
         if(role==='admin'){state.admin=result.initial;await ensureAdminTab(state.adminTab);renderAdmin();}
         else if(role==='teacher'){state.teacherBoot=result.initial;if(state.teacherTab==='roster')await ensureClassCatalog();renderTeacher();}
-        else renderStudent();
+        else renderStudent(true);
         break;
       }
       case 'student':{

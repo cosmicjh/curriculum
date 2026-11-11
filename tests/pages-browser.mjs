@@ -107,13 +107,14 @@ try{
  await step('Pages displays the mobile student timetable without leaving its own origin',async()=>{
   await page.goto(pages+'/curriculum/');await idle();assert(await page.locator('#sidebar').isHidden());
   const before=requests.filter(r=>r.action==='passwordParameters').length;
-  await page.locator('#login-role').selectOption('student');assert(await page.locator('#password').isHidden());
+  assert.equal(await page.locator('#login-role').inputValue(),'student');assert(await page.locator('#password').isHidden());
   await page.locator('form[data-form=login] button').click();await page.locator('#student-number').waitFor();await idle();
+  assert(await page.locator('#student-number').evaluate(input=>document.activeElement===input));
   assert.equal(requests.filter(r=>r.action==='passwordParameters').length,before);
   assert.deepEqual(await page.locator('#sidebar-menu button').allTextContents(),['학생 시간표']);await page.locator('#student-number').fill('30101');await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();await idle();assert.equal(new URL(page.url()).origin,pages);assert.equal(await page.locator('.tt tbody tr').count(),7);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  });
  await step('Pages admin login, real D1 save and history work without third-party cookies',async()=>{
-  await page.locator('[data-action=logout]').click();await idle();assert.equal(await page.locator('#login-role').inputValue(),'');assert(await page.locator('#sidebar').isHidden());assert(await page.locator('[data-sidebar-open]').isHidden());
+  await page.locator('[data-action=logout]').click();await idle();assert.equal(await page.locator('#login-role').inputValue(),'student');assert(await page.locator('#sidebar').isHidden());assert(await page.locator('[data-sidebar-open]').isHidden());
   await page.goto(pages+'/curriculum/admin.html');await idle();await login();await page.locator('[data-action=edit-student]').first().click();await page.locator('#edit-name').waitFor();await idle();await page.locator('#edit-name').fill('Pages입력보호');await page.locator('form[data-form=save-student] button.primary').click();await page.waitForFunction(()=>!document.querySelector('#modal').open);await idle();assert.equal((await h.api('adminStudent',{id:'student-one'},cookieAdmin.cookie)).data.student.name,'Pages입력보호');assert.equal(new URL(page.url()).origin,pages);
   const storage=await page.evaluate(()=>({local:{...localStorage},session:{...sessionStorage}}));assert(!/[a-f0-9]{64}/.test(JSON.stringify(storage)));assert.equal(JSON.parse(storage.session['timetable.admin']).token,'memory');
  });
@@ -129,7 +130,7 @@ try{
   await page.screenshot({path:'test-results/course-mobile.png',fullPage:true});
  });
  await step('refresh requires a new login and logout revokes the in-memory Pages session',async()=>{
-  await page.reload();await idle();await page.locator('#password').waitFor();assert.equal(await page.locator('[data-action=new-student]').count(),0);await login();await page.locator('[data-action=logout]').click();await page.locator('#password').waitFor();await idle();assert.equal(await page.evaluate(()=>TTApi.hasSession('admin')),false);await page.locator('#login-role').selectOption('admin');
+  await page.reload();await idle();await page.locator('#password').waitFor();assert.equal(await page.locator('[data-action=new-student]').count(),0);await login();await page.locator('[data-action=logout]').click();await page.locator('#login-role').waitFor();await idle();assert.equal(await page.evaluate(()=>TTApi.hasSession('admin')),false);await page.locator('#login-role').selectOption('admin');
  });
  await step('Separate password buttons select the intended role and preserve unsaved settings',async()=>{
   await login();await clickMenu(page,page.locator('[data-action=admin-tab]').filter({hasText:'설정',exact:true}));await idle();
