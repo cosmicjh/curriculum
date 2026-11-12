@@ -64,6 +64,9 @@ try{
  await step('Private draft, explicit submission, print and admin-only review',async()=>{
   await swap.locator('#teacherA').fill('교사');
   assert.deepEqual(await swap.locator('#teacherAOptions [role=option]').allTextContents(),['가교사','나교사','다교사']);
+  await swap.locator('#teacherA').press('Enter');
+  await page.locator('#toast').filter({hasText:'일치하는 교사가 여러 명입니다.'}).waitFor();
+  assert.equal(await swap.locator('#teacherA').inputValue(),'교사');
   await page.screenshot({path:'test-results/swap-teacher-picker.png'});
   await swap.locator('#teacherA').press('ArrowDown');await swap.locator('#teacherA').press('Enter');
   assert.equal(await swap.locator('#teacherA').inputValue(),'가교사');
@@ -136,7 +139,9 @@ try{
   await manager.evaluate(()=>TTAssets.load('xlsx'));const store=sharedStore();store.teacherRows[2][2]='공통 수정 과학';store.teacherRows.push(['4','추가교사'],['','']);
   const bytes=await manager.evaluate(rows=>{const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet(rows),'교사시간표');return Array.from(new Uint8Array(XLSX.write(book,{type:'array',bookType:'xlsx'})));},store.teacherRows);
   await manager.locator('#import-teacher').setInputFiles({name:'shared-teachers.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(bytes)});await manager.locator('form[data-form=preview-import] button[type=submit]').click();await manager.locator('[data-action=commit-import]').waitFor();await manager.waitForFunction(()=>document.body.dataset.loading==='false');await manager.locator('[data-action=commit-import]').click();await manager.waitForFunction(()=>document.body.dataset.loading==='false');
-  await swap.locator('#writeView [data-action=refresh]').click();await swapIdle();await swap.locator('#teacherA').fill('추가');await swap.getByRole('option',{name:'추가교사',exact:true}).waitFor();await swap.locator('#teacherA').fill('가');await swap.getByRole('option',{name:'가교사',exact:true}).click();assert.match(await swap.locator('#tableA').textContent(),/공통 수정 과학/);
+  await swap.locator('#writeView [data-action=refresh]').click();await swapIdle();await swap.locator('#teacherA').fill('추가');await swap.getByRole('option',{name:'추가교사',exact:true}).waitFor();
+  await swap.locator('#teacherA').press('Enter');assert.equal(await swap.locator('#teacherA').inputValue(),'추가교사');
+  await swap.locator('#teacherA').fill('가교사');await swap.locator('#teacherA').press('Enter');assert.match(await swap.locator('#tableA').textContent(),/공통 수정 과학/);
   await clickMenu(page,page.locator('[data-tab=timetable]'));await page.locator('#teacher-name').fill('가교사');await page.locator('form[data-form=teacher] button').click();await idle();assert.match(await page.locator('#app .tt').textContent(),/공통 수정 과학/);await clickMenu(page,page.locator('[data-tab=classSwap]'));await idle();await swapIdle();await manager.close();
  });
  await step('Term changes update the shared heading and keep unsaved class swap drafts per term',async()=>{
@@ -153,6 +158,11 @@ try{
   await page.locator('body > #toast').waitFor({state:'hidden'});await page.screenshot({path:'test-results/teacher-tools-mobile.png',fullPage:true});await page.setViewportSize({width:1440,height:1100});
   assert.equal(await targetPane.evaluate(pane=>getComputedStyle(pane,'::before').width),'1px');
   await page.screenshot({path:'test-results/teacher-tools-desktop.png',fullPage:true});
+  await page.setViewportSize({width:1440,height:650});
+  await page.evaluate(()=>window.scrollTo(0,0));
+  await page.mouse.move(700,450);await page.mouse.wheel(0,480);
+  await page.waitForFunction(()=>window.scrollY>0);
+  assert.equal(await swap.evaluate(el=>el.scrollTop),0);
  });
  await step('teacher menus retain the same FHD frame and native class-swap draft',async()=>{
   await page.setViewportSize({width:1920,height:1080});let frame;

@@ -67,7 +67,8 @@ body.workspace #class-swap-pane{max-width:none;margin:0;padding:0;width:100%}
  body.workspace .admin-content{overflow:auto}
  body.workspace .admin-content:has(>.allocation-view){overflow:hidden}
  body.workspace .admin-content>.panel{max-width:960px;width:100%}
- body.workspace #class-swap-pane{flex:1;min-height:0;overflow:auto}
+ body.workspace #app.shell:has(#teacher-swap,.class-swap-view){height:auto;min-height:calc(100dvh - 60px)}
+ body.workspace .admin-content:has(>.class-swap-view){overflow:visible}
  .allocation-view{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto minmax(0,1fr);column-gap:20px;flex:1;min-height:0}
  .allocation-heading,#allocation-grid,.allocation-note{grid-column:1/-1;min-width:0}
  #allocation-grid{min-height:0}

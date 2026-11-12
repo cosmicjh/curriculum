@@ -75,6 +75,7 @@ try{
   await clickMenu(page,panel.locator('nav button').first());
   await page.locator('#student-number').fill('30101');await page.locator('form[data-form=student] button').click();
   await page.locator('.tt').waitFor();await idle();assert(await page.evaluate(()=>TTApi.hasSession('admin')));
+  assert.equal(await page.getByRole('heading',{name:'학생 시간표',exact:true}).count(),0);
   await opener.click();await page.reload();await idle();
   assert(await panel.isHidden());assert(await opener.isHidden());assert.equal(await page.evaluate(()=>document.body.style.position),'');
   await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();
@@ -101,6 +102,7 @@ try{
   await clickMenu(page,first);await page.locator('#student-number').fill('30101');
   await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();await idle();
   assert(await page.evaluate(()=>TTApi.hasSession('teacher')));
+  assert.equal(await page.getByRole('heading',{name:'학생 시간표',exact:true}).count(),0);
   await clickMenu(page,page.locator('[data-action=teacher-tab][data-tab=timetable]'));
   assert(await page.locator('form[data-form=teacher]').isVisible());
  });
@@ -110,6 +112,7 @@ try{
   assert.equal(await page.locator('#login-role').inputValue(),'student');assert(await page.locator('#password').isHidden());
   await page.locator('#login-student-number').fill('30101');await page.locator('form[data-form=login] button').click();await page.locator('.tt').waitFor();await idle();
   assert.equal(await page.locator('#header .top-actions').innerText(),'로그아웃');
+  assert.equal(await page.getByRole('heading',{name:'학생 시간표',exact:true}).count(),0);
   assert.equal(requests.filter(r=>r.action==='passwordParameters').length,before);
   assert.deepEqual(await page.locator('#sidebar-menu button').allTextContents(),['학생 시간표']);await idle();assert.equal(new URL(page.url()).origin,pages);assert.equal(await page.locator('.tt tbody tr').count(),7);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  });

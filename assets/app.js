@@ -138,7 +138,7 @@
     const request=(action,payload)=>requestSwap(role,action,payload);
     const [module,response,initial]=await Promise.all([import(new URL('app.js?v='+version,base)),fetch(new URL('view.html?v='+version,base)),request('resume')]);
     if(!response.ok)throw Error('결보강 화면을 불러오지 못했습니다. 다시 선택해 주세요.');
-    const html=await response.text(),host=document.createElement('div'),root=host.attachShadow({mode:'open'});root.innerHTML=html;
+    const html=await response.text(),host=document.createElement('div'),root=host.attachShadow({mode:'open'});host.className='class-swap-view';root.innerHTML=html;
     const view=module.mountClassSwap(root,initial,{request,notify:toast,admin:role==='admin',cachePrefix:swapCachePrefix,selectedTeacher:()=>state.teacherName||'',print:(html,css,page)=>run(()=>printClassSwap(html,css,page),null,false)});
     swapViews.set(role,{view,host});target.replaceChildren(host);
   }
@@ -222,7 +222,7 @@
     return '<div class="capture"><h2>'+esc(name)+'</h2><table class="tt"><thead><tr><th></th>'+days.map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
   }
   function resultHTML(timetable=state.timetable){return timetable?'<div id="capture-area" class="panel">'+timetableHTML(timetable)+'</div><div class="result-tools"><button data-action="save-image">이미지 저장</button><button data-action="print-single">인쇄</button></div>':'';}
-  function studentContent(focus=false){return '<div class="lookup">'+head('학생 시간표')+'<form class="lookup-form" data-form="student">'+field('학번','student-number',input('student-number',state.studentTimetable?.studentNumber||'','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off" required'+(focus?' autofocus':'')))+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+resultHTML(state.studentTimetable)+'</div></div>';}
+  function studentContent(focus=false){return '<div class="lookup"><form class="lookup-form" data-form="student" aria-label="학생 시간표">'+field('학번','student-number',input('student-number',state.studentTimetable?.studentNumber||'','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off" required'+(focus?' autofocus':'')))+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+resultHTML(state.studentTimetable)+'</div></div>';}
   function renderStudent(focus=false){TTNavigation.render([studentMenu],'student',studentMenu[0]);showScreen(studentContent(focus));}
   function visibleTimetable(){return $('#student-number')?state.studentTimetable:state.timetable;}
   async function loadTeacher(force=false){

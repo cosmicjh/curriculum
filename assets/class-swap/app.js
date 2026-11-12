@@ -22,7 +22,7 @@ function showSnapshot(v){
  if(!S.dirty&&!S.draft.teacherA){const teacher=S.dataset?.teachers.find(t=>t.name===selectedTeacher());if(teacher){S.draft.teacherA=teacher.id;S.draft.submitter=teacher.name;}}renderAll();
 }
 function markDirty(){S.dirty=true;$('dirtyLabel').hidden=false;}
-function teacherPicker(id,getChoices,select,{restore}={}){
+function teacherPicker(id,getChoices,select,{restore,enterByName=false}={}){
  const input=$(id),list=$(id+'Options');
  let choices=[],active=-1,filter=false;
  function close(){
@@ -34,7 +34,9 @@ function teacherPicker(id,getChoices,select,{restore}={}){
   const option=list.children[active];
   option.setAttribute('aria-selected','true');
   input.setAttribute('aria-activedescendant',option.id);
-  option.scrollIntoView({block:'nearest'});
+  const top=option.offsetTop,bottom=top+option.offsetHeight;
+  if(top<list.scrollTop)list.scrollTop=top;
+  else if(bottom>list.scrollTop+list.clientHeight)list.scrollTop=bottom-list.clientHeight;
  }
  function open(){
   const query=filter?input.value.trim():'';
@@ -57,7 +59,17 @@ function teacherPicker(id,getChoices,select,{restore}={}){
  input.addEventListener('keydown',event=>{
   if(event.isComposing||event.keyCode===229)return;
   if(event.key==='Escape'&&!list.hidden){event.preventDefault();close();if(restore)input.value=restore();filter=!restore;return;}
-  if(event.key==='Enter'&&!list.hidden&&active>=0){event.preventDefault();choose(active);return;}
+  if(event.key==='Enter'){
+   if(!list.hidden&&active>=0){event.preventDefault();choose(active);return;}
+   const query=input.value.trim();
+   if(!enterByName||!query||!filter)return;
+   event.preventDefault();
+   const exact=choices.filter(choice=>choice.name===query);
+   const matches=exact.length?exact:choices;
+   if(matches.length===1)choose(choices.indexOf(matches[0]));
+   else notify(matches.length?'일치하는 교사가 여러 명입니다. 목록에서 선택해 주세요.':'일치하는 교사가 없습니다.');
+   return;
+  }
   if(event.key!=='ArrowDown'&&event.key!=='ArrowUp')return;
   if(list.hidden)open();
   if(list.hidden)return;
@@ -233,7 +245,7 @@ const syncTeacherA=teacherPicker('teacherA',()=>[...(S.dataset?.teachers||[])].s
  if(id===S.draft.teacherA)return;
  if(S.draft.items.length&&!confirm('결강 교사를 바꾸면 현재 계획 내역을 비웁니다. 변경하겠습니까?')){syncTeacherA(sourceName());return;}
  S.draft.teacherA=id;S.draft.items=[];S.draft.submitter=teacher?.name||'';markDirty();resetSelection();renderWrite();
-},{restore:sourceName});
+},{restore:sourceName,enterByName:true});
 const syncTeacherB=teacherPicker('teacherB',()=>S.candidates.map(c=>({...c,detail:S.sel.mode==='swap'?c.choices.length+'개 수업':'당일 '+c.load+'시간'})),teacher=>{
  const id=teacher?.teacherId||'';
  if(id===S.sel.teacherB)return;
