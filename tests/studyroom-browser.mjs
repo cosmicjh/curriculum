@@ -42,6 +42,7 @@ try{
  const requests=[];teacher.on('request',request=>{if(request.url().endsWith('/api/studyroom'))requests.push(request.postDataJSON());});
  const sr=teacher.locator('.studyroom'),idle=()=>sr.locator('[data-sr="refresh"]').waitFor().then(()=>teacher.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false'));
  await step('common teacher login can add a note and all 99 seats fit without horizontal scrolling',async()=>{
+  await teacher.clock.install();
   await teacher.goto(url+'/teacher.html');await teacher.locator('#password').fill('1234');await teacher.locator('form[data-form=login] button').click();await clickMenu(teacher,teacher.locator('[data-action=teacher-tab][data-tab=studyroom]'));await idle();assert.equal(await sr.locator('[data-sr=seat]').count(),99);assert.match(await sr.locator('[data-seat="99"]').textContent(),/30101.*가상학생하나/);
   assert.equal(await sr.locator('[data-sr-identity]').count(),0);
   assert.equal(await sr.locator('input[type=search], [data-sr-view]').count(),0);
@@ -69,12 +70,32 @@ try{
   assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await teacher.screenshot({path:'test-results/studyroom/current-mobile.png',fullPage:true});
   await sr.locator('[data-sr=display][data-value=list]').click();assert(await sr.locator('[data-sr-list]').evaluate(e=>!e.hidden&&e.scrollWidth<=e.clientWidth));
-  assert(await sr.locator('[data-sr-list] tbody tr').evaluate(row=>{
-   const cell=row.cells[0],contentY=cell.getBoundingClientRect().y+parseFloat(getComputedStyle(cell).paddingTop);
-   return Math.abs(row.querySelector('[data-sr=history]').getBoundingClientRect().y-contentY)<4;
-  }));
+  assert.equal(await sr.locator('[data-sr-list] [data-sr=edit], [data-sr-list] [data-sr=history]').count(),0);
+  await sr.locator('[data-sr-list] [data-sr=readNote]').click();
+  assert.equal(await sr.locator('dialog [name=change]').count(),0);
+  await sr.locator('dialog [name=note]').fill('현재 출석 비고');
+  await sr.locator('dialog button.primary').click();await idle();
+  await sr.locator('[data-sr-list] [data-sr=readNote]').filter({hasText:'현재 출석 비고'}).click();
+  await sr.locator('dialog button[value=delete]').click();await idle();
+  assert.equal(await sr.locator('[data-sr-list] [data-sr=readNote]').textContent(),'');
+  await sr.locator('[data-sr-list] [data-sr=readNote]').click();
+  await sr.locator('dialog [name=note]').fill('가상 특이사항');
+  await sr.locator('dialog button.primary').click();await idle();
   await sr.locator('[data-sr=display][data-value=seats]').click();await teacher.setViewportSize({width:1440,height:1000});
   await teacher.screenshot({path:'.impeccable/review/desktop.png',fullPage:true});
+ });
+ await step('Automatic attendance refresh uses the selected browser interval',async()=>{
+  const interval=sr.getByLabel('자동 새로고침');
+  assert.equal(await interval.inputValue(),'30');
+  await interval.selectOption('15');
+  const dashboard=()=>teacher.waitForRequest(req=>req.url().endsWith('/api/studyroom')&&req.postDataJSON()?.op==='dashboard');
+  await Promise.all([dashboard(),teacher.clock.fastForward(15000)]);
+  await idle();
+  await interval.selectOption('0');
+  assert.equal(await teacher.evaluate(()=>localStorage.getItem('timetable.studyroomRefreshSeconds')),'0');
+  const before=await teacher.evaluate(()=>TIMETABLE_PERF.filter(r=>r.action==='studyroom').length);
+  await teacher.clock.fastForward(60000);
+  assert.equal(await teacher.evaluate(()=>TIMETABLE_PERF.filter(r=>r.action==='studyroom').length),before);
  });
  await step('calendars show date and student attendance, filter by session and month, and allow note edits',async()=>{
   await sr.locator('[data-seat="98"]').click();

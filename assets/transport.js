@@ -3,7 +3,19 @@
  const api=new URL(global.TIMETABLE_CONFIG?.apiBase||'/api/',location.href),cross=api.origin!==location.origin;
  if(cross&&(api.protocol!=='https:'||api.pathname!=='/api/'||api.search||api.hash||api.username||api.password))throw Error('API 주소를 확인하세요.');
  const reads=new Set(['allocation','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','previewImport','downloadBackup','toolTransfer','courseTransfer']);
- let memorySession=null;
+ const rememberedKey='timetable.rememberedTeacher';
+ function rememberedTeacher(){
+  try{
+   const saved=JSON.parse(localStorage.getItem(rememberedKey)||'null');
+   if(saved?.role==='teacher'&&saved.expiresAt>Date.now()&&(cross?/^[a-f0-9]{64}$/.test(saved.token):saved.token==='cookie'))return saved;
+   localStorage.removeItem(rememberedKey);
+  }catch{}
+  return null;
+ }
+ function storeTeacher(session){
+  try{if(session)localStorage.setItem(rememberedKey,JSON.stringify(session));else localStorage.removeItem(rememberedKey);}catch{}
+ }
+ let memorySession=cross?rememberedTeacher():null;
  const loginPreparations=new Map();
  function prepareLogin(role){
   if(!['teacher','admin'].includes(role))return Promise.reject(Error('사용자 유형을 선택하세요.'));
@@ -24,7 +36,7 @@
    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),quickRead?15000:110000);
    try{const response=await fetch(new URL(name,api),{method:'POST',credentials:cross?'omit':'same-origin',cache:'no-store',headers:{'Content-Type':'application/json',...(cross&&memorySession?{Authorization:'Bearer '+memorySession.token}:{})},body:JSON.stringify(data),signal:controller.signal});if(!response.headers.get('Content-Type')?.includes('application/json')){const e=Error('서버 응답을 확인하지 못했습니다 ('+response.status+'). 입력 자료를 보관하고 자료 목록에서 저장 여부를 확인하세요.');e.code='UPSTREAM_ERROR';e.status=response.status;throw e;}const body=await response.text(),result=JSON.parse(body);
     const perf=global.TIMETABLE_PERF||(global.TIMETABLE_PERF=[]);perf.push({action:name,elapsedMs:Math.round(performance.now()-started),bytes:Number(response.headers.get('Content-Length'))||new TextEncoder().encode(body).length,serverTiming:response.headers.get('Server-Timing'),rowsRead:Number(response.headers.get('X-D1-Rows-Read')),rowsWritten:Number(response.headers.get('X-D1-Rows-Written'))});if(perf.length>80)perf.shift();
-    if(!result.ok){if(result.code==='AUTH_REQUIRED')memorySession=null;const e=Error(result.error||'요청을 처리하지 못했습니다.');e.code=result.code;e.status=response.status;throw e;}return result.data;
+    if(!result.ok){if(result.code==='AUTH_REQUIRED'){if(action==='login'||memorySession?.role==='teacher'||!cross)storeTeacher(null);memorySession=null;}const e=Error(result.error||'요청을 처리하지 못했습니다.');e.code=result.code;e.status=response.status;throw e;}return result.data;
    }catch(e){if(e.name==='AbortError')throw Error(quickRead?'조회 응답이 지연되었습니다. 다시 조회해 주세요.':'응답을 확인하지 못했습니다. 입력값을 보관하고 새로고침하여 저장 결과를 확인하세요.');if(e instanceof TypeError&&/fetch|network|load failed/i.test(e.message)){const error=Error('서버에 연결하지 못했습니다. 입력 자료는 유지됩니다. 재시도 전에 자료 목록에서 저장 여부를 확인하세요.');error.code='NETWORK_ERROR';throw error;}throw e;}finally{clearTimeout(timer);}
   }
   let data;
@@ -45,6 +57,8 @@
    }
    try{data=await send(action,payload);}catch(e){if(reads.has(action)&&e.code==='READ_CHANGED')data=await send(action,payload);else throw e;}
   }
+  if(action==='login')storeTeacher(data.role==='teacher'&&payload.rememberTeacher===true?{token:data.token,role:data.role,expiresAt:data.expiresAt}:null);
+  if(action==='logout'||action==='changePassword'&&payload.role==='teacher')storeTeacher(null);
   if(cross&&action==='login'){
    if(!/^[a-f0-9]{64}$/.test(data.token))throw Error('로그인 응답을 확인하세요.');
    memorySession={token:data.token,role:data.role,expiresAt:data.expiresAt};return {...data,token:'memory'};
@@ -53,5 +67,5 @@
   if(action==='logout'||action==='changePassword'&&payload.role===memorySession?.role)memorySession=null;
   return data;
  }
- global.TTApi={request,hasSession,prepareLogin};
+ global.TTApi={request,hasSession,prepareLogin,rememberedTeacher};
 })(window);

@@ -171,7 +171,7 @@
   modal.addEventListener('cancel',e=>{if(busyCount)e.preventDefault();});
   function route(){const h=location.hash.match(/^#\/(home|student|teacher|admin)/);return h?h[1]:(document.body.dataset.page||'home');}
   function href(page){return '#/'+page;}
-  function session(role){try{const s=JSON.parse(sessionStorage.getItem('timetable.'+role)||'null');if(s&&s.expiresAt>Date.now()&&TTApi.hasSession(role))return s;}catch(e){}sessionStorage.removeItem('timetable.'+role);return null;}
+  function session(role){try{const s=JSON.parse(sessionStorage.getItem('timetable.'+role)||'null')||(role==='teacher'?TTApi.rememberedTeacher():null);if(s&&s.expiresAt>Date.now()&&TTApi.hasSession(role))return s;}catch(e){}sessionStorage.removeItem('timetable.'+role);return null;}
   function clearSessions(){for(const role of Object.keys(roles))sessionStorage.removeItem('timetable.'+role);}
   function token(role){return (session(role)||role==='teacher'&&session('admin')||{}).token||'';}
   async function call(action,args={},role){const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);const viewTerm=role==='admin'?state.admin?.store.term:role==='teacher'?state.teacherBoot?.meta.term:undefined;return TTApi.request(action,{...(!['adminBootstrap','teacherBootstrap','login','logout'].includes(action)&&viewTerm?{viewTerm}:{}),...(writes.has(action)?{expectedTerm:state.admin?.store.term,expectedRevision:state.admin?.meta.revision}:{}),...args});}
@@ -186,7 +186,7 @@
     const settings=state.meta&&state.meta.settings||{}, school=settings.schoolName||(window.TIMETABLE_CONFIG||{}).schoolName||'개인 시간표';
     document.title=TTNavigation.title;
     const term=state.meta?'<span class="term-label">'+esc(settings.academicYear+'학년도 '+settings.semester+'학기')+'</span>':'';
-    $('#header').innerHTML=TTNavigation.opener()+'<div class="school-heading"><a class="brand" href="'+href('home')+'"><span class="school-name">'+esc(school)+'</span><span class="compact-program-title">'+TTNavigation.title+'</span></a>'+term+'</div><div class="top-actions">'+(state.route!=='home'?'<a class="quiet" href="'+href('home')+'">처음</a>':'')+(roles[state.route]&&token(state.route)?'<button class="quiet" data-action="logout">로그아웃</button>':'')+'</div>';TTNavigation.sync();
+    $('#header').innerHTML=TTNavigation.opener()+'<div class="school-heading"><span class="brand"><span class="school-name">'+esc(school)+'</span><span class="compact-program-title">'+TTNavigation.title+'</span></span>'+term+'</div><div class="top-actions">'+(state.route==='student'||state.route!=='home'&&!token(state.route)?'<a class="quiet" href="'+href('home')+'">처음</a>':'')+(roles[state.route]&&token(state.route)?'<button class="quiet" data-action="logout">로그아웃</button>':'')+'</div>';TTNavigation.sync();
   }
   function head(title,actions=''){return '<div class="view-head"><div>'+(title?'<h1>'+esc(title)+'</h1>':'')+'</div>'+actions+'</div>';}
   function showScreen(html,workspace=false){hideCourse();sectionPane.hidden=true;document.body.classList.remove('section-assignment-workspace');app.innerHTML=html;document.body.classList.toggle('workspace',workspace);}
@@ -195,6 +195,10 @@
     password.closest('.field').hidden=student;
     password.required=!student;
     if(student)password.value='';
+    const number=$('#login-student-number');
+    number.closest('.field').hidden=!student;number.required=student;
+    $('#remember-teacher-field').hidden=role!=='teacher';
+    if(role!=='teacher')$('#remember-teacher').checked=false;
   }
   function renderLogin(role='student'){
     role=role||'student';
@@ -203,8 +207,10 @@
     hideSwap();header();
     const choices=Object.entries(roles).map(([value,label])=>({value,label}));
     showScreen('<div class="auth"><h1>로그인</h1><form data-form="login">'+
-      field('사용자 유형','login-role','<select id="login-role"'+(role==='student'?' autofocus':'')+'>'+options(choices,role)+'</select>')+
+      field('사용자 유형','login-role','<select id="login-role">'+options(choices,role)+'</select>')+
       field('비밀번호','password','<input id="password" type="password" required maxlength="128" autocomplete="current-password"'+(role!=='student'?' autofocus':'')+'>')+
+      field('학번','login-student-number',input('login-student-number','','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off"'+(role==='student'?' autofocus':'')))+
+      '<label class="check-label" id="remember-teacher-field"><input id="remember-teacher" type="checkbox">로그인 유지</label>'+
       '<p id="login-error" class="error" role="alert" hidden></p><button class="primary" type="submit">로그인</button></form></div>');
     syncLoginPassword(role);
     if(role!=='student')TTApi.prepareLogin(role).catch(()=>{});
@@ -215,7 +221,7 @@
     return '<div class="capture"><h2>'+esc(name)+'</h2><table class="tt"><thead><tr><th></th>'+days.map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
   }
   function resultHTML(timetable=state.timetable){return timetable?'<div id="capture-area" class="panel">'+timetableHTML(timetable)+'</div><div class="result-tools"><button data-action="save-image">이미지 저장</button><button data-action="print-single">인쇄</button></div>':'';}
-  function studentContent(focus=false){return '<div class="lookup">'+head('학생 시간표')+'<form class="lookup-form" data-form="student">'+field('학번','student-number',input('student-number','','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off" required'+(focus?' autofocus':'')))+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+resultHTML(state.studentTimetable)+'</div></div>';}
+  function studentContent(focus=false){return '<div class="lookup">'+head('학생 시간표')+'<form class="lookup-form" data-form="student">'+field('학번','student-number',input('student-number',state.studentTimetable?.studentNumber||'','inputmode="numeric" pattern="[1-3][0-9]{4}" maxlength="5" autocomplete="off" required'+(focus?' autofocus':'')))+'<button class="primary" type="submit">조회</button></form><div id="lookup-result">'+resultHTML(state.studentTimetable)+'</div></div>';}
   function renderStudent(focus=false){TTNavigation.render([studentMenu],'student',studentMenu[0]);showScreen(studentContent(focus));}
   function visibleTimetable(){return $('#student-number')?state.studentTimetable:state.timetable;}
   async function loadTeacher(force=false){
@@ -348,7 +354,7 @@
   function renderSettings(root){const s=state.admin.store.settings;root.innerHTML='<div class="panel"><div class="toolbar">'+'<label for="switch-term">운영 학기</label>'+select('switch-term',state.admin.terms,state.admin.store.term)+'<button data-action="switch-term">학기 전환</button></div><details class="term-create"><summary>새 학기 만들기</summary><form data-form="create-term" data-skip-draft="true" class="toolbar">'+field('학년도','create-year',input('create-year',Math.min(2100,s.academicYear+(s.semester===2?1:0)),'type="number" min="2020" max="2100" required'))+field('학기','create-semester',select('create-semester',['1','2'],Number(s.semester)===1?'2':'1'))+'<button type="submit" class="primary">학기 생성</button></form></details><form data-form="settings"><div class="form-grid">'+field('학교명','set-school',input('set-school',s.schoolName,'maxlength="80"'))+field('시간표 제목','set-title',input('set-title',s.title,'maxlength="100"'))+'</div><label class="check-label"><input type="checkbox" id="set-course-teachers" '+(s.courseAllocationTeachers?'checked':'')+'>교사 시수배당표 사용 허용</label><div class="settings-section"><h2>요일별 교시</h2><div class="check-grid">'+days.map(d=>field(d,'period-'+d,select('period-'+d,[1,2,3,4,5,6,7],s.periods[d]))).join('')+'</div></div><div class="settings-section"><h2>창체</h2><div class="check-grid">'+days.map(d=>'<div class="check-day"><h3>'+d+'</h3>'+[1,2,3,4,5,6,7].map(p=>'<label class="check-label"><input type="checkbox" data-fixed-day="'+d+'" data-fixed-period="'+p+'" '+(s.fixedPeriods.some(f=>f.day===d&&f.period===p)?'checked':'')+'>'+p+'교시</label>').join('')+'</div>').join('')+'</div></div><div class="form-footer"><button class="primary">저장</button></div></form><div class="settings-section"><h2>비밀번호 변경</h2><div class="toolbar"><button type="button" data-action="password-dialog" data-role="teacher">교사 비밀번호 변경</button><button type="button" data-action="password-dialog" data-role="admin">관리자 비밀번호 변경</button></div></div>'+backupSettings()+'</div>';}
   function passwordDialog(role){const title=roles[role]+' 비밀번호 변경';openDialog(modalHead(title)+'<form data-form="password" data-role="'+role+'"><div class="form-stack">'+field('현재 관리자 비밀번호','password-current',input('password-current','','type="password" required maxlength="128" autocomplete="current-password" autofocus'))+field('새 비밀번호','password-new',input('password-new','','type="password" required minlength="4" maxlength="128" autocomplete="new-password"'))+field('새 비밀번호 확인','password-confirm',input('password-confirm','','type="password" required minlength="4" maxlength="128" autocomplete="new-password"'))+'</div><div class="form-footer"><button type="button" data-action="close-modal">취소</button><button class="primary" type="submit">비밀번호 변경</button></div></form>');}
   function backupSettings(){return '<div class="settings-section"><h2>백업</h2><div class="toolbar"><button data-action="backup">백업 저장</button><button data-action="restore-file">백업 불러오기</button><input type="file" id="restore-file" accept=".json" hidden></div><div class="table-scroll"><table class="data-table"><thead><tr><th>일시</th><th>이름</th><th></th></tr></thead><tbody>'+state.admin.backups.filter(b=>b.term===state.admin.store.term).map(b=>'<tr><td>'+date(b.at)+'</td><td>'+esc(b.label)+'</td><td><button class="mini" data-action="download-backup" data-id="'+esc(b.id)+'">다운로드</button> <button class="mini" data-action="restore-backup" data-id="'+esc(b.id)+'">복원</button></td></tr>').join('')+'</tbody></table></div></div>';}
-  async function renderRoute(){hideSwap();state.route=route();header();if(state.route==='home')renderLogin();if(state.route==='student'){if(token('student'))renderStudent();else renderLogin('student');}if(state.route==='teacher'){if(!token('teacher'))renderLogin('teacher');else await loadTeacher();}if(state.route==='admin'){if(!token('admin'))renderLogin('admin');else await loadAdmin();}}
+  async function renderRoute(){hideSwap();state.route=route();if(state.route==='home'&&TTApi.rememberedTeacher()&&token('teacher')){state.route='teacher';history.replaceState(null,'',href('teacher'));}header();if(state.route==='home')renderLogin();if(state.route==='student'){if(token('student'))renderStudent();else renderLogin('student');}if(state.route==='teacher'){if(!token('teacher'))renderLogin('teacher');else await loadTeacher();}if(state.route==='admin'){if(!token('admin'))renderLogin('admin');else await loadAdmin();}}
   function download(blob,name){const link=document.createElement('a'),url=URL.createObjectURL(blob);link.href=url;link.download=name;link.hidden=true;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
   async function print(html,kind,paper='A3'){
     const target=$('#print-root');target.className='print-root print-'+kind;target.innerHTML=html;
@@ -392,7 +398,7 @@
       case 'login':{
         const role=$('#login-role').value,error=$('#login-error');error.hidden=true;
         let result;
-        try{result=await call('login',{role,...(role==='student'?{}:{password:$('#password').value}),initialize:true,workspaceOnly:role==='admin'&&state.adminTab==='sectionAssignment'});}
+        try{result=await call('login',{role,...(role==='student'?{studentNumber:$('#login-student-number').value.trim()}:{password:$('#password').value,rememberTeacher:role==='teacher'&&$('#remember-teacher').checked}),initialize:true,workspaceOnly:role==='admin'&&state.adminTab==='sectionAssignment'});}
         catch(err){error.textContent=err.message;error.hidden=false;return;}
         clearSessions();
         sessionStorage.setItem('timetable.'+role,JSON.stringify({token:result.token,role:result.role,expiresAt:result.expiresAt}));
@@ -400,7 +406,7 @@
         useMeta(result.initial.meta);
         if(role==='admin'){state.admin=result.initial;await ensureAdminTab(state.adminTab);renderAdmin();}
         else if(role==='teacher'){state.teacherBoot=result.initial;if(state.teacherTab==='roster')await ensureClassCatalog();renderTeacher();}
-        else renderStudent(true);
+        else{state.studentTimetable=result.initial.timetable;renderStudent();}
         break;
       }
       case 'student':{

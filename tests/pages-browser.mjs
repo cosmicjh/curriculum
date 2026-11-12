@@ -57,7 +57,7 @@ try{
   await opener.click();assert.equal(await panel.getAttribute('aria-modal'),'true');
   assert(await page.locator('#workspace').evaluate(el=>el.inert));assert.equal(await page.evaluate(()=>document.body.style.position),'fixed');
   assert(await toggle.evaluate(el=>el===document.activeElement));assert.equal(await panel.locator('.sidebar-credit').innerText(),credit);
-  await page.keyboard.press('Shift+Tab');await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
   assert.equal(await page.evaluate(()=>document.activeElement.dataset.tab),'settings');
   await page.setViewportSize({width:390,height:320});
   assert(await panel.locator('nav').evaluate(el=>el.scrollHeight>el.clientHeight));
@@ -108,10 +108,29 @@ try{
   await page.goto(pages+'/curriculum/');await idle();assert(await page.locator('#sidebar').isHidden());
   const before=requests.filter(r=>r.action==='passwordParameters').length;
   assert.equal(await page.locator('#login-role').inputValue(),'student');assert(await page.locator('#password').isHidden());
-  await page.locator('form[data-form=login] button').click();await page.locator('#student-number').waitFor();await idle();
-  assert(await page.locator('#student-number').evaluate(input=>document.activeElement===input));
+  await page.locator('#login-student-number').fill('30101');await page.locator('form[data-form=login] button').click();await page.locator('.tt').waitFor();await idle();
   assert.equal(requests.filter(r=>r.action==='passwordParameters').length,before);
-  assert.deepEqual(await page.locator('#sidebar-menu button').allTextContents(),['학생 시간표']);await page.locator('#student-number').fill('30101');await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();await idle();assert.equal(new URL(page.url()).origin,pages);assert.equal(await page.locator('.tt tbody tr').count(),7);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  assert.deepEqual(await page.locator('#sidebar-menu button').allTextContents(),['학생 시간표']);await idle();assert.equal(new URL(page.url()).origin,pages);assert.equal(await page.locator('.tt tbody tr').count(),7);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ });
+ await step('Teacher can resume from a new tab and logout removes the remembered session',async()=>{
+  const teacher=await context.newPage();
+  await teacher.goto(pages+'/curriculum/');
+  await teacher.locator('#login-role').selectOption('teacher');
+  await teacher.locator('#remember-teacher').check();
+  await teacher.locator('#password').fill('1234');
+  await teacher.locator('form[data-form=login] button').click();
+  await teacher.locator('[data-action=logout]').waitFor();
+  const remaining=await teacher.evaluate(()=>JSON.parse(localStorage.getItem('timetable.rememberedTeacher')).expiresAt-Date.now());
+  assert(remaining>399*86400000&&remaining<=400*86400000);
+  await teacher.close();
+  const resumed=await context.newPage();
+  await resumed.goto(pages+'/curriculum/');
+  await resumed.locator('[data-tab=timetable]').waitFor({state:'attached'});
+  assert.equal(await resumed.locator('#header a, #sidebar a.program-title').count(),0);
+  await resumed.locator('[data-action=logout]').click();
+  await resumed.locator('#login-role').waitFor();
+  assert.equal(await resumed.evaluate(()=>localStorage.getItem('timetable.rememberedTeacher')),null);
+  await resumed.close();
  });
  await step('Pages admin login, real D1 save and history work without third-party cookies',async()=>{
   await page.locator('[data-action=logout]').click();await idle();assert.equal(await page.locator('#login-role').inputValue(),'student');assert(await page.locator('#sidebar').isHidden());assert(await page.locator('[data-sidebar-open]').isHidden());

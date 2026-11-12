@@ -241,7 +241,13 @@ async function api(request,env){
   else if(action==='passwordParameters')data=await Auth.parameters(db,env,req.role);
   else if(action==='logout'){await Auth.revoke(db,request,env);if(!pagesRequest(request,env)){for(const role of Auth.roles)headers.append('Set-Cookie',Auth.cookie(role));}data=true;}
   else if(action==='login'){
-   data=await Auth.login(db,env,request,req,headers);if(req.initialize){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx,req):req.role==='teacher'?await teacherBoot(db,ctx):{meta:S.meta(ctx)};}
+   const initializeStudent=req.initialize&&req.role==='student'&&req.studentNumber!==undefined?async()=>{
+    await Auth.rateLimit(db,request,'student',60);
+    const ctx=await S.context(db),timetable=await read(db,ctx,{action:'student',studentNumber:req.studentNumber});
+    return {meta:timetable.meta,timetable};
+   }:undefined;
+   data=await Auth.login(db,env,request,req,headers,initializeStudent);
+   if(req.initialize&&!data.initial){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx,req):req.role==='teacher'?await teacherBoot(db,ctx):{meta:S.meta(ctx)};}
   }else if(action==='studyroom')data=await studyroom(db,await S.context(db),env,req,request);
   else{
    const requiresAdmin=!teacherActions.has(action)||action==='classSwap'&&req.swapScope==='admin';

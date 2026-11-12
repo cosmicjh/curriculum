@@ -4,7 +4,7 @@
  const workspace=document.getElementById('workspace'),mobile=matchMedia('(max-width:1023px)');
  const sidebar=document.createElement('aside'),backdrop=document.createElement('div');
  sidebar.id='sidebar';sidebar.setAttribute('aria-label',title);
- sidebar.innerHTML='<div class="sidebar-heading"><a class="program-title" href="#/home">'+titleLead+' <span>'+titleTail+'</span></a><button type="button" data-sidebar-toggle aria-controls="sidebar-menu"></button></div><nav id="sidebar-menu" aria-label="주 메뉴"></nav><footer class="sidebar-credit">기획·개발: 첨단고등학교 정준홍</footer>';
+ sidebar.innerHTML='<div class="sidebar-heading"><div class="program-title">'+titleLead+' <span>'+titleTail+'</span></div><button type="button" data-sidebar-toggle aria-controls="sidebar-menu"></button></div><nav id="sidebar-menu" aria-label="주 메뉴"></nav><footer class="sidebar-credit">기획·개발: 첨단고등학교 정준홍</footer>';
  backdrop.className='sidebar-backdrop';backdrop.hidden=true;workspace.before(sidebar,backdrop);
  const menu=sidebar.querySelector('nav'),toggle=sidebar.querySelector('[data-sidebar-toggle]'),key='curriculum.navigation';
  const paths={

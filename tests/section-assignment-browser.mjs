@@ -28,7 +28,7 @@ try{
   const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
   async function login(role,password='1234'){
     await page.locator('#login-role').selectOption(role);
-    if(role==='student')assert(await page.locator('#password').isHidden());
+    if(role==='student'){assert(await page.locator('#password').isHidden());await page.locator('#login-student-number').fill('30101');}
     else await page.locator('#password').fill(password);
     await page.getByRole('button',{name:'로그인',exact:true}).click();
     await idle();

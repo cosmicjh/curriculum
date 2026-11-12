@@ -45,13 +45,14 @@ export async function rateLimit(db,request,scope,limit=10,windowMs=60000){
  const [r]=await db.batch([db.prepare('INSERT INTO login_limits(bucket,attempts,expires_at) VALUES(?,1,?) ON CONFLICT(bucket) DO UPDATE SET attempts=CASE WHEN login_limits.expires_at<=? THEN 1 ELSE login_limits.attempts+1 END,expires_at=CASE WHEN login_limits.expires_at<=? THEN excluded.expires_at ELSE login_limits.expires_at END RETURNING attempts',bucket,now+windowMs,now,now),db.prepare('DELETE FROM sessions WHERE token_hash IN (SELECT token_hash FROM sessions WHERE expires_at<=? LIMIT 50)',now),db.prepare('DELETE FROM login_limits WHERE bucket IN (SELECT bucket FROM login_limits WHERE expires_at<=? LIMIT 50)',now)]);
  if(r.results[0].attempts>limit)fail(429,'RATE_LIMITED','잠시 후 다시 시도하세요.');
 }
-export async function login(db,env,request,req,headers){
+export async function login(db,env,request,req,headers,initializeStudent){
  if(!roles.includes(req.role))fail(400,'INVALID_REQUEST','권한을 확인하세요.');
  await rateLimit(db,request,'login:'+req.role,req.role==='student'?120:10);const cred=(await credentials(db,env))[req.role];
  if(req.role!=='student'&&(req.credentialEpoch!==cred.epoch||!await passwordMatches(req.password,cred.password_hash,env.PASSWORD_PEPPER,req.role))){
   await revoke(db,request,env);if(!pagesRequest(request,env)){for(const role of roles)headers.append('Set-Cookie',cookie(role));}fail(401,'AUTH_REQUIRED','비밀번호가 다르거나 변경되었습니다.');
  }
- const token=randomToken(),ttl=req.role==='admin'?7200:21600,expiresAt=Date.now()+ttl*1000;
+ const initial=req.role==='student'&&initializeStudent?await initializeStudent():undefined;
+ const token=randomToken(),ttl=req.role==='admin'?7200:req.role==='teacher'&&req.rememberTeacher===true?400*86400:21600,expiresAt=Date.now()+ttl*1000;
  // Replace the sessions presented by this browser when switching roles.
  const pages=pagesRequest(request,env),jar=pages?{}:tokens(request),stmts=[];
  if(pages){
@@ -69,7 +70,7 @@ export async function login(db,env,request,req,headers){
   for(const role of roles)if(role!==req.role&&jar[cookieName(role)])headers.append('Set-Cookie',cookie(role));
   headers.append('Set-Cookie',cookie(req.role,token,ttl));
  }
- return {token:pages?token:'cookie',role:req.role,expiresAt};
+ return {token:pages?token:'cookie',role:req.role,expiresAt,...(initial?{initial}:{})};
 }
 export async function parameters(db,env,role){if(!['teacher','admin'].includes(role))fail(400,'INVALID_REQUEST','비밀번호를 사용하는 유형을 선택하세요.');return publicParameters((await credentials(db,env))[role]);}
 export async function passwordChangeStatements(db,env,req){

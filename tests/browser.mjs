@@ -16,7 +16,7 @@ try{
  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
  async function login(){await page.goto(url+'/admin.html');await idle();await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await clickMenu(page,page.locator('.admin-nav [data-tab=students]'));await page.locator('[data-action=new-student]').waitFor();await idle();}
  await step('student/mobile timetable, shared Pretendard, same-origin requests',async()=>{
-  await page.goto(url+'/student.html');await idle();assert(await page.locator('#password').isHidden());await page.locator('form[data-form=login] button').click();await page.locator('#student-number').fill('30101');await page.locator('form[data-form=student] button').click();await page.locator('.tt').waitFor();await idle();
+  await page.goto(url+'/student.html');await idle();assert(await page.locator('#password').isHidden());await page.locator('#login-student-number').fill('30101');await page.locator('form[data-form=login] button').click();await page.locator('.tt').waitFor();await idle();
   await page.setViewportSize({width:390,height:844});assert.equal(await page.locator('.tt tbody tr').count(),7);assert.equal(await page.locator('.tt thead th').count(),6);assert(await page.locator('link[href*="font.css"]').count());assert(await page.evaluate(()=>document.fonts.check('12px "Timetable UI"','한글')));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert((await page.locator('.tt').boundingBox()).height<470);await page.screenshot({path:'test-results/mobile.png',fullPage:true});
  });
  await step('PNG output is real PNG and single timetable print has print layout',async()=>{
@@ -77,7 +77,8 @@ try{
   await clickMenu(page,button('teacher-tab').filter({hasText:'학급별 시간표 인쇄'}));await page.locator('#batch-grade').selectOption('3');await page.locator('#batch-class').selectOption('1');await page.locator('form[data-form=batch] button').click();await page.locator('.batch-page').first().waitFor({state:'attached'});await idle();assert.equal(await page.locator('.batch-item').count(),5);assert.equal(await page.locator('.batch-page').count(),2);assert.equal(await page.locator('.batch-page').first().locator('.batch-item').count(),4);await page.emulateMedia({media:'print'});assert.equal(await page.locator('.batch-page').first().evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),2);assert.equal(await page.locator('.batch-page').first().evaluate(el=>getComputedStyle(el).gridTemplateRows.split(' ').length),2);await page.locator('.batch-page').first().screenshot({path:'test-results/print-batch.png'});await page.emulateMedia({media:'screen'});await page.evaluate(()=>dispatchEvent(new Event('afterprint')));
  });
  await step('role selection keeps its layout while teacher login loads',async()=>{
-  await page.locator('#header .brand').click();
+  assert.equal(await page.locator('#header a.brand').count(),0);
+  await button('logout').click();
   const menu=page.locator('.auth');await menu.waitFor();await idle();
   await page.locator('#login-role').selectOption('teacher');await page.locator('#password').fill('1234');
   const before=await menu.boundingBox();
