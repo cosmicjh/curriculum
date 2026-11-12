@@ -109,6 +109,7 @@ try{
   const before=requests.filter(r=>r.action==='passwordParameters').length;
   assert.equal(await page.locator('#login-role').inputValue(),'student');assert(await page.locator('#password').isHidden());
   await page.locator('#login-student-number').fill('30101');await page.locator('form[data-form=login] button').click();await page.locator('.tt').waitFor();await idle();
+  assert.equal(await page.locator('#header .top-actions').innerText(),'로그아웃');
   assert.equal(requests.filter(r=>r.action==='passwordParameters').length,before);
   assert.deepEqual(await page.locator('#sidebar-menu button').allTextContents(),['학생 시간표']);await idle();assert.equal(new URL(page.url()).origin,pages);assert.equal(await page.locator('.tt tbody tr').count(),7);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  });
@@ -122,10 +123,12 @@ try{
   await teacher.locator('[data-action=logout]').waitFor();
   const remaining=await teacher.evaluate(()=>JSON.parse(localStorage.getItem('timetable.rememberedTeacher')).expiresAt-Date.now());
   assert(remaining>399*86400000&&remaining<=400*86400000);
+  await clickMenu(teacher,teacher.locator('[data-tab=studentTimetable]'));
+  await teacher.locator('#student-number').waitFor();
   await teacher.close();
   const resumed=await context.newPage();
   await resumed.goto(pages+'/curriculum/');
-  await resumed.locator('[data-tab=timetable]').waitFor({state:'attached'});
+  await resumed.locator('#student-number').waitFor();
   assert.equal(await resumed.locator('#header a, #sidebar a.program-title').count(),0);
   await resumed.locator('[data-action=logout]').click();
   await resumed.locator('#login-role').waitFor();

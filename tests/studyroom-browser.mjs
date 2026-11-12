@@ -62,9 +62,9 @@ try{
   assert.equal(await sr.locator('.sr-seat-scroll').evaluate(el=>getComputedStyle(el).borderTopWidth),'0px');
   assert.equal(await sr.locator('[data-seat="98"]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(244, 244, 244)');
   assert.equal(await sr.locator('[data-seat="99"]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(232, 241, 220)');
-  assert(await sr.locator('.sr-current-status').evaluate(el=>{
-   const [session,refresh]=Array.from(el.children,child=>child.getBoundingClientRect());
-   return Math.abs(session.y+session.height/2-refresh.y-refresh.height/2)<1;
+  assert(await sr.locator('.sr-attendance-toolbar').evaluate(el=>{
+   const refresh=el.querySelector('[data-sr=refresh]').getBoundingClientRect();
+   return Math.abs(refresh.right-el.getBoundingClientRect().right)<1;
   }));
   assert(await sr.locator('.sr-seat-scroll').evaluate(e=>e.scrollWidth<=e.clientWidth));
   assert(await teacher.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
@@ -84,15 +84,19 @@ try{
   await sr.locator('[data-sr=display][data-value=seats]').click();await teacher.setViewportSize({width:1440,height:1000});
   await teacher.screenshot({path:'.impeccable/review/desktop.png',fullPage:true});
  });
- await step('Automatic attendance refresh uses the selected browser interval',async()=>{
-  const interval=sr.getByLabel('자동 새로고침');
-  assert.equal(await interval.inputValue(),'30');
-  await interval.selectOption('15');
+ await step('Teacher attendance refresh uses the administrator interval',async()=>{
+  assert.equal(await sr.getByLabel('자동 새로고침').count(),0);
+  assert.equal((await api('dashboard')).data.refreshSeconds,30);
+  const teacherSession=await h.login('teacher');
+  const denied=await h.api('studyroom',{op:'refreshInterval',seconds:15,expectedRevision:await rev()},teacherSession.cookie);
+  assert.equal(denied.ok,false);
+  assert((await api('refreshInterval',{seconds:15,expectedRevision:await rev()})).ok);
+  await sr.locator('[data-sr=refresh]').click();await idle();
   const dashboard=()=>teacher.waitForRequest(req=>req.url().endsWith('/api/studyroom')&&req.postDataJSON()?.op==='dashboard');
   await Promise.all([dashboard(),teacher.clock.fastForward(15000)]);
   await idle();
-  await interval.selectOption('0');
-  assert.equal(await teacher.evaluate(()=>localStorage.getItem('timetable.studyroomRefreshSeconds')),'0');
+  assert((await api('refreshInterval',{seconds:0,expectedRevision:await rev()})).ok);
+  await sr.locator('[data-sr=refresh]').click();await idle();
   const before=await teacher.evaluate(()=>TIMETABLE_PERF.filter(r=>r.action==='studyroom').length);
   await teacher.clock.fastForward(60000);
   assert.equal(await teacher.evaluate(()=>TIMETABLE_PERF.filter(r=>r.action==='studyroom').length),before);
@@ -259,6 +263,12 @@ try{
   assert.equal(await m.locator('[data-sr-form=staff]').count(),0);
   assert.equal(await m.getByRole('button',{name:'이용 학생',exact:true}).count(),0);
   await m.locator('[data-sr-form=schedule] button:not([type=button])').click();await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');assert.equal((await h.sql('SELECT count(*) n FROM sr_schedules')).results[0].n,2);
+  const refreshForm=m.locator('[data-sr-form=refreshInterval]');
+  assert.equal(await refreshForm.getByLabel('자동 새로고침').inputValue(),'0');
+  await refreshForm.getByLabel('자동 새로고침').selectOption('60');
+  await refreshForm.getByRole('button',{name:'저장'}).click();
+  await manager.waitForFunction(()=>document.querySelector('.studyroom')?.getAttribute('aria-busy')==='false');
+  assert.equal((await api('dashboard')).data.refreshSeconds,60);
   await manager.screenshot({path:'test-results/studyroom/settings-desktop.png',fullPage:true});await manager.close();
  });
  await step('all browser windows can close before the server-side scheduled archive runs',async()=>{

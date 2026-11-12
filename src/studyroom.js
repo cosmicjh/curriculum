@@ -49,10 +49,10 @@ async function student(db,ctx,req,submit){
  }
 }
 async function dashboard(db,ctx,env){
- const now=iso(),[st,rules,policy]=await db.batch([db.prepare('SELECT * FROM sr_state WHERE id=1'),db.prepare('SELECT * FROM sr_schedules WHERE term_id=? AND effective_date<=? ORDER BY effective_date DESC,version DESC LIMIT 1',ctx.term,D.localTime(now).date),db.prepare('SELECT enabled FROM sr_term_policy WHERE term_id=?',ctx.term)]);
+ const now=iso(),[st,rules,policy]=await db.batch([db.prepare('SELECT * FROM sr_state WHERE id=1'),db.prepare('SELECT * FROM sr_schedules WHERE term_id=? AND effective_date<=? ORDER BY effective_date DESC,version DESC LIMIT 1',ctx.term,D.localTime(now).date),db.prepare('SELECT coalesce((SELECT enabled FROM sr_term_policy WHERE term_id=?),0) AS enabled, coalesce((SELECT seconds FROM sr_refresh_intervals WHERE term_id=?),30) AS refresh_seconds',ctx.term,ctx.term)]);
  const status=st.results[0],current=D.currentSession(rules.results,ctx,now);
  const rows=current?await db.all("SELECT * FROM sr_attendance WHERE session_id=? AND state='active' ORDER BY student_number",current.id):[];
- return {revision:status.revision,enabled:Boolean(policy.results[0]?.enabled),current,rows,serverAt:now,lastRunAt:status.last_run_at,lastError:status.last_error,cronEnabled:env.STUDYROOM_CRON_ENABLED==='true',testLabel:env.STUDYROOM_TEST_MODE==='true'?'가상 검증':'',term:ctx.term,academicYear:ctx.settings.academicYear};
+ return {revision:status.revision,enabled:Boolean(policy.results[0]?.enabled),refreshSeconds:policy.results[0]?.refresh_seconds??30,current,rows,serverAt:now,lastRunAt:status.last_run_at,lastError:status.last_error,cronEnabled:env.STUDYROOM_CRON_ENABLED==='true',testLabel:env.STUDYROOM_TEST_MODE==='true'?'가상 검증':'',term:ctx.term,academicYear:ctx.settings.academicYear};
 }
 async function students(db,ctx,req){
  const search=String(req.search||'').trim().slice(0,80),q='%'+search+'%';
@@ -144,7 +144,7 @@ export async function runStudyroomSchedule(db,now=iso()){
 export async function studyroom(db,ctx,env,req,request){
  const op=req.op;
  if(['studentInfo','submit'].includes(op)){await A.rateLimit(db,request,'sr-student',600);return student(db,ctx,req,op==='submit');}
- const adminOps=new Set(['configuration','setMember','linkStudent','export','closeDue']);
+ const adminOps=new Set(['configuration','refreshInterval','setMember','linkStudent','export','closeDue']);
  const session=await A.authenticate(db,request,adminOps.has(op)?'admin':'teacher',env);
  if(req.viewTerm&&req.viewTerm!==ctx.term)A.fail(409,'TERM_CHANGED','활성 학기가 변경되었습니다.');
  if(op==='dashboard')return dashboard(db,ctx,env);
@@ -153,6 +153,14 @@ export async function studyroom(db,ctx,env,req,request){
  if(op==='history'){D.check(typeof req.recordId==='string','출석 기록을 선택하세요.');return {events:await db.all('SELECT e.id,e.action,e.at,e.actor,e.reason,e.record FROM sr_events e JOIN sr_attendance a ON a.session_id=e.session_id AND a.person_id=e.person_id WHERE a.id=? AND a.term_id=? ORDER BY e.seq',req.recordId,ctx.term)};}
  if(op==='change')return changeAttendance(db,ctx,req,session);
  if(op==='configuration')return configure(db,ctx,req,session);
+ if(op==='refreshInterval'){
+  D.check([0,15,30,60,120,300].includes(req.seconds),'자동 새로고침 간격을 선택하세요.');
+  const st=await state(db);requireRevision(st,req);
+  await commit(db,ctx,st,adminActor(session),[
+   db.prepare('INSERT INTO sr_refresh_intervals(term_id,seconds) VALUES(?,?) ON CONFLICT(term_id) DO UPDATE SET seconds=excluded.seconds',ctx.term,req.seconds),
+   event(db,{action:'refreshInterval',actor:'role:admin',record:{term:ctx.term,seconds:req.seconds}})
+  ]);return true;
+ }
  if(op==='settings')return {revision:(await state(db)).revision,schedules:await schedules(db,ctx)};
  if(op==='setMember'){
   const st=await state(db);requireRevision(st,req);D.check(typeof req.enabled==='boolean'&&await db.first('SELECT id FROM student_people WHERE id=?',req.personId||''),'학생·이용 상태를 확인하세요.');

@@ -7,7 +7,6 @@ const field=(name,html)=>'<label>'+name+html+'</label>';
 const button=(action,label,attrs='')=>'<button type="button" data-sr="'+action+'" '+attrs+'>'+label+'</button>';
 const toggleGroup=(action,label,choices)=>'<div class="sr-toggle" role="group" aria-label="'+label+'">'+choices.map(([value,text],i)=>button(action,text,'data-value="'+value+'" aria-pressed="'+(!i)+'"')).join('')+'</div>';
 const refreshIntervals=[[15,'15초'],[30,'30초'],[60,'1분'],[120,'2분'],[300,'5분'],[0,'끄기']];
-const refreshIntervalKey='timetable.studyroomRefreshSeconds';
 function monthRange(month){
  const from=month+'-01',first=new Date(from+'T00:00:00Z');
  const length=new Date(Date.UTC(first.getUTCFullYear(),first.getUTCMonth()+1,0)).getUTCDate();
@@ -19,10 +18,6 @@ export function mountStudyroom(root,{request,admin=false}){
  root.innerHTML='<div class="sr-heading"><h2>스터디룸</h2><span data-sr-test></span></div><p data-sr-error role="alert"></p><nav class="tabs" aria-label="스터디룸 메뉴">'+[['current','현재 출석'],['query','출석 조회'],...(admin?[['settings','운영 설정']]:[])].map(([v,l])=>button('view',l,'data-view="'+v+'"')).join('')+'</nav><section data-sr-content></section><dialog aria-labelledby="sr-dialog-title"></dialog>';
  const content=$('[data-sr-content]'),dialog=$('dialog');let busy=false,searchTimer,searchTicket=0,queued=null;
  let refreshSeconds=30,refreshTimer;
- try{
-  const saved=localStorage.getItem(refreshIntervalKey);
-  if(saved!==null&&refreshIntervals.some(([seconds])=>String(seconds)===saved))refreshSeconds=Number(saved);
- }catch{}
  function scheduleRefresh(){
   clearInterval(refreshTimer);
   if(refreshSeconds)refreshTimer=setInterval(()=>{
@@ -32,8 +27,7 @@ export function mountStudyroom(root,{request,admin=false}){
  async function api(op,args={}){return request('studyroom',{op,...args});}
  async function run(fn,queue=false){if(busy){if(queue)queued=fn;return;}busy=true;root.setAttribute('aria-busy','true');$('[data-sr-error]').textContent='';try{await fn();}catch(e){$('[data-sr-error]').textContent=e.message;}finally{busy=false;root.setAttribute('aria-busy','false');if(queued){const next=queued;queued=null;run(next);}}}
  function renderCurrent(){
-  const interval='<label class="sr-refresh-interval">자동 새로고침<select data-sr-refresh-interval>'+refreshIntervals.map(([seconds,label])=>'<option value="'+seconds+'"'+(seconds===refreshSeconds?' selected':'')+'>'+label+'</option>').join('')+'</select></label>';
-  content.innerHTML='<div class="sr-toolbar sr-attendance-toolbar"><div class="sr-current-status"><strong data-sr-session></strong>'+button('refresh','새로고침')+'</div>'+toggleGroup('display','보기',[['seats','좌석'],['list','목록']])+interval+'</div><p class="sr-count" data-sr-count></p><div class="sr-seat-scroll" tabindex="0" aria-label="99석 배치표"><div class="sr-seat-grid"></div></div><div class="sr-table" data-sr-list hidden></div>';
+  content.innerHTML='<div class="sr-toolbar sr-attendance-toolbar"><strong data-sr-session></strong>'+toggleGroup('display','보기',[['seats','좌석'],['list','목록']])+button('refresh','새로고침','class="sr-current-refresh"')+'</div><p class="sr-count" data-sr-count></p><div class="sr-seat-scroll" tabindex="0" aria-label="99석 배치표"><div class="sr-seat-grid"></div></div><div class="sr-table" data-sr-list hidden></div>';
   const grid=$('.sr-seat-grid');
   for(const [code,row,column] of seats){const b=document.createElement('button');b.type='button';b.dataset.sr='seat';b.dataset.seat=code;b.style.gridRow=(row-6)+' / span 4';b.style.gridColumn=column;b.innerHTML='<strong>'+code+'</strong><span data-number hidden></span><span data-name hidden></span>';grid.append(b);}
   paintCurrent();
@@ -74,7 +68,7 @@ export function mountStudyroom(root,{request,admin=false}){
   }
   return dates.size?[...dates].map(([date,groups])=>'<section class="sr-day"><h3>'+esc(date)+'</h3>'+[...groups].map(([label,records])=>'<h4>'+esc(label)+'</h4><div class="sr-table">'+table(records,true)+'</div>').join('')+'</section>').join(''):table([]);
  }
- async function refresh(){state.dashboard=await api('dashboard');$('[data-sr-test]').textContent=state.dashboard.testLabel;paintCurrent();}
+ async function refresh(){state.dashboard=await api('dashboard');const seconds=state.dashboard.refreshSeconds??30;if(seconds!==refreshSeconds){refreshSeconds=seconds;scheduleRefresh();}$('[data-sr-test]').textContent=state.dashboard.testLabel;paintCurrent();}
  function showDialog(html){dialog.innerHTML='<div class="sr-dialog-head"><h2 id="sr-dialog-title">'+html.title+'</h2>'+button('closeDialog','닫기')+'</div>'+html.body;if(!dialog.open)dialog.showModal();}
  function edit(r,seat='',noteOnly=false){
   const manual=!r;state.pending=null;state.editRevision=state.dashboard.revision;state.editRecordVersion=r?.version;state.editSessionId=state.dashboard.current?.id;
@@ -187,17 +181,13 @@ export function mountStudyroom(root,{request,admin=false}){
  }
  async function renderSettings(){
   const settings=await api('settings'),rules=settings.schedules[0]?JSON.parse(settings.schedules[0].definitions):[];
-  content.innerHTML='<h3>접수</h3><form data-sr-form="enabled" class="sr-toolbar"><label class="sr-check"><input name="enabled" type="checkbox" '+(state.dashboard.enabled?'checked':'')+'>학생 접수 허용</label><button>저장</button></form><p>자동 마감 '+(state.dashboard.cronEnabled?'설정됨':'미설정')+(state.dashboard.lastRunAt?' · '+esc(state.dashboard.lastRunAt):'')+'</p>'+(state.dashboard.lastError?'<p role="alert">'+esc(state.dashboard.lastError)+'</p>':'')+'<h3>시정</h3><form data-sr-form="schedule">'+field('적용일','<input type="date" name="effectiveDate" value="'+(rules.length?new Date(Date.now()+33*3600000).toISOString().slice(0,10):localDate())+'" required>')+'<div class="sr-rules"></div><div class="sr-toolbar">'+button('addRule','회차 추가')+'<button class="primary">시정 저장</button></div></form><h3>자료</h3>'+button('export','출석 자료 내보내기');
+  const interval='<form data-sr-form="refreshInterval" class="sr-toolbar"><label>자동 새로고침<select name="seconds">'+refreshIntervals.map(([seconds,label])=>'<option value="'+seconds+'"'+(seconds===refreshSeconds?' selected':'')+'>'+label+'</option>').join('')+'</select></label><button>저장</button></form>';
+  content.innerHTML='<h3>현재 출석</h3>'+interval+'<h3>접수</h3><form data-sr-form="enabled" class="sr-toolbar"><label class="sr-check"><input name="enabled" type="checkbox" '+(state.dashboard.enabled?'checked':'')+'>학생 접수 허용</label><button>저장</button></form><p>자동 마감 '+(state.dashboard.cronEnabled?'설정됨':'미설정')+(state.dashboard.lastRunAt?' · '+esc(state.dashboard.lastRunAt):'')+'</p>'+(state.dashboard.lastError?'<p role="alert">'+esc(state.dashboard.lastError)+'</p>':'')+'<h3>시정</h3><form data-sr-form="schedule">'+field('적용일','<input type="date" name="effectiveDate" value="'+(rules.length?new Date(Date.now()+33*3600000).toISOString().slice(0,10):localDate())+'" required>')+'<div class="sr-rules"></div><div class="sr-toolbar">'+button('addRule','회차 추가')+'<button class="primary">시정 저장</button></div></form><h3>자료</h3>'+button('export','출석 자료 내보내기');
   for(const r of rules.length?rules:[{}])addRule(r);
  }
  function addRule(r={}){const div=document.createElement('div');div.className='sr-rule';div.dataset.id=r.id||crypto.randomUUID();div.innerHTML=field('회차 이름','<input name="label" value="'+esc(r.label==='아침'?'오전':r.label||'')+'" maxlength="30" required>')+'<fieldset><legend>요일</legend>'+['월','화','수','목','금','토','일'].map((d,i)=>'<label class="sr-check"><input type="checkbox" value="'+(i+1)+'" '+(r.days?.includes(i+1)?'checked':'')+'>'+d+'</label>').join('')+'</fieldset>'+field('접수 시작','<input name="start" type="time" value="'+esc(r.start||'')+'" required>')+field('저장·초기화','<input name="end" type="time" value="'+esc(r.end||'')+'" required>')+button('removeRule','삭제');$('.sr-rules').append(div);}
  async function show(view){clearTimeout(searchTimer);searchTicket++;state.view=view;root.querySelectorAll('[data-sr="view"]').forEach(b=>b.setAttribute('aria-current',b.dataset.view===view?'page':'false'));if(view==='current'){renderCurrent();await refresh();}if(view==='query')await renderQuery();if(view==='settings'){await refresh();await renderSettings();}}
  root.addEventListener('change',e=>{
- if(e.target.matches('[data-sr-refresh-interval]')){
-  refreshSeconds=Number(e.target.value);
-  try{localStorage.setItem(refreshIntervalKey,String(refreshSeconds));}catch{}
-  scheduleRefresh();
- }
  if(e.target.name==='month'&&state.view==='query')run(()=>{
   if(!e.target.value)e.target.value=localDate().slice(0,7);
   state.queryDay=null;return loadCalendar();
@@ -241,6 +231,11 @@ export function mountStudyroom(root,{request,admin=false}){
    state.pending=null;dialog.close();
    if(state.view==='query'&&args.change==='note')return renderRecords({...state.query,rows:state.query.rows.map(row=>row.id===saved.id?{...row,...saved}:row)});
    return state.view==='query'?loadRecords(state.query.offset):refresh();
+  }
+  if(kind==='refreshInterval'){
+   if(!admin)return;
+   await api('refreshInterval',{seconds:Number(f.elements.seconds.value),expectedRevision:state.dashboard.revision});
+   await refresh();return renderSettings();
   }
   if(kind==='enabled'){await api('configuration',{enabled:f.elements.enabled.checked,expectedRevision:state.dashboard.revision});return refresh();}
   if(kind==='schedule'){const definitions=Array.from(root.querySelectorAll('.sr-rule')).map(row=>({id:row.dataset.id,label:row.querySelector('[name="label"]').value,start:row.querySelector('[name="start"]').value,end:row.querySelector('[name="end"]').value,days:Array.from(row.querySelectorAll('input[type="checkbox"]:checked')).map(x=>Number(x.value))}));await api('configuration',{enabled:state.dashboard.enabled,expectedRevision:state.dashboard.revision,schedule:{effectiveDate:f.elements.effectiveDate.value,definitions}});return refresh();}
