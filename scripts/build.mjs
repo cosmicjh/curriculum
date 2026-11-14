@@ -19,6 +19,7 @@ await copyFile(resolve(course,'index.html'),resolve(courseDist,'view.html'));
 await cp(resolve(course,'shared'),resolve(courseDist,'shared'),{recursive:true});
 const bundle=await build({entryPoints:[resolve(root,'src/worker.js')],bundle:true,write:false,format:'esm',platform:'browser'});
 if(/SpreadsheetApp|PropertiesService|google\.script|script\.google/.test(bundle.outputFiles[0].text))throw Error('Legacy server dependency found');
+if(/exportSolverModel|시간표_솔버모델/.test(bundle.outputFiles[0].text))throw Error('Browser timetable model found in Worker bundle');
 console.log('Workers Static Assets build complete. Student data and server files are excluded.');
 
 await mkdir(resolve(dist,'class-swap'),{recursive:true});

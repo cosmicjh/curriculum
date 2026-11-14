@@ -278,10 +278,38 @@
   function mergeLinks(data){Object.assign(state.admin,{warnings:data.warnings,blocks:data.blocks,teachers:data.teachers});state.admin.store.overrides=data.overrides;state.admin.store.blocks=data.manualBlocks;if(data.sections){state.admin.store.sections=data.sections;state.admin.sectionsRevision=data.meta.sectionsRevision;state.admin.loaded.sections=true;}state.admin.lessonCache={};if(data.teacher)state.admin.lessonCache[data.teacher]=data.lessons;state.admin.loaded.links=true;}
   async function ensureAdminTab(tab){
     const admin=state.admin;if(!admin.loaded)admin.loaded={};if(!admin.lessonCache)admin.lessonCache={};
+    if(tab==='timetable')await loadSolver();
     if(tab==='students'&&!admin.loaded.students){const data=await call('adminBootstrap',{},'admin');admin.store.students=data.store.students;admin.loaded.students=true;useMeta(data.meta);}
     if(tab==='sections'&&!admin.loaded.sections){const data=await call('adminSections',{},'admin');admin.store.sections=data.sections;admin.sectionsRevision=data.sectionsRevision;admin.loaded.sections=true;useMeta(data.meta);}
     if(['imports','links'].includes(tab)&&!admin.loaded.links){const data=await call('adminLinks',{},'admin');mergeLinks(data);useMeta(data.meta);}
     if(tab==='settings'&&!admin.loaded.settings){const data=await call('adminSettings',{},'admin');Object.assign(admin,{backups:data.backups,terms:data.terms});admin.loaded.settings=true;useMeta(data.meta);}
+  }
+  async function loadSolver(){
+    if(state.route!=='admin'||!token('admin'))return;
+    const admin=state.admin;admin.solver=null;
+    try{
+      const [{exportSolverModel},workspace]=await Promise.all([
+        import('../course-allocation/shared/timetable-model.js?v='+encodeURIComponent(window.TIMETABLE_CONFIG?.assetVersion||'1')),
+        call('courseWorkspace',{role:'admin',path:'/workspace',method:'GET',data:{all:true}},'admin')
+      ]);
+      const {global,parts,revisions}=workspace,term=global.school.year+'-'+global.school.semester;
+      if(term!==admin.store.term)throw Error('시수배당표 학기('+term+')가 현재 학기('+admin.store.term+')와 다릅니다. 시수배당표에서 학기를 확인하세요.');
+      const byId=new Map(parts.map(p=>[p.department.id,p])),ordered=global.departmentIds.map(id=>byId.get(id));
+      if(ordered.some(p=>!p))throw Error('전체 교과군을 불러오지 못했습니다. 새로고침해 주세요.');
+      const source={school:global.school,departments:ordered.map(p=>p.department),departmentRevisions:revisions};
+      for(const key of ['teachers','courses','groups','assignments','unmapped'])source[key]=ordered.flatMap(p=>p[key]);
+      admin.solver=exportSolverModel(source,{exportedAt:new Date().toISOString()});
+    }catch(error){
+      admin.solver={model:null,errors:[error.message],warnings:[]};
+      if(['AUTH_REQUIRED','TERM_CHANGED'].includes(error.code))throw error;
+    }
+  }
+  function renderSolver(root){
+    const result=state.admin.solver,errors=result?.errors||[],warnings=result?.warnings||[];
+    root.innerHTML='<section aria-labelledby="solver-heading"><h2 id="solver-heading">확정 배당 점검</h2><div role="status" aria-live="polite"><p class="error">'+(!result?'배당 자료를 불러오고 있습니다.':errors.length?'오류 '+errors.length+'건 · 배당표를 수정한 뒤 새로고침하세요.':'점검을 통과했습니다.')+'</p></div>'+
+      (errors.length?'<h3>오류</h3><ul class="notice-list" tabindex="0" aria-label="내보내기 오류">'+errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>':'')+
+      (warnings.length?'<h3>경고</h3><ul class="notice-list" tabindex="0" aria-label="내보내기 경고">'+warnings.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>':'')+
+      '<button class="primary" data-action="export-solver" '+(!result?.model||errors.length?'disabled':'')+'>솔버 모델 내보내기</button></section><section class="settings-section" aria-labelledby="solver-local-heading"><h2 id="solver-local-heading">학교 PC에서 계산</h2><ol class="notice-list"><li>timetable-solver 폴더의 setup.cmd를 최초 1회 실행합니다.</li><li>start.cmd 바로가기로 http://127.0.0.1:8765를 엽니다.</li><li>내보낸 JSON을 선택한 뒤 계산합니다.</li><li>유효한 이전 결과를 시작점으로 쓰면 더 빠릅니다.</li></ol></section>';
   }
   async function teacherLessons(teacher){if(!teacher||state.admin.lessonCache[teacher])return;const data=await call('adminLessons',{teacher},'admin');state.admin.lessonCache[teacher]=data.lessons;useMeta(data.meta);}
   async function loadAdmin(force=false){
@@ -300,8 +328,8 @@
     }
     useMeta(state.admin.meta);await ensureAdminTab(state.adminTab);renderAdmin();
   }
-  function renderAdmin(){if(!token('admin')){renderLogin('admin');return;}const tabs=[studentMenu,['sectionAssignment','분반배정'],['students','학생'],['hours','시수배당표'],['allocation','이동수업 배치표'],['classSwap','결보강'],...(state.admin.meta.features?.studyroom?[['studyroom','스터디룸']]:[]),['settings','설정']];TTNavigation.render(tabs,'admin',['links','imports','sections'].includes(state.adminTab)?'settings':state.adminTab);showScreen(head('',[studentMenu[0],'sectionAssignment','allocation','hours'].includes(state.adminTab)?'':'<button data-action="refresh-admin">새로고침</button>')+'<div class="admin-layout"><div id="admin-content" class="admin-content"></div></div>',true);renderAdminContent();}
-  function renderAdminContent(){const root=$('#admin-content');if(!root||!state.admin)return;if(state.adminTab===studentMenu[0]){root.innerHTML=studentContent();return;}if(state.adminTab==='sectionAssignment')showSectionAssignment();if(state.adminTab==='hours')showCourse('admin');if(state.adminTab==='allocation')run(()=>showAllocation(root,'admin'));if(state.adminTab==='classSwap')run(()=>showSwap('admin',root));if(state.adminTab==='studyroom')run(()=>showStudyroom(root,'admin'));if(state.adminTab==='students')renderStudents(root);if(state.adminTab==='sections')renderSections(root);if(state.adminTab==='imports')renderImports(root);if(state.adminTab==='links')renderLinks(root);if(state.adminTab==='settings')renderSettings(root);
+  function renderAdmin(){if(!token('admin')){renderLogin('admin');return;}const tabs=[studentMenu,['sectionAssignment','분반배정'],['students','학생'],['hours','시수배당표'],['timetable','시간표'],['allocation','이동수업 배치표'],['classSwap','결보강'],...(state.admin.meta.features?.studyroom?[['studyroom','스터디룸']]:[]),['settings','설정']];TTNavigation.render(tabs,'admin',['links','imports','sections'].includes(state.adminTab)?'settings':state.adminTab);showScreen(head('',[studentMenu[0],'sectionAssignment','allocation','hours'].includes(state.adminTab)?'':'<button data-action="refresh-admin">새로고침</button>')+'<div class="admin-layout"><div id="admin-content" class="admin-content"></div></div>',true);renderAdminContent();}
+  function renderAdminContent(){const root=$('#admin-content');if(!root||!state.admin)return;if(state.adminTab===studentMenu[0]){root.innerHTML=studentContent();return;}if(state.adminTab==='sectionAssignment')showSectionAssignment();if(state.adminTab==='hours')showCourse('admin');if(state.adminTab==='timetable')renderSolver(root);if(state.adminTab==='allocation')run(()=>showAllocation(root,'admin'));if(state.adminTab==='classSwap')run(()=>showSwap('admin',root));if(state.adminTab==='studyroom')run(()=>showStudyroom(root,'admin'));if(state.adminTab==='students')renderStudents(root);if(state.adminTab==='sections')renderSections(root);if(state.adminTab==='imports')renderImports(root);if(state.adminTab==='links')renderLinks(root);if(state.adminTab==='settings')renderSettings(root);
     if(['settings','links','imports','sections'].includes(state.adminTab)){
       const nav=document.createElement('nav');nav.className='tabs settings-nav';nav.setAttribute('aria-label','설정 메뉴');
       nav.innerHTML=[['settings','학기·운영 설정'],['imports','자료 등록'],['sections','선택분반']].map(([v,label])=>'<button data-action="admin-tab" data-tab="'+(v==='settings'?'term-settings':v)+'"'+((state.adminTab==='links'?'imports':state.adminTab)===v?' aria-current="page"':'')+'>'+label+'</button>').join('');
@@ -472,6 +500,7 @@
       case 'student-tab':renderStudent();break;
       case 'teacher-tab':if(el.dataset.tab==='hours'&&!state.teacherBoot.meta.settings.courseAllocationTeachers){courseNotice('관리자 설정에서 시수배당표 사용을 허용한 뒤 열 수 있습니다.');return;}if(el.dataset.tab==='roster')await ensureClassCatalog();state.teacherTab=el.dataset.tab;renderTeacher();break;
       case 'admin-tab':state.adminTab=el.dataset.tab==='term-settings'?'settings':el.dataset.tab;if(state.admin.reloadAfterSwap){await loadAdmin();delete state.admin.reloadAfterSwap;}else{await ensureAdminTab(state.adminTab);renderAdmin();}break;
+      case 'export-solver':{if(state.route!=='admin'||!token('admin')||state.adminTab!=='timetable')return;const result=state.admin?.solver;if(!result?.model||result.errors.length)return;download(new Blob([JSON.stringify(result.model,null,2)],{type:'application/json'}),'시간표_솔버모델_'+result.model.source.term+'.json');break;}
       case 'refresh-admin':await loadAdmin(true);toast('새로고침했습니다.');break;
       case 'course-transfer':await previewCourseTransfer();break;
       case 'bulk-import':openBulkImport(el.dataset.kind);break;

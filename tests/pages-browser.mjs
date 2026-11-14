@@ -41,7 +41,7 @@ try{
   await page.goto(pages+'/curriculum/admin.html');await idle();assert(await panel.isHidden());assert(await opener.isHidden());await login();
   assert.equal(await page.title(),title);assert.equal(await panel.locator('.program-title').innerText(),title);
   assert.equal(await panel.locator('.sidebar-credit').innerText(),credit);
-  assert.deepEqual(await panel.locator('nav button').allTextContents(),['학생 시간표','분반배정','학생','시수배당표','이동수업 배치표','결보강','설정']);
+  assert.deepEqual(await panel.locator('nav button').allTextContents(),['학생 시간표','분반배정','학생','시수배당표','시간표','이동수업 배치표','결보강','설정']);
   assert.equal(await selected.getAttribute('aria-current'),'page');
   await page.screenshot({path:'test-results/curriculum-sidebar-desktop.png'});
   const expanded=await page.locator('#workspace').evaluate(el=>el.clientWidth);
@@ -142,6 +142,11 @@ try{
   await page.locator('[data-action=logout]').click();await idle();assert.equal(await page.locator('#login-role').inputValue(),'student');assert(await page.locator('#sidebar').isHidden());assert(await page.locator('[data-sidebar-open]').isHidden());
   await page.goto(pages+'/curriculum/admin.html');await idle();await login();await page.locator('[data-action=edit-student]').first().click();await page.locator('#edit-name').waitFor();await idle();await page.locator('#edit-name').fill('Pages입력보호');await page.locator('form[data-form=save-student] button.primary').click();await page.waitForFunction(()=>!document.querySelector('#modal').open);await idle();assert.equal((await h.api('adminStudent',{id:'student-one'},cookieAdmin.cookie)).data.student.name,'Pages입력보호');assert.equal(new URL(page.url()).origin,pages);
   const storage=await page.evaluate(()=>({local:{...localStorage},session:{...sessionStorage}}));assert(!/[a-f0-9]{64}/.test(JSON.stringify(storage)));assert.equal(JSON.parse(storage.session['timetable.admin']).token,'memory');
+ });
+ await step('Pages loads the admin solver tab and blocks a different course term',async()=>{
+  await clickMenu(page,page.locator('.admin-nav [data-tab=timetable]'));await idle();
+  assert(await page.getByRole('button',{name:'솔버 모델 내보내기',exact:true}).isDisabled());
+  assert.match(await page.locator('[aria-label="내보내기 오류"]').innerText(),/학기.*다릅니다/);
  });
  await step('Pages opens the course allocation worksheet with the same in-memory admin session',async()=>{
   await clickMenu(page,page.locator('.admin-nav [data-tab=hours]'));await idle();
