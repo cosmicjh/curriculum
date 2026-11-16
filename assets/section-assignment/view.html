@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>분반배정</title>
+<link rel="stylesheet" href="../course-allocation/shared/ui.css">
 <link rel="stylesheet" href="../assets/font.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -28,7 +29,7 @@
   <h2>분반 코드</h2>
 
   <div style="overflow-x:auto"><table class="sheet-table" id="sheetsTable"></table></div>
-  <div style="margin-top:12px"><button class="btn secondary" id="saveSettingsBtn">설정 저장</button>
+  <div style="margin-top:12px"><button class="btn primary" id="saveSettingsBtn">설정 저장</button>
   <button class="btn secondary" id="loadSettingsBtn">설정 불러오기</button>
   <button class="btn secondary" id="courseCountsBtn">시수배당 분반 수 불러오기</button>
   <input type="file" id="settingsFile" accept=".json" hidden><p id="courseCountsStatus" class="desc" role="status"></p></div>
@@ -53,7 +54,7 @@
   <h2>2+1 결합</h2>
 
   <div id="creditPairList"></div>
-  <button class="btn secondary" id="addCreditPairBtn">+ 2+1 결합 추가</button>
+  <button class="btn secondary" id="addCreditPairBtn">2+1 결합 추가</button>
   <span class="hint" id="creditPairHint"></span>
 </div>
 
@@ -89,7 +90,7 @@
 
   <datalist id="coursesList"></datalist>
   <div id="bigsecList"></div>
-  <button class="btn secondary" id="addBigsecBtn" disabled>+ 과목 추가</button>
+  <button class="btn secondary" id="addBigsecBtn" disabled>과목 추가</button>
   <span class="hint" id="bigsecHint"></span>
 </div>
 
@@ -98,7 +99,7 @@
 
   <datalist id="studentsList"></datalist>
   <div id="avoidList"></div>
-  <button class="btn secondary" id="addAvoidBtn" disabled>+ 학생 추가</button>
+  <button class="btn secondary" id="addAvoidBtn" disabled>학생 추가</button>
   <span class="hint" id="avoidHint"></span>
 </div>
 
@@ -106,7 +107,7 @@
   <h2>교사 공유</h2>
 
   <div id="teacherList"></div>
-  <button class="btn secondary" id="addTeacherBtn" disabled>+ 과목 묶음 추가</button>
+  <button class="btn secondary" id="addTeacherBtn" disabled>과목 묶음 추가</button>
   <span class="hint" id="teacherHint"></span>
 </div>
 
@@ -118,7 +119,7 @@
 
 <div class="card hidden" id="runCard">
   <h2>배정 실행</h2>
-  <button class="btn" id="runBtn">분반 배정 실행</button>
+  <button class="btn primary" id="runBtn">분반 배정 실행</button>
   <button class="btn secondary hidden" id="cancelBtn" disabled>계산 중지</button>
   <button class="btn secondary hidden" id="downloadBtn" style="margin-left: 8px;">결과 xlsx 다운로드</button>
 

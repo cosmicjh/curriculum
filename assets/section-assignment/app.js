@@ -486,7 +486,7 @@ function renderCourseConfig() {
         <td>${escapeHtml(sheet.name)}</td><td>${escapeHtml(c)}</td><td>${applicants}</td>
         <td><input type="number" min="1" max="10" value="${sheet.courseCredits[c] || 3}" aria-label="${escapeHtml(c)} 학점" data-cfg="credit" data-si="${si}" data-course="${key}" style="min-width:70px"></td>
         <td><input type="number" min="1" max="100" value="${nsec}" aria-label="${escapeHtml(c)} 분반 수" data-cfg="sections" data-si="${si}" data-course="${key}" style="min-width:70px"></td>
-        <td style="white-space:nowrap;color:var(--ink-dim);">${range}</td>
+        <td style="white-space:nowrap;color:var(--ui-ink-2);">${range}</td>
       </tr>`);
     }
   }
@@ -548,10 +548,10 @@ function renderCreditPairs() {
     const opt2 = ['<option value="">2학점 과목 선택</option>'].concat(twos.map(c=>`<option value="${escapeHtml(c)}" ${c===p.course2?'selected':''}>${escapeHtml(c)}</option>`)).join('');
     const opt1 = ['<option value="">1학점 과목 선택</option>'].concat(ones.map(c=>`<option value="${escapeHtml(c)}" ${c===p.course1?'selected':''}>${escapeHtml(c)}</option>`)).join('');
     div.innerHTML = `
-      <div class="avoid-field"><label>시트</label><select class="pair-sheet" style="padding:7px;border:1px solid var(--line);">${sheetOptions}</select></div>
-      <div class="avoid-field"><label>2학점 과목</label><select class="pair-2" style="padding:7px;border:1px solid var(--line);">${opt2}</select></div>
-      <div class="avoid-field"><label>1학점 과목</label><select class="pair-1" style="padding:7px;border:1px solid var(--line);">${opt1}</select></div>
-      <button class="btn-remove-pair" title="삭제">×</button>`;
+      <div class="avoid-field"><label>시트</label><select class="pair-sheet" style="padding:7px;border:1px solid var(--ui-line);">${sheetOptions}</select></div>
+      <div class="avoid-field"><label>2학점 과목</label><select class="pair-2" style="padding:7px;border:1px solid var(--ui-line);">${opt2}</select></div>
+      <div class="avoid-field"><label>1학점 과목</label><select class="pair-1" style="padding:7px;border:1px solid var(--ui-line);">${opt1}</select></div>
+      <button class="btn-remove-pair" title="삭제">삭제</button>`;
     div.querySelector('.pair-sheet').addEventListener('change', e => { p.sheetName=e.target.value; p.course2=''; p.course1=''; renderCreditPairs(); });
     div.querySelector('.pair-2').addEventListener('change', e => { p.course2=e.target.value; });
     div.querySelector('.pair-1').addEventListener('change', e => { p.course1=e.target.value; });
@@ -641,7 +641,7 @@ function renderAvoidPairs() {
         <input type="text" list="studentsList" class="avoid-target-input"
                placeholder="학생 검색">
       </div>
-      <button class="btn-remove-pair" title="삭제">×</button>
+      <button class="btn-remove-pair" title="삭제">삭제</button>
     `;
     const tagsEl = div.querySelector('.target-tags');
     (pair.targetRows || []).forEach(trow => {
@@ -742,7 +742,7 @@ function renderTeacherGroups() {
                placeholder="과목 검색">
         <div class="bigsec-hint">${escapeHtml(group.sheetName ? '시트: '+group.sheetName : '')}</div>
       </div>
-      <button class="btn-remove-pair" title="삭제">×</button>
+      <button class="btn-remove-pair" title="삭제">삭제</button>
     `;
     const tags = div.querySelector('.target-tags');
     (group.courses || []).forEach(cName => {
@@ -819,7 +819,7 @@ function renderCoverage() {
     if (!possible) coverageEnabled[sheet.name] = false;
 
     const div = document.createElement('div');
-    div.style.cssText = 'padding:12px;background:#fafafa;border-radius:6px;border:1px solid var(--line);margin-bottom:10px;';
+    div.style.cssText = 'padding:12px;background:#fafafa;border-radius:6px;border:1px solid var(--ui-line);margin-bottom:10px;';
     const id = `cov_${loadedData.sheets.indexOf(sheet)}`;
     const courseChecks = Object.keys(sheet.courses).map((c, ci) => {
       const checked = selected.includes(c) ? 'checked' : '';
@@ -840,7 +840,7 @@ function renderCoverage() {
           possible ? `${nSelectedSecs}분반 · ${nGroups}코드` :
           `${nSelectedSecs}분반 · ${nGroups}코드 — 분반 부족`}
       </div>
-      <div style="margin-top:8px;padding-top:7px;border-top:1px solid var(--line);">${courseChecks}</div>
+      <div style="margin-top:8px;padding-top:7px;border-top:1px solid var(--ui-line);">${courseChecks}</div>
     `;
     coverageList.appendChild(div);
 
@@ -904,7 +904,7 @@ function renderBigsecList() {
         <input type="number" class="bigsec-parallel-limit" min="1" max="100" step="1" value="${entry.maxParallel}" aria-label="${escapeHtml(entry.course || '대분반 과목')} 동시 분반 상한">
 
       </div>
-      <button class="btn-remove-pair" title="삭제">×</button>
+      <button class="btn-remove-pair" title="삭제">삭제</button>
     `;
     const cInp = div.querySelector('.bigsec-course');
     div.querySelector('.bigsec-parallel-limit').addEventListener('change',e=>{

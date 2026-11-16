@@ -1,5 +1,24 @@
 # 성능 측정과 공통 화면 정리 · 2026-11-04
 
+## 2026-11-16 UI 통일·글꼴 범위 지정
+
+승인 설계 `course-allocation/docs/design/ui-unification-optimization.md`에 따라 공통 CSS를 먼저 불러오고, 전체 Pretendard의 `unicode-range`를 `timetable-ui.woff2` 문자표의 여집합으로 제한했다. 두 WOFF2 파일은 변경하지 않았다. 새 글꼴 의존성과 서버 변경은 없다.
+
+동일한 `scripts/benchmark-browser.mjs`, 로컬 Miniflare/D1 가상 자료, Edge FHD, 지연 40ms·다운로드 2MB/s 조건에서 측정했다. 아래는 각 1회 관측값이며 통계적 개선이나 운영 성능을 뜻하지 않는다.
+
+| 항목 | 변경 전 | 변경 후 |
+| --- | ---: | ---: |
+| 첫 문서 FCP | 460ms | 436ms |
+| 첫 문서+글꼴 준비 | 585.00ms | 560.02ms |
+| 다음 문서 FCP | 268ms | 236ms |
+| 다음 문서+글꼴 준비 | 311.89ms | 258.61ms |
+| 첫 문서 글꼴 본문 전송량 | 450,028B | 450,028B |
+| 다음 문서 글꼴 전송량 | 0B | 0B |
+
+현재 main은 이미 일반 로그인 화면에서 서브셋만 받았다. 따라서 설계의 과거 수치인 전체 글꼴 2,057,688B를 이번 변경 전 기준으로 사용할 수 없고, **현재 기준에서 첫 방문 글꼴 전송량 감소는 관측되지 않았다**. 일반 UI에서는 전체 글꼴 요청이 없고 서브셋 밖 한글에는 전체 글꼴을 사용할 수 있음을 `tests/ui-browser.mjs`로 검사한다. 원시 결과는 Git 제외 `test-results/ui-before.json`, `test-results/ui-after.json`에 있다.
+
+공통 CSS의 임시 사본은 `vendor/course-allocation/shared/ui.css`이며 마지막 통합 단계에서 상위 저장소 원본으로 교체해야 한다. 교체 시 `Timetable UI` 우선 글꼴 스택을 보존하고 CSS 해시 기준 및 UI 시험을 다시 갱신·실행한다.
+
 운영 자료·권한·백업·동시 수정 보호를 유지하면서 반복 계산, 불필요한 D1 쓰기와 글꼴 중복 전송을 줄였다. 새 DB, 유료 서비스, 자동 실행 훅은 추가하지 않았다.
 
 ## 측정 조건

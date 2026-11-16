@@ -19,7 +19,7 @@
     "test:browser": "node tests/browser.mjs && node tests/solver-browser.mjs && node tests/browser-solver.mjs",
     "test:section-assignment": "node tests/section-assignment-browser.mjs",
     "test:worker": "node tests/wrangler.mjs",
-    "test:all": "pnpm test && pnpm test:browser && pnpm test:section-assignment && pnpm test:pages-browser && pnpm test:worker && pnpm test:teacher-tools && pnpm test:allocation && pnpm test:studyroom-browser",
+    "test:all": "pnpm test && pnpm test:browser && pnpm test:section-assignment && pnpm test:pages-browser && pnpm test:worker && pnpm test:teacher-tools && pnpm test:allocation && pnpm test:studyroom-browser && pnpm test:ui",
     "test:studyroom-browser": "node tests/studyroom-browser.mjs",
     "test:allocation": "node tests/allocation-browser.mjs",
     "benchmark": "node scripts/benchmark.mjs",
@@ -28,7 +28,8 @@
     "test:remote": "node scripts/verify-remote.mjs",
     "build:pages": "node scripts/build-pages.mjs",
     "test:pages-browser": "node tests/pages-browser.mjs",
-    "test:teacher-tools": "node tests/teacher-tools-browser.mjs"
+    "test:teacher-tools": "node tests/teacher-tools-browser.mjs",
+    "test:ui": "node tests/ui-browser.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

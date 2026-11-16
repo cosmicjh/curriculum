@@ -264,9 +264,9 @@
     $('#roster-section').innerHTML=options(choices,section,'선택');
   }
   function rosterHTML(r){let html='<table class="roster-table"><colgroup>'+Array.from({length:21},()=>'<col>').join('')+'</colgroup><thead><tr>'+['연번','학년','반','번호','이름','비고',...Array(15).fill('')].map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>';r.students.forEach((s,i)=>{html+='<tr>'+[i+1,s.grade,s.classNum,s.number,s.name,s.note,...Array(15).fill('')].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>';});return html+'</tbody></table>';}
-  function showRoster(r){state.roster=r;openDialog('<div class="roster-header"><h2>'+esc(r.title)+' <small>'+esc(r.detail)+' · '+r.students.length+'명</small></h2><div><button data-action="print-roster">인쇄</button><button class="modal-close" data-action="close-modal" aria-label="닫기">×</button></div></div><div class="table-scroll">'+rosterHTML(r)+'</div>',true);}
+  function showRoster(r){state.roster=r;openDialog('<div class="roster-header"><h2>'+esc(r.title)+' <small>'+esc(r.detail)+' · '+r.students.length+'명</small></h2><div><button data-action="print-roster">인쇄</button><button class="modal-close" data-action="close-modal" aria-label="닫기">닫기</button></div></div><div class="table-scroll">'+rosterHTML(r)+'</div>',true);}
   function openDialog(html,wide=false){modal.classList.toggle('wide',wide);modal.innerHTML=html;if(!modal.open)modal.showModal();}
-  function modalHead(title){return '<div class="modal-head"><h2>'+esc(title)+'</h2><button class="modal-close" data-action="close-modal" aria-label="닫기">×</button></div>';}
+  function modalHead(title){return '<div class="modal-head"><h2>'+esc(title)+'</h2><button class="modal-close" data-action="close-modal" aria-label="닫기">닫기</button></div>';}
   function useMeta(meta){if(!meta)return;
     if(state.studentTimetable&&(state.studentTimetable.meta.revision!==meta.revision||state.studentTimetable.meta.term!==meta.term))state.studentTimetable=null;
     if(state.meta&&state.meta.term!==meta.term){

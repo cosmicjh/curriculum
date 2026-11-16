@@ -1,0 +1,16 @@
+/* Source: course-allocation/shared/ui.css. Temporary copy; replaced from the original during final vendor synchronization. */
+:root{--ui-ink:#1f1f1f;--ui-ink-2:#595959;--ui-ink-3:#767676;--ui-line:#e0e0e0;--ui-line-strong:#c8c8c8;--ui-paper:#fff;--ui-subtle:#f5f5f5;--ui-radius:4px}
+:where(html,:host){font-family:var(--ui-font);color:var(--ui-ink);background:var(--ui-paper);font-synthesis:none;color-scheme:light}
+:where(button,input,select,textarea){font:inherit}
+button,::file-selector-button{border:0;border-radius:0;background:transparent;color:var(--ui-ink-2);padding:6px 10px;min-height:32px;cursor:pointer;text-underline-offset:3px;touch-action:manipulation}
+button:hover,::file-selector-button:hover{color:var(--ui-ink);text-decoration:underline}
+button.primary{color:var(--ui-ink);font-weight:650;text-decoration:underline}
+button:disabled{color:var(--ui-ink-3);text-decoration:none;opacity:1;cursor:default}
+:where(button,a,input,select,textarea,summary,[tabindex]):focus-visible{outline:2px solid var(--ui-ink);outline-offset:2px}
+:where(input,select,textarea){border:1px solid var(--ui-line-strong);border-radius:var(--ui-radius);background:var(--ui-paper);color:var(--ui-ink);caret-color:var(--ui-ink)}
+input[type=file]{border:0;background:transparent;padding:0;max-width:100%;font:inherit;color:var(--ui-ink-2)}
+:where(input,textarea)::placeholder{color:var(--ui-ink-3);opacity:1}
+@media(max-width:640px){button,::file-selector-button{min-height:44px}}
+:where(.card,.step-panel){border:0;border-top:1px solid var(--ui-line);border-radius:0;box-shadow:none}
+::selection{background:var(--ui-line);color:var(--ui-ink)}
+@media(max-width:640px){button,::file-selector-button{min-height:44px}button{min-width:44px}}

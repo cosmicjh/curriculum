@@ -60,8 +60,8 @@ try{
   assert(await sr.locator('[data-seat="99"] [data-number]').evaluate(e=>e.scrollWidth<=e.clientWidth),'mobile seat shows all five student-number digits');
   assert(await sr.locator('button').evaluateAll(buttons=>buttons.every(button=>getComputedStyle(button).borderTopWidth==='0px')));
   assert.equal(await sr.locator('.sr-seat-scroll').evaluate(el=>getComputedStyle(el).borderTopWidth),'0px');
-  assert.equal(await sr.locator('[data-seat="98"]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(244, 244, 244)');
-  assert.equal(await sr.locator('[data-seat="99"]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(232, 241, 220)');
+  assert.equal(await sr.locator('[data-seat="98"]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(245, 245, 245)');
+  assert.equal(await sr.locator('[data-seat="99"]').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(236, 236, 236)');
   assert(await sr.locator('.sr-attendance-toolbar').evaluate(el=>{
    const refresh=el.querySelector('[data-sr=refresh]').getBoundingClientRect();
    return Math.abs(refresh.right-el.getBoundingClientRect().right)<1;
@@ -193,7 +193,7 @@ try{
   assert(await noteFillsCell(),'the note button fills its entire table cell');
   const noteCell=results.locator('.sr-query-note').first();await noteCell.hover();
   assert.equal(await noteCell.evaluate(el=>getComputedStyle(el).backgroundColor),'rgba(0, 0, 0, 0)');
-  assert.equal(await noteCell.locator('button').evaluate(el=>getComputedStyle(el).textDecorationLine),'none');
+  assert.equal(await noteCell.locator('button').evaluate(el=>getComputedStyle(el).textDecorationLine),'underline');
   await teacher.screenshot({path:'test-results/studyroom/query-search-note-mobile.png',fullPage:true});
   await teacher.screenshot({path:'.impeccable/review/mobile.png',fullPage:true});
   await results.locator('[data-sr=readNote]').click({position:{x:1,y:1}});
