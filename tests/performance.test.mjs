@@ -1,6 +1,38 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {harness} from './harness.mjs';import {backup,fixture,allocationFixture} from './fixture.mjs';
 import {validateSchedule} from '../src/class-swap.js';
 import {performanceFixture} from './performance-fixture.mjs';
+import {setupStudyroom} from './studyroom-fixture.mjs';
+
+test('full allocation snapshots read assignments once and preserve the entire pre-save store',async t=>{
+ const h=await harness();t.after(()=>h.close());const admin=await h.login(),{store,board}=performanceFixture();
+ assert((await h.mutation('restore',{backup:{format:'school-timetable-backup',schemaVersion:1,store}},admin.cookie)).ok);
+ assert((await h.mutation('saveAllocation',{board,compact:true},admin.cookie)).ok);
+ const before=await h.mutation('backup',{},admin.cookie);assert(before.ok);
+ board.grades[0].homerooms.r0='가상담임수정';
+ const saved=await h.mutation('saveAllocation',{board,compact:true},admin.cookie);assert(saved.ok,JSON.stringify(saved.error));
+ assert(Number(saved.headers.get('x-d1-rows-read'))<9000,'full backup avoids re-reading 900 student rows through the assignment join');
+ const backups=(await h.api('adminHistory',{},admin.cookie)).data.backups;
+ const snapshot=await h.api('downloadBackup',{backupId:backups[0].id},admin.cookie);assert(snapshot.ok);
+ assert.deepEqual(snapshot.data.store,before.data.result.backup.store);
+ assert.equal(snapshot.data.store.students.length,900);
+ assert.equal(snapshot.data.store.students.reduce((n,s)=>n+Object.keys(s.choices).length,0),7200);
+});
+
+test('one-person studyroom history does not scan other students attendance',async t=>{
+ const h=await harness({studyroom:true});t.after(()=>h.close());const {api,teacher}=await setupStudyroom(h);
+ const schedule=(await h.sql('SELECT id FROM sr_schedules LIMIT 1')).results[0].id;
+ await h.sql("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<201) INSERT INTO sr_sessions(id,date,label,academic_year,schedule_id,starts_at,ends_at) SELECT 'history-'||i,'2026-10-01','아침',2026,?,'2026-10-01T00:00:00Z','2026-10-01T10:00:00Z' FROM n",schedule);
+ await h.sql("INSERT INTO sr_attendance(id,session_id,person_id,term_id,student_id,student_number,name,seat,state,first_at,last_at,version,note) SELECT se.id||s.id,se.id,l.person_id,s.term_id,s.id,'3010'||s.number,s.name,'0'||s.number,'active',se.starts_at,se.starts_at,1,'' FROM sr_sessions se CROSS JOIN students s JOIN student_person_links l ON l.term_id=s.term_id AND l.student_id=s.id WHERE s.id='student-two' OR se.id IN ('history-1','history-2')");
+ const person=(await h.sql("SELECT person_id FROM student_person_links WHERE student_id='student-one'")).results[0].person_id;
+ const args={from:'2026-10-01',to:'2026-10-01',personId:person,sessionLabel:'오전'};
+ for(const scope of [{},{recordsOnly:true},{calendarOnly:true}]){
+  const result=await api('query',{...args,...scope},teacher.cookie);assert(result.ok);
+  assert(Number(result.headers.get('x-d1-rows-read'))<50,'existing person index bounds all three query variants');
+  if(result.data.rows){assert.equal(result.data.rows.length,2);assert(result.data.rows.every(r=>r.person_id===person));assert.equal(result.data.next,null);}
+  if(result.data.calendar)assert.deepEqual(result.data.calendar,[{date:'2026-10-01',records:2,students:1}]);
+  if(result.data.totals)assert.deepEqual(result.data.totals,{records:2,days:1,students:1});
+ }
+});
 
 test('class timetable lookup reads the selected class instead of every student assignment',async t=>{
  const h=await harness();t.after(()=>h.close());const {cookie}=await h.login(),{store}=performanceFixture();

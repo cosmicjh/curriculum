@@ -23,6 +23,13 @@ try{
   const allowFill='#sidebar-menu button,.cell-button,.allocation-cell,.tt .cell,.sr-seat-grid button,.sr-calendar-day';
   const failures=[];
   for(const frame of page.frames()){
+   await frame.waitForFunction(()=>{
+    function ready(root){
+     if([...root.querySelectorAll('link[rel=stylesheet]')].some(link=>!link.sheet))return false;
+     return [...root.querySelectorAll('*')].every(host=>!host.shadowRoot||ready(host.shadowRoot));
+    }
+    return ready(document);
+   });
    failures.push(...await frame.evaluate(({width,allowFill})=>{
     const problems=[];
     if(document.documentElement.scrollWidth>innerWidth+1)problems.push('page overflow');

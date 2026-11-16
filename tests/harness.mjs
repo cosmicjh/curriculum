@@ -6,10 +6,10 @@ import {resolve,sep,extname} from 'node:path';
 import {provisionCredential,randomToken} from '../src/crypto.js';
 import {stretchPassword,newSalt} from '../src/password.js';
 let bundle,bindings;
-export async function harness({frontendOrigin='https://cosmicjh.github.io',studyroom=false,course=false,staticAssets=false}={}){
+export async function harness({frontendOrigin='https://cosmicjh.github.io',studyroom=false,course=false,staticAssets=false,workerScript}={}){
  bundle??=(await build({entryPoints:['tests/worker.mjs'],bundle:true,write:false,format:'esm',platform:'browser'})).outputFiles[0].text;
  if(!bindings){const pepper=randomToken();bindings={PASSWORD_PEPPER:pepper,BOOTSTRAP_TEACHER_HASH:await provisionCredential('1234',pepper,'teacher'),BOOTSTRAP_ADMIN_HASH:await provisionCredential('1234',pepper,'admin')};}
- const mf=new Miniflare({modules:true,script:bundle,compatibilityDate:'2026-07-30',...(staticAssets?{assets:{directory:resolve('dist'),binding:'ASSETS',routerConfig:{has_user_worker:true,static_routing:{user_worker:['/api','/api/*','/__fixture_sql']}}}}:{}),d1Databases:{DB:'timetable-test-'+crypto.randomUUID(),...(course?{COURSE_DB:'course-test-'+crypto.randomUUID()}:{})},bindings:{...bindings,FRONTEND_ORIGIN:frontendOrigin,STUDYROOM_ENABLED:studyroom?'true':'false',STUDYROOM_CRON_ENABLED:studyroom?'true':'false',STUDYROOM_TEST_MODE:studyroom?'true':'false'},host:'127.0.0.1',port:0,log:new Log(LogLevel.ERROR)});
+ const mf=new Miniflare({modules:true,script:workerScript??bundle,compatibilityDate:'2026-07-30',...(staticAssets?{assets:{directory:resolve('dist'),binding:'ASSETS',routerConfig:{has_user_worker:true,static_routing:{user_worker:['/api','/api/*','/__fixture_sql']}}}}:{}),d1Databases:{DB:'timetable-test-'+crypto.randomUUID(),...(course?{COURSE_DB:'course-test-'+crypto.randomUUID()}:{})},bindings:{...bindings,FRONTEND_ORIGIN:frontendOrigin,STUDYROOM_ENABLED:studyroom?'true':'false',STUDYROOM_CRON_ENABLED:studyroom?'true':'false',STUDYROOM_TEST_MODE:studyroom?'true':'false'},host:'127.0.0.1',port:0,log:new Log(LogLevel.ERROR)});
  async function fixtureSql(binding,sql,args){const r=await mf.dispatchFetch('http://localhost/__fixture_sql',{method:'POST',body:JSON.stringify({sql,args,binding})});if(!r.ok)throw Error(await r.text());return r.json();}
  const sql=(query,...args)=>fixtureSql('DB',query,args),courseSql=(query,...args)=>fixtureSql('COURSE_DB',query,args);
  async function migrate(dir,execute){

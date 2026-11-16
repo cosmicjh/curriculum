@@ -73,7 +73,8 @@ async function query(db,ctx,req){
  }
  if(!req.includeCancelled)conditions.push("a.state='active'");
  // Date lookups start with the indexed sessions instead of scanning a whole term's attendance.
- const where=conditions.join(' AND '),base=(req.personId?' FROM sr_attendance a JOIN sr_sessions s ON s.id=a.session_id':' FROM sr_sessions s CROSS JOIN sr_attendance a ON a.session_id=s.id')+' WHERE '+where;
+ // The term index scans everyone's attendance when looking up one person's history.
+ const where=conditions.join(' AND '),base=(req.personId?' FROM sr_attendance a INDEXED BY sr_attendance_person JOIN sr_sessions s ON s.id=a.session_id':' FROM sr_sessions s CROSS JOIN sr_attendance a ON a.session_id=s.id')+' WHERE '+where;
  const records='SELECT a.*,s.date,'+label+' AS label,s.academic_year'+base+' ORDER BY s.date DESC,s.starts_at,s.id,a.student_number';
  if(req.recordsOnly===true){
   const rows=await db.all(records+' LIMIT 201 OFFSET ?',...args,offset);
