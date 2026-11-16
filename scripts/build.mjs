@@ -24,6 +24,7 @@ await writeFile(resolve(lib,'NOTICE.txt'),'or-tools-wasm 1.0.0 and OR-Tools CP-S
 const course=resolve(root,'vendor/course-allocation'),courseDist=resolve(dist,'course-allocation');
 await mkdir(courseDist,{recursive:true});
 await copyFile(resolve(course,'index.html'),resolve(courseDist,'view.html'));
+await cp(resolve(course,'assets'),resolve(courseDist,'assets'),{recursive:true});
 await cp(resolve(course,'shared'),resolve(courseDist,'shared'),{recursive:true});
 const bundle=await build({entryPoints:[resolve(root,'src/worker.js')],bundle:true,write:false,format:'esm',platform:'browser'});
 if(/SpreadsheetApp|PropertiesService|google\.script|script\.google/.test(bundle.outputFiles[0].text))throw Error('Legacy server dependency found');

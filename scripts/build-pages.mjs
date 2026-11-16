@@ -16,6 +16,7 @@ source.push(...await Promise.all(['app.js','view.html'].map(name=>readFile(resol
 for(const file of (await readdir(resolve(output,'section-assignment'))).sort())source.push(await readFile(resolve(output,'section-assignment',file),'utf8'));
 const course=resolve(output,'course-allocation');
 source.push(await readFile(resolve(course,'view.html'),'utf8'));
+for(const file of (await readdir(resolve(course,'assets'))).sort())source.push(await readFile(resolve(course,'assets',file),'utf8'));
 for(const file of (await readdir(resolve(course,'shared'))).sort())source.push(await readFile(resolve(course,'shared',file),'utf8'));
 const version=createHash('sha256').update(source.map(s=>s.replaceAll('\r\n','\n')).join('\n')+apiBase).digest('hex').slice(0,12);
 await writeFile(resolve(output,'config.js'),"window.TIMETABLE_CONFIG="+JSON.stringify({schoolName:'첨단고등학교',apiBase,assetVersion:version})+';\n');

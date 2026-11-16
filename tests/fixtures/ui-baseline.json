@@ -1,10 +1,11 @@
 {
   "assets/pretendard.woff2": "9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4",
   "assets/font.css": "58f39b34ca4f1a950a9335e03e7c48cf0c84d71c2a3c39aafcab088b8c61d177",
-  "assets/style.css": "682f4f814613d8d1fcc2e1acb4dbc35ab534a7614bccf6b35ab84c25c564ac2b",
+  "assets/style.css": "af5b8ea2e0e7c07408aa25aeeb7e797d222e7f35959b6696ec8eb0e1f110825a",
   "assets/studyroom.css": "887455ff153925659ff7fb5446f16ce723504c49b597c3e1e09d233956bbfc81",
   "assets/solver/style.css": "7b27028423c6d2c91594093bead1e6c4fd1d0a4ef3dbb25e48def152c438bdc7",
   "assets/section-assignment/style.css": "ef81932bebaf882b06a4086585da85e07f2e476e7457ebf437ce89ee98f962bc",
   "assets/class-swap/view.html": "0c99212b65e97ed0410962697c8163f1f7838614bb363818c743be47f75c001b",
-  "vendor/course-allocation/shared/ui.css": "b615c7456a2d11b551f417db694221433c9d05e1a300b30eea714d3f9eb052e3"
+  "vendor/course-allocation/shared/ui.css": "bf659d307c8415be999c4eff609a6b6b2fc8ab35a670b8b60dde6714be5428ae",
+  "vendor/course-allocation/assets/workbook-APTSXI6R.css": "050712726d97241063e9a570a21ce32fb590c752b0b37e4558954186c8000602"
 }

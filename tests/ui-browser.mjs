@@ -9,7 +9,8 @@ import '../scripts/build.mjs';
 const h=await harness({studyroom:true,course:true}),results=[];let browser;
 try{
  const admin=await h.login();
- assert((await h.mutation('restore',{backup:backup()},admin.cookie)).ok);
+ const source=backup();source.store.settings.courseAllocationTeachers=true;
+ assert((await h.mutation('restore',{backup:source},admin.cookie)).ok);
  assert((await h.mutation('saveAllocation',{board:allocationFixture()},admin.cookie)).ok);
  const base=await h.listen();
  browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'msedge'}:{})});
@@ -18,6 +19,7 @@ try{
  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
  async function inspect(name,width){
   await page.setViewportSize({width,height:1000});
+  await page.evaluate(()=>Promise.all(document.getAnimations().filter(animation=>animation.effect?.getComputedTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{}))));
   await page.evaluate(()=>document.fonts.ready);
   // These are interactive data cells and the explicitly retained sidebar state.
   const allowFill='#sidebar-menu button,.cell-button,.allocation-cell,.tt .cell,.sr-seat-grid button,.sr-calendar-day';
@@ -35,6 +37,10 @@ try{
     if(document.documentElement.scrollWidth>innerWidth+1)problems.push('page overflow');
     if(getComputedStyle(document.documentElement).getPropertyValue('--ui-ink').trim()!=='#1f1f1f')problems.push('shared tokens missing');
     if(!getComputedStyle(document.body).fontFamily.startsWith('"Timetable UI"'))problems.push('UI subset must be first');
+    for(const button of document.querySelectorAll('.workbook-header button,.workbook-nav button')){
+     const rect=button.getBoundingClientRect();
+     if(rect.width&&(rect.left<-.5||rect.right>innerWidth+.5))problems.push(button.textContent.trim()+': clipped action');
+    }
     function visit(root){
      for(const button of root.querySelectorAll('button')){
       const rect=button.getBoundingClientRect(),style=getComputedStyle(button);
@@ -55,6 +61,7 @@ try{
    },{width,allowFill}));
   }
   assert.deepEqual(failures,[],name+' '+width);
+  if(name==='admin hours')await page.screenshot({path:'test-results/course-unified-'+width+'.png',fullPage:true});
   results.push({name,width});
  }
  async function sizes(name){for(const width of [1440,390])await inspect(name,width);}
@@ -66,16 +73,18 @@ try{
  });
  assert(await page.evaluate(()=>performance.getEntriesByType('resource').some(r=>r.name.endsWith('/pretendard.woff2'))));
  await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await idle();
- for(const tab of ['studentTimetable','timetable','roster','allocation','classSwap','batch','studyroom']){
+ for(const tab of ['studentTimetable','timetable','roster','allocation','classSwap','batch','studyroom','hours']){
   await clickMenu(page,page.locator('[data-tab="'+tab+'"]'));await idle();
   if(tab==='classSwap')await page.locator('#class-swap-pane #appView').waitFor();
+  if(tab==='hours')await page.frameLocator('#course-pane iframe:not([hidden])').locator('.workbook').waitFor();
   await sizes('teacher '+tab);
  }
  await page.goto(base+'/admin.html');await idle();
  await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await idle();
- for(const tab of ['sectionAssignment','students','timetable','allocation','classSwap','settings']){
+ for(const tab of ['sectionAssignment','students','timetable','allocation','classSwap','settings','hours']){
   await clickMenu(page,page.locator('[data-tab="'+tab+'"]'));await idle();
   if(tab==='sectionAssignment')await page.frameLocator('#section-assignment-pane iframe').locator('#fileSelectBtn').waitFor();
+  if(tab==='hours')await page.frameLocator('#course-pane iframe:not([hidden])').locator('.workbook').waitFor();
   await sizes('admin '+tab);
  }
  await page.goto(base+'/studyroom-student.html?seat=1');await sizes('studyroom student');

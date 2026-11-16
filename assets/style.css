@@ -152,7 +152,7 @@ body.section-assignment-workspace #app.shell .admin-layout{flex:none}
  #sidebar [data-sidebar-toggle]:hover,.sidebar-opener:hover{background:var(--ui-subtle)}
  .sidebar-opener{display:none}
  #sidebar-menu{flex:1;display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:4px;min-height:0;margin:0;padding:2px 8px;overflow:auto;border:0;overscroll-behavior:contain}
- #sidebar-menu button{flex:none;display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:8px 10px;border:0;border-radius:var(--ui-radius);background:transparent;color:var(--ui-ink-2);font-size:14px;text-decoration:none;text-align:left}
+ #sidebar-menu button{flex:none;display:flex;align-items:center;justify-content:flex-start;gap:10px;width:100%;min-height:44px;padding:8px 10px;border:0;border-radius:var(--ui-radius);background:transparent;color:var(--ui-ink-2);font-size:14px;text-decoration:none;text-align:left}
  #sidebar-menu button:hover,#sidebar-menu button[aria-current=page]{color:var(--ui-ink);background:var(--ui-subtle)}
  #sidebar-menu button[aria-current=page]{background:var(--schedule-highlight);font-weight:650}
  #sidebar-menu button:focus-visible{outline-offset:-2px}

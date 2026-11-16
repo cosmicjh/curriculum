@@ -140,7 +140,7 @@
 
 현재 main은 이미 일반 로그인 화면에서 서브셋만 받았다. 따라서 설계의 과거 수치인 전체 글꼴 2,057,688B를 이번 변경 전 기준으로 사용할 수 없고, **현재 기준에서 첫 방문 글꼴 전송량 감소는 관측되지 않았다**. 일반 UI에서는 전체 글꼴 요청이 없고 서브셋 밖 한글에는 전체 글꼴을 사용할 수 있음을 `tests/ui-browser.mjs`로 검사한다. 원시 결과는 Git 제외 `test-results/ui-before.json`, `test-results/ui-after.json`에 있다.
 
-공통 CSS의 임시 사본은 `vendor/course-allocation/shared/ui.css`이며 마지막 통합 단계에서 상위 저장소 원본으로 교체해야 한다. 교체 시 `Timetable UI` 우선 글꼴 스택을 보존하고 CSS 해시 기준 및 UI 시험을 다시 갱신·실행한다.
+B 작업 당시의 임시 공통 CSS는 최종 vendor 동기화에서 eb75f3c의 원본으로 교체했다. `Timetable UI` 우선 글꼴 스택을 유지하고 CSS 해시 기준 및 iframe UI 시험을 갱신했다. 재생성·검증 절차는 [COURSE_VENDOR.md](COURSE_VENDOR.md)를 따른다.
 
 운영 자료·권한·백업·동시 수정 보호를 유지하면서 반복 계산, 불필요한 D1 쓰기와 글꼴 중복 전송을 줄였다. 새 DB, 유료 서비스, 자동 실행 훅은 추가하지 않았다.
 
