@@ -4,26 +4,99 @@ import {checkTimetable} from '../course-allocation/shared/timetable-checker.js';
 import {teacherRows,makeWorkbook} from './excel.js';
 import {storedResult} from './storage.js';
 
-const $=id=>document.getElementById(id),listKeys=['buja','gangsa','pairAllowList'],jsonKeys=['gangsaDayCount','blockTimeBan','dependents'],weights=['over4','run3','lunch','firstlast'];
+const weights=['over4','run3','lunch','firstlast'];
+export function readControlOptions(root){
+  const all=(selector,node=root)=>[...node.querySelectorAll(selector)];
+  const buja=all('input[name="buja"]:checked').map(el=>el.value),gangsa=all('input[name="gangsa"]:checked').map(el=>el.value);
+  const gangsaDayCount=Object.fromEntries(all('[data-gangsa-days]').filter(el=>gangsa.includes(el.dataset.teacher)&&Number(el.value)>0).map(el=>[el.dataset.teacher,Number(el.value)]));
+  const pairAllowList=all('[data-pair] select').map(el=>el.value).filter(Boolean);
+  const dependents=all('[data-dependent]').map(row=>({subject:row.querySelector('select').value,follows:all('input:checked',row).map(el=>el.value)})).filter(row=>row.subject);
+  const blocks=new Map();
+  for(const row of all('[data-block]')){
+    const block=row.querySelector('select').value;if(!block)continue;
+    if(!blocks.has(block))blocks.set(block,new Map());
+    for(const cell of all('input:checked:not(:disabled)',row))blocks.get(block).set(cell.value,cell.value.split(',').map(Number));
+  }
+  return {buja,gangsa,weights:Object.fromEntries(weights.map(k=>[k,Number(root.querySelector('#'+k).value)])),pairAllowList,gangsaDayCount,dependents,blockTimeBan:Object.fromEntries([...blocks].map(([block,cells])=>[block,[...cells.values()]])),startLimit:Number(root.querySelector('#startLimit').value)};
+}
+export function readRunSettings(root){
+  return {options:readControlOptions(root),limits:[1,2,3].map(i=>Number(root.querySelector('#limit'+i).value)),workers:Number(root.querySelector('#workers').value)};
+}
+
+async function start(){
+const $=id=>document.getElementById(id),presets={fast:[0,120,60,30],normal:[0,1800,600,120],thorough:[0,3600,1200,300]},timeIds=['startLimit','limit1','limit2','limit3'];
 let model=null,result=null,saved=null,warm=null,worker=null,wake=null,loading=false,fileReading=false,loadId=0,fileId=0,stage='준비',began=0,stageBegan=0;
+let summaryModel=null,issueCounts={errors:0,warnings:0};
+const drafts=new Map();
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function message(s){$('message').textContent=s;}
 function update(){
   $('run').disabled=!model||!!worker||loading||fileReading||!crossOriginIsolated;
   $('cancel').disabled=!worker;$('reload').disabled=loading||!!worker||fileReading;
-  for(const el of $('form').elements)if(!['run','cancel'].includes(el.id))el.disabled=!!worker||loading||fileReading;
+  for(const el of $('form').elements)if(!['run','cancel'].includes(el.id))el.disabled=!!worker||loading||fileReading||!model||el.hasAttribute('data-unavailable');
   $('warm-run').querySelector('[value=saved]').disabled=!saved;
+  $('block-add').disabled=!!worker||loading||fileReading||!model?.blocks.length;
+}
+const subjects=()=>[...new Set([...model.bans,...model.blocks].map(r=>r.subject))].sort((a,b)=>a.localeCompare(b,'ko'));
+const blockNames=()=>[...new Set(model.blocks.map(r=>r.block))].sort((a,b)=>a.localeCompare(b,'ko'));
+function selectOptions(items,current,placeholder='선택하세요'){
+  const values=[...new Set([...items,...(current?[current]:[])])];
+  return `<option value="">${placeholder}</option>`+values.map(v=>`<option value="${esc(v)}" ${v===current?'selected':''}>${esc(v)}${items.includes(v)?'':' (배당 없음)'}</option>`).join('');
+}
+function teacherChoices(role,selected){
+  return [...model.teachers].sort((a,b)=>a.localeCompare(b,'ko')).map(t=>`<label class="teacher-choice"><input type="checkbox" name="${role}" value="${esc(t)}" ${selected.includes(t)?'checked':''}><span>${esc(t)}</span></label>`).join('');
+}
+function gangsaDays(o){
+  $('gangsa-days').innerHTML=o.gangsa.map(t=>`<div class="gangsa-row"><span>${esc(t)} <span class="hint">주 ${[...model.bans,...model.blocks].filter(r=>r.teacher===t).reduce((n,r)=>n+r.hours,0)}시간</span></span><label>주당 출근 일수<select data-gangsa-days data-teacher="${esc(t)}" aria-label="${esc(t)} 주당 출근 일수"><option value="0">제한 없음</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${o.gangsaDayCount?.[t]===n?'selected':''}>${n}일</option>`).join('')}</select></label></div>`).join('')||'<p class="hint">지정된 강사가 없습니다.</p>';
+}
+function pairRow(subject=''){
+  return `<div class="option-row" data-pair><label>과목<select aria-label="하루 2회 허용 과목">${selectOptions(subjects(),subject,'과목 선택')}</select></label><button type="button" data-remove aria-label="하루 2회 허용 과목 삭제">삭제</button></div>`;
+}
+function dependentRow(dep={subject:'',follows:[]}){
+  const choices=[...new Set([...subjects(),...dep.follows])];
+  return `<div class="dependent-row" data-dependent><div class="option-row"><label>주과목<select aria-label="종속 주과목">${selectOptions(subjects(),dep.subject,'주과목 선택')}</select></label><span class="relation-arrow" aria-hidden="true">←</span><button type="button" data-remove aria-label="종속 과목 삭제">삭제</button></div><fieldset class="follow-field"><legend>따르는 과목 · 여러 개 선택</legend><div class="follow-grid">${choices.map(s=>`<label class="teacher-choice"><input type="checkbox" value="${esc(s)}" ${dep.follows.includes(s)?'checked':''}><span>${esc(s)}${subjects().includes(s)?'':' (배당 없음)'}</span></label>`).join('')}</div></fieldset></div>`;
+}
+function blockRow(block='',cells=[]){
+  const days=['월','화','수','목','금'];
+  return `<div class="block-row" data-block><div class="option-row"><label>블록<select aria-label="금지 시간 블록">${selectOptions(blockNames(),block,'블록 선택')}</select></label><button type="button" data-remove aria-label="블록 금지 칸 삭제">삭제</button></div><table class="ban-grid"><caption class="hint">체크한 칸은 배치 금지</caption><thead><tr><th scope="col">교시</th>${days.map(d=>`<th scope="col">${d}</th>`).join('')}</tr></thead><tbody>${[1,2,3,4,5,6,7].map(p=>`<tr><th scope="row">${p}</th>${days.map((d,i)=>{const unavailable=i===0&&p===1||i===2&&p>=5;return `<td class="${unavailable?'unavailable':''}"><input type="checkbox" value="${i},${p}" aria-label="${d} ${p}교시 ${unavailable?'수업 없음':'금지'}" ${unavailable?'disabled data-unavailable':cells.some(([day,period])=>day===i&&period===p)?'checked':''}></td>`;}).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 function apply(o){
-  for(const k of listKeys)if(Array.isArray(o[k]))$(k).value=o[k].join('\n');
-  for(const k of jsonKeys)if(o[k]!==undefined)$(k).value=JSON.stringify(o[k],null,2);
-  for(const k of weights)if(o.weights?.[k]!==undefined)$(k).value=o.weights[k];
+  $('buja').innerHTML=teacherChoices('buja',o.buja??[]);$('gangsa').innerHTML=teacherChoices('gangsa',o.gangsa??[]);gangsaDays(o);
+  $('pairAllowList').innerHTML=(o.pairAllowList??[]).map(pairRow).join('');
+  $('dependents').innerHTML=(o.dependents??[]).map(dependentRow).join('');
+  $('blockTimeBan').innerHTML=Object.entries(o.blockTimeBan??{}).map(([block,cells])=>blockRow(block,cells)).join('');
+  for(const k of weights){const current=o.weights?.[k]??1,choices=[[0,'없음'],[1,'약함'],[3,'보통'],[6,'강함'],[10,'매우 강함']];if(!choices.some(([v])=>v===current))choices.push([current,'불러온 값']);$(k).innerHTML=choices.map(([v,label])=>`<option value="${v}" ${v===current?'selected':''}>${label} (${v})</option>`).join('');}
   if(o.startLimit!==undefined)$('startLimit').value=o.startLimit;
+  filterTeachers();renderStats();
 }
-function options(){
-  const o={};for(const k of listKeys)o[k]=$(k).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-  for(const k of jsonKeys){try{o[k]=JSON.parse($(k).value);}catch{throw Error(`${$(k).labels[0].firstChild.textContent.trim()}: JSON 형식을 확인하세요.`);}}
-  o.weights=Object.fromEntries(weights.map(k=>[k,Number($(k).value)]));o.startLimit=Number($('startLimit').value);return o;
+function renderStats(){
+  if(!summaryModel)return;const m=summaryModel,total=rows=>rows.reduce((n,r)=>n+r.hours,0),blocks=g=>[...new Map(m.blocks.filter(r=>r.grade===g).map(r=>[r.block,r.blockLen])).values()];
+  const items=[['교사 수',m.teachers.length],['총 시수',total(m.bans)+total(m.blocks)],['반수업 시수',total(m.bans)],['이동수업 시수',total(m.blocks)],...['2','3'].map(g=>[g+'학년 블록',`${blocks(g).length}개 · ${blocks(g).reduce((a,b)=>a+b,0)}시간`]),['부장 수',model?document.querySelectorAll('input[name="buja"]:checked').length:m.buja.length],['강사 수',model?document.querySelectorAll('input[name="gangsa"]:checked').length:m.gangsa.length],['경고 수',issueCounts.warnings],['오류 수',issueCounts.errors]];
+  $('allocation-stats').innerHTML=items.map(([label,value])=>`<div class="stat"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
+}
+function filterTeachers(){
+  const search=$('buja-search').value.trim().toLocaleLowerCase();let count=0;
+  for(const label of $('buja').querySelectorAll('label')){label.hidden=!label.textContent.toLocaleLowerCase().includes(search);if(!label.hidden)count++;}$('buja-empty').hidden=count>0;
+}
+function presetSummary(){
+  const times=timeIds.map(k=>Number($(k).value));$('preset').value=Object.keys(presets).find(k=>presets[k].every((n,i)=>n===times[i]))??'custom';
+  $('preset-summary').textContent=`0단계 ${times[0]}초 → 1단계 ${times[1]}초 → 2단계 ${times[2]}초 → 2.5단계 ${times[3]}초`;
+}
+function persist(){
+  if(!model||loading)return;
+  const value=readRunSettings(document);drafts.set(model.source.term,value);
+  try{sessionStorage.setItem('timetable.solver.settings:'+model.source.term,JSON.stringify(value));$('draft-status').textContent='설정을 이 탭에 보관했습니다.';}
+  catch{$('draft-status').textContent='설정은 메모리에만 유지됩니다. 새로고침하면 사라질 수 있습니다.';}
+}
+function restoreDraft(){
+  let draft=drafts.get(model.source.term);
+  try{draft=JSON.parse(sessionStorage.getItem('timetable.solver.settings:'+model.source.term))??draft;}catch{}
+  if(draft?.options){
+    const checked=validateModel(model,draft.options,draft.limits);
+    if(!checked.errors.length&&Array.isArray(draft.limits)&&draft.limits.length===3&&Number.isInteger(draft.workers)&&draft.workers>=1&&draft.workers<=32){apply(draft.options);draft.limits.forEach((n,i)=>$('limit'+(i+1)).value=n);$('workers').value=draft.workers;$('draft-status').textContent='보관한 설정을 복원했습니다.';}
+    else $('draft-status').textContent='이전 설정이 현재 배당과 다릅니다. 현재 배당의 기본값을 표시합니다.';
+  }
+  presetSummary();
 }
 function warmSummary(){
   if(!warm){$('warm-summary').innerHTML='시작점이 없으면 수십 분 이상 걸릴 수 있습니다. 처음부터 계산할 때는 <a href="https://github.com/cosmicjh/course-allocation/tree/main/timetable-solver" target="_blank" rel="noopener">로컬 솔버</a>도 사용할 수 있습니다.';return;}
@@ -32,7 +105,9 @@ function warmSummary(){
   $('warm-summary').textContent=`학기 ${warm.source?.term??'정보 없음'} · 현재 학기 ${model.source.term} · rowId 대응 ${matched}/${old.size} (${old.size?Math.round(100*matched/old.size):0}%) · 0단계는 생략합니다.`;
 }
 async function load(){
+  persist();
   const id=++loadId;loading=true;model=null;result=null;saved=null;warm=null;++fileId;fileReading=false;
+  summaryModel=null;$('allocation-stats').replaceChildren();
   $('result-section').hidden=true;$('warm-file').value='';$('warm-run').value='';$('validation').textContent='확정 배당을 읽고 있습니다.';$('issues').replaceChildren();update();
   try{
     const [admin,workspace]=await Promise.all([TTApi.request('adminBootstrap',{workspaceOnly:true}),TTApi.request('courseWorkspace',{role:'admin',path:'/workspace',method:'GET',data:{all:true}})]);
@@ -44,11 +119,14 @@ async function load(){
     const source={school:global.school,departments:ordered.map(p=>p.department),departmentRevisions:revisions};
     for(const k of ['teachers','courses','groups','assignments','unmapped'])source[k]=ordered.flatMap(p=>p[k]);
     const exported=exportSolverModel(source,{exportedAt:new Date().toISOString()});
+    summaryModel=exported.model;issueCounts={errors:exported.errors.length,warnings:exported.warnings.length};
+    $('issue-summary').textContent=`오류 ${issueCounts.errors}건 · 경고 ${issueCounts.warnings}건 보기`;
     $('issues').innerHTML=[...exported.errors,...exported.warnings].map(e=>`<li>${esc(e)}</li>`).join('');
     $('validation').textContent=exported.errors.length?`오류 ${exported.errors.length}건 · 배당표를 수정한 뒤 다시 읽으세요.`:`${term} · 점검 통과`;
+    renderStats();
     if(exported.errors.length)return;
     model=exported.model;apply({...DEFAULT_OPTIONS,...model.options,buja:model.buja,gangsa:model.gangsa});
-    $('model-summary').textContent=`교사 ${model.teachers.length}명 · 이동수업 ${model.blocks.length}행 · 반수업 ${model.bans.length}행`;
+    timeIds.forEach((k,i)=>$(k).value=presets.normal[i]);$('workers').value=Math.min(navigator.deviceMemory<8?4:8,navigator.hardwareConcurrency||4);restoreDraft();
     try{saved=await storedResult(term);if(saved){validateWarmStart(saved);warm=saved;$('warm-run').value='saved';}}
     catch{saved=null;message('이 브라우저의 이전 결과를 읽지 못했습니다. result.json을 선택할 수 있습니다.');}
     warmSummary();
@@ -69,6 +147,27 @@ $('login').onsubmit=async event=>{
 };
 $('logout').onclick=async()=>{if(worker)stop('계산을 취소했습니다.');try{await TTApi.request('logout',{role:'admin'});showLogin('로그아웃했습니다.');}catch(e){message(e.message);}};
 $('reload').onclick=load;
+$('buja-search').oninput=filterTeachers;
+$('preset').onchange=()=>{if(presets[$('preset').value])timeIds.forEach((k,i)=>$(k).value=presets[$('preset').value][i]);presetSummary();persist();};
+$('form').addEventListener('input',event=>{
+  if(timeIds.includes(event.target.id))presetSummary();
+  if(event.target.id!=='buja-search'&&event.target.type!=='file')persist();
+});
+$('form').addEventListener('change',event=>{
+  if(event.target.name==='gangsa'){gangsaDays(readControlOptions(document));update();}
+  if(event.target.name==='buja'||event.target.name==='gangsa')renderStats();
+  if(event.target.type!=='file')persist();
+});
+$('form').addEventListener('click',event=>{
+  const add=event.target.closest('[data-add]'),remove=event.target.closest('[data-remove]');
+  if(add){
+    const target={pair:'pairAllowList',dependent:'dependents',block:'blockTimeBan'}[add.dataset.add];
+    $(target).insertAdjacentHTML('beforeend',({pair:pairRow,dependent:dependentRow,block:blockRow})[add.dataset.add]());
+    $(target).lastElementChild.querySelector('select').focus();update();persist();
+  }else if(remove){
+    const row=remove.closest('[data-pair],[data-dependent],[data-block]'),list=row.parentElement;row.remove();list.nextElementSibling.focus();persist();
+  }
+});
 $('warm-run').onchange=()=>{++fileId;fileReading=false;$('warm-file').value='';warm=$('warm-run').value==='saved'?saved:null;warmSummary();update();};
 $('warm-clear').onclick=()=>{++fileId;fileReading=false;warm=null;$('warm-run').value='';$('warm-file').value='';warmSummary();update();};
 $('warm-file').onchange=async()=>{
@@ -81,8 +180,11 @@ $('settings').onchange=async()=>{
   try{
     if(file.size>1024*1024)throw Error('설정 파일은 1MB 이하로 선택하세요.');
     const value=JSON.parse(await file.text());if(value._type!=='고교학점제_설정'||value._version!==1||!value.timetable)throw Error('고교학점제_설정 버전 1 JSON을 선택하세요.');
-    if(id!==loadId)return;const s=value.timetable;
-    apply({...s,...(s.pairAllow?{pairAllowList:s.pairAllow}:{}),...(s.bujaList?{buja:s.bujaList}:{})});message('설정을 불러왔습니다. 규칙 적용 여부를 확인하세요.');
+    if(id!==loadId)return;const s=value.timetable,current=readControlOptions(document);
+    const imported={...current,...s,weights:{...current.weights,...Object.fromEntries(Object.entries(s.weights??{}).map(([k,v])=>[k,Number(v)]))},...(s.pairAllow?{pairAllowList:s.pairAllow}:{}),...(s.bujaList?{buja:s.bujaList}:{}),...(s.gangsaList?{gangsa:s.gangsaList}:{}),...(s.gangsaDayCount?{gangsaDayCount:Object.fromEntries(Object.entries(s.gangsaDayCount).filter(([,n])=>Number(n)>0).map(([t,n])=>[t,Number(n)]))}:{})};
+    const limits=s.limits??[1,2,3].map(i=>Number($('limit'+i).value)),checked=validateModel(model,imported,limits);
+    if(checked.errors.length)throw Error(checked.errors.join(' · '));
+    apply(imported);limits.forEach((n,i)=>$('limit'+(i+1)).value=n);presetSummary();persist();message('설정을 불러왔습니다.');
   }catch(e){message(e.message);}finally{fileReading=false;update();}
 };
 function stages(items){
@@ -107,7 +209,7 @@ $('form').onsubmit=event=>{
   event.preventDefault();if(!model||worker||loading||fileReading)return;
   try{
     if(!crossOriginIsolated)throw Error('Worker 도메인에서 계산 페이지를 열어 주세요.');
-    const limits=[1,2,3].map(i=>Number($('limit'+i).value)),o=options(),checked=validateModel(model,o,limits),workers=Number($('workers').value);
+    const {options:o,limits,workers}=readRunSettings(document),checked=validateModel(model,o,limits);
     if(checked.errors.length)throw Error(checked.errors.join('\n'));
     if(!Number.isInteger(workers)||workers<1||workers>32)throw Error('워커 수는 1~32 정수로 입력하세요.');
     if(warm)validateWarmStart(warm);
@@ -136,4 +238,6 @@ $('json').onclick=()=>{
 $('excel').onclick=async()=>{const button=$('excel');button.disabled=true;const current=result,currentModel=model;try{const XLSX=await TTAssets.load('xlsx');XLSX.writeFile(makeWorkbook(XLSX,currentModel,current),'result.xlsx');}catch(e){message(e.message);}finally{button.disabled=false;}};
 window.addEventListener('beforeunload',event=>{if(worker){event.preventDefault();event.returnValue='';}});
 $('workers').value=Math.min(navigator.deviceMemory<8?4:8,navigator.hardwareConcurrency||4);
-apply(DEFAULT_OPTIONS);await open();
+update();await open();
+}
+if(typeof document!=='undefined')await start();

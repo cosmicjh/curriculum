@@ -4,6 +4,24 @@ import {readFile,readdir} from 'node:fs/promises';
 import {workbookData,teacherRows} from '../assets/solver/excel.js';
 import '../scripts/build.mjs';
 
+test('friendly controls serialize the existing solver option and run-setting format',async()=>{
+  const {readRunSettings}=await import('../dist/solver/app.js');
+  const values=xs=>xs.map(value=>({value}));
+  const block=(name,cells)=>({querySelector:()=>({value:name}),querySelectorAll:()=>values(cells)});
+  const dependent={querySelector:()=>({value:'주과목'}),querySelectorAll:()=>values(['따르는 과목','다른 과목'])};
+  const selections={
+    'input[name="buja"]:checked':values(['가상부장']),
+    'input[name="gangsa"]:checked':values(['가상강사','다른강사']),
+    '[data-gangsa-days]':[{dataset:{teacher:'가상강사'},value:'3'},{dataset:{teacher:'다른강사'},value:'0'},{dataset:{teacher:'선택 해제'},value:'2'}],
+    '[data-pair] select':values(['과목 하나','', '과목 둘']),
+    '[data-dependent]':[dependent],
+    '[data-block]':[block('2A',['1,2','4,7']),block('2A',['1,2','3,3']),block('',[])],
+  };
+  const numbers={over4:'0',run3:'3',lunch:'6',firstlast:'10',startLimit:'0',limit1:'1800',limit2:'600',limit3:'120',workers:'4'};
+  const root={querySelectorAll:selector=>selections[selector],querySelector:selector=>({value:numbers[selector.slice(1)]})};
+  assert.deepEqual(readRunSettings(root),{options:{buja:['가상부장'],gangsa:['가상강사','다른강사'],weights:{over4:0,run3:3,lunch:6,firstlast:10},pairAllowList:['과목 하나','과목 둘'],gangsaDayCount:{가상강사:3},dependents:[{subject:'주과목',follows:['따르는 과목','다른 과목']}],blockTimeBan:{'2A':[[1,2],[4,7],[3,3]]},startLimit:0},limits:[1800,600,120],workers:4});
+});
+
 test('only CP-SAT runtimes ship, the server excludes browser solvers, and headers are scoped',async()=>{
   const files=(await readdir('dist/solver/lib',{recursive:true})).map(f=>f.replaceAll('\\','/'));
   assert.deepEqual(files.filter(f=>f.endsWith('.wasm')).sort(),['wasm/cp_sat_runtime.wasm','wasm/cp_sat_runtime_asyncify.wasm']);

@@ -3,37 +3,66 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>브라우저 시간표 계산</title><link rel="stylesheet" href="assets/font.css"><link rel="stylesheet" href="assets/style.css"><link rel="stylesheet" href="solver/style.css"><script src="config.js"></script><script src="assets/transport.js"></script><script src="assets/assets.js"></script><script type="module" src="solver/app.js"></script></head>
 <body>
 <header class="topbar"><a class="brand" href="admin.html">교육과정 편성·운영 지원 도구</a><button id="logout" hidden>로그아웃</button></header>
-<main class="solver-shell"><h1>브라우저 시간표 계산</h1><p id="auth-message" role="status">관리자 로그인을 확인하고 있습니다.</p><form id="login" hidden><h2>관리자 로그인</h2><label for="password">관리자 비밀번호</label><input id="password" type="password" autocomplete="current-password" required><button class="primary">로그인</button></form><div id="workspace" hidden>
-<section aria-labelledby="input-title"><div class="section-title"><h2 id="input-title">확정 배당 점검</h2><button id="reload" type="button">배당 다시 읽기</button></div><p id="validation" role="status"></p><ul id="issues" class="notice-list" aria-label="배당 점검 결과"></ul>
+<main class="solver-shell">
+<h1>브라우저 시간표 계산</h1><p id="auth-message" role="status">관리자 로그인을 확인하고 있습니다.</p>
+<form id="login" hidden><h2>관리자 로그인</h2><label for="password">관리자 비밀번호</label><input id="password" type="password" autocomplete="current-password" required><button class="primary">로그인</button></form>
+<div id="workspace" hidden>
+<section class="step-panel" aria-labelledby="input-title">
+  <div class="section-title"><h2 id="input-title"><span class="step-number">1</span>배당 점검</h2><button id="reload" type="button">배당 다시 읽기</button></div>
+  <p id="validation" role="status"></p><div id="allocation-stats" class="stats-grid" aria-label="배당 요약"></div>
+  <details id="issue-details"><summary id="issue-summary">오류·경고 보기</summary><ul id="issues" class="notice-list" aria-label="배당 점검 결과"></ul></details>
+</section>
 <form id="form">
-<p id="model-summary" role="status"></p>
-<fieldset><legend>이전 결과를 시작점으로 사용 · 선택 사항</legend>
-<p class="hint">유효한 이전 결과를 시작점으로 쓰면 가장 빠릅니다(권장).</p>
-<div class="columns"><label>이전 실행<select id="warm-run"><option value="">없음</option><option value="saved" disabled>이 브라우저에 저장된 이전 결과</option></select></label><label>이전 result.json<input id="warm-file" type="file" accept=".json,application/json"></label></div>
-<div class="actions"><button id="warm-clear" type="button" class="secondary">시작점 선택 해제</button><span id="warm-summary" role="status">이전 결과가 없으면 1단계 시간을 늘려야 할 수 있습니다.</span></div>
-</fieldset>
-<details><summary>계산 옵션</summary>
-<label>이전 설정 JSON · 선택 사항<input id="settings" type="file" accept=".json,application/json"></label>
-<div class="columns"><label>부장 목록 · 한 줄에 한 명<textarea id="buja" rows="3"></textarea></label><label>강사 목록 · 한 줄에 한 명<textarea id="gangsa" rows="3"></textarea></label></div>
-<fieldset><legend>불편 가중치</legend><div class="weights"><label>일별 시수<input id="over4" type="number" value="1" step="1" min="-1000000" max="1000000"></label><label>3연강<input id="run3" type="number" value="1" step="1" min="-1000000" max="1000000"></label><label>점심 끼임<input id="lunch" type="number" value="1" step="1" min="-1000000" max="1000000"></label><label>1·7교시<input id="firstlast" type="number" value="1" step="1" min="-1000000" max="1000000"></label></div></fieldset>
-<label>하루 2회 허용 과목 · 한 줄에 한 과목<textarea id="pairAllowList" rows="2" aria-describedby="pair-help"></textarea></label><p class="hint" id="pair-help">같은 날 최대 2회, 표시 교시 차이 3 이상으로 배치합니다.</p>
-<div class="columns"><label>강사 출근일수 상한 · JSON 객체<textarea id="gangsaDayCount" rows="3" spellcheck="false">{}</textarea><span class="hint">예: {"가상강사": 2} · 정확히 N일이 아닌 상한입니다.</span></label><label>블록 금지 칸 · JSON 객체<textarea id="blockTimeBan" rows="3" spellcheck="false">{}</textarea><span class="hint">예: {"3C": [[4, 6], [4, 7]]} · 월=0, 금=4</span></label></div>
-<label>종속 과목 · JSON 배열<textarea id="dependents" rows="5" spellcheck="false">[]</textarea><span class="hint">예: [{"subject":"주과목","follows":["따르는 과목"]}]</span></label>
-<fieldset><legend>단계별 제한 시간 · 초</legend><div class="weights"><label>0단계 · 완화 시작점<input id="startLimit" type="number" min="0" max="86400" value="0" required></label><label>1단계 · 배치 최대화<input id="limit1" type="number" min="0" max="86400" value="1800" required></label><label>2단계 · 최고 불편<input id="limit2" type="number" min="0" max="86400" value="600" required></label><label>2.5단계 · 총 불편<input id="limit3" type="number" min="0" max="86400" value="120" required></label></div><p class="hint">0단계는 실험적 선택 기능입니다(기본 0초: 생략). 0·2·2.5단계는 0초로 생략하며, 이전 결과를 선택해도 0단계를 생략합니다. 기본 탐색 예산은 총 42분입니다.</p></fieldset>
-<label>워커 수<input id="workers" type="number" min="1" max="32" required></label></details>
-<details><summary>규칙 적용 여부</summary><div class="table-wrap"><table><thead><tr><th>규칙</th><th>적용</th></tr></thead><tbody>
-<tr><td>실제 시간 교사 중복, 학급 31칸, 블록 하루 1회·같은 학년 중복 금지</td><td>고정</td></tr>
-<tr><td>부장 금1 반수업 제외(진로 예외), 3학년 진로 금1</td><td>고정</td></tr>
-<tr><td>일반교사 1·7교시 각 2~3일, 매일 2시간 이상, 최대 월4·화5·수3·목5·금5</td><td>고정 · 강사 제외</td></tr>
-<tr><td>점심 보장, 최대 3연강, 과목별 하루 1회</td><td>고정 · 강사 제외</td></tr>
-<tr><td>미술 인접 2시간 + 다른 날 1시간(4→5 제외)</td><td>고정</td></tr>
-<tr><td>강사 출근일수, 하루 2회, 종속 과목, 블록 금지 칸</td><td>위 옵션 적용</td></tr>
-<tr><td>시작점 탐색 · 완화 모델 또는 이전 결과의 배치를 힌트로 사용</td><td>학교 규칙은 바꾸지 않는 탐색 보조 · 0단계 해는 결과 채택 안 함</td></tr>
-<tr><td>artBlock · noLunchBlock · spread · coverage · coverageSubjects · bujaFridayP1Forbidden</td><td>미적용 · 원본 HTML의 미연결 설정</td></tr>
-</tbody></table></div></details>
-<div class="actions"><button id="run" class="primary" type="submit" disabled>계산 시작</button><button id="cancel" type="button" disabled>취소</button><span id="message" role="status" aria-live="polite"></span></div>
-</form></section>
-<section aria-labelledby="progress-title"><h2 id="progress-title">계산 진행</h2><p id="progress" role="status" aria-live="polite">대기 중</p><p id="keep-open" hidden>계산 중에는 탭을 열어 두세요.</p><div id="stages"></div></section>
-<section id="result-section" hidden aria-labelledby="result-title"><h2 id="result-title">결과 요약</h2><p id="result-status" role="status"></p><div class="actions"><button id="excel" type="button">엑셀 내려받기</button><button id="json" type="button">result.json 내려받기</button><button id="save" type="button">이 브라우저에 저장</button></div><p id="storage-status" role="status"></p><div id="result"></div></section>
+<section class="step-panel" aria-labelledby="settings-title">
+  <h2 id="settings-title"><span class="step-number">2</span>설정</h2>
+  <fieldset><legend>부장</legend><p class="hint">금요일 1교시 반수업에서 제외합니다. 진로 과목은 예외입니다.</p>
+    <label class="search-field">교사 이름 검색<input id="buja-search" type="search" placeholder="이름 검색" autocomplete="off"></label>
+    <div id="buja" class="teacher-grid" aria-label="부장 지정"></div><p id="buja-empty" class="hint" hidden>검색 결과가 없습니다.</p>
+  </fieldset>
+  <fieldset><legend>강사</legend><div id="gangsa" class="teacher-grid" aria-label="강사 지정"></div>
+    <p class="hint">주당 출근 일수는 상한입니다. 제한 없음이면 어느 요일이든 배치합니다.</p><div id="gangsa-days"></div>
+  </fieldset>
+  <fieldset><legend>불편 가중치</legend><div class="weight-grid">
+    <label>일별 시수<select id="over4" aria-describedby="over4-help"></select><span id="over4-help" class="hint">요일별 상한보다 적게 배치될수록 점수가 낮아집니다.</span></label>
+    <label>3연강<select id="run3" aria-describedby="run3-help"></select><span id="run3-help" class="hint">주당 1·2·3·4·5회에 1·2·4·8·16점입니다.</span></label>
+    <label>점심 끼임<select id="lunch" aria-describedby="lunch-help"></select><span id="lunch-help" class="hint">해당 날 수 1·2·3·4·5일에 1·2·4·8·16점입니다.</span></label>
+    <label>1·7교시<select id="firstlast" aria-describedby="firstlast-help"></select><span id="firstlast-help" class="hint">화~금 1교시·월화목금 7교시 수업 일수에서 각각 2를 뺀 값입니다.</span></label>
+  </div></fieldset>
+  <fieldset><legend>하루 2회 허용 과목</legend><p class="hint">같은 날 최대 2회, 교시 간격 3 이상</p><div id="pairAllowList" class="editable-list"></div><button type="button" data-add="pair">+ 과목 추가</button></fieldset>
+  <fieldset><legend>종속 과목</legend><p class="hint">주과목과 따르는 과목은 같은 시간에 겹치지 않게 배치합니다.</p><div id="dependents" class="editable-list"></div><button type="button" data-add="dependent">+ 추가</button></fieldset>
+  <fieldset><legend>블록 금지 칸</legend><p class="hint">선택한 칸에는 해당 블록을 배치하지 않습니다.</p><div id="blockTimeBan" class="editable-list"></div><button id="block-add" type="button" data-add="block">+ 블록 추가</button></fieldset>
+  <details class="auxiliary"><summary>이전 설정 파일 불러오기</summary><label>설정 JSON<input id="settings" type="file" accept=".json,application/json"></label></details>
+  <details><summary>적용되는 규칙 보기</summary><div class="table-wrap"><table><thead><tr><th scope="col">규칙</th><th scope="col">적용</th></tr></thead><tbody>
+    <tr><td>교사 실제 시간 중복 금지, 학급 31칸, 블록 하루 1회·같은 학년 중복 금지</td><td>고정</td></tr>
+    <tr><td>부장 금1 반수업 제외(진로 예외), 3학년 진로 금1</td><td>고정</td></tr>
+    <tr><td>일반교사 1·7교시 각 2~3일, 매일 2시간 이상, 최대 월4·화5·수3·목5·금5</td><td>고정 · 강사 제외</td></tr>
+    <tr><td>점심 보장, 최대 3연강, 과목별 하루 1회</td><td>고정 · 강사 제외</td></tr>
+    <tr><td>미술 인접 2시간 + 다른 날 1시간(4→5 제외)</td><td>고정</td></tr>
+    <tr><td>부장·강사, 불편 가중치, 하루 2회, 강사 출근일수, 종속 과목, 블록 금지 칸</td><td>위 설정 적용</td></tr>
+    <tr><td>0단계는 시작점 탐색 보조이며 결과로 채택하지 않음</td><td>선택</td></tr>
+    <tr><td>artBlock · noLunchBlock · spread · coverage · coverageSubjects · bujaFridayP1Forbidden</td><td>미적용</td></tr>
+  </tbody></table></div></details>
+  <p id="draft-status" class="hint" role="status"></p>
+</section>
+<section class="step-panel" aria-labelledby="warm-title">
+  <h2 id="warm-title"><span class="step-number">3</span>시작점</h2>
+  <div class="columns"><label>시작점 선택<select id="warm-run"><option value="">없음 · 오래 걸림(로컬 솔버 권장)</option><option value="saved" disabled>저장된 이전 결과 · 권장</option></select></label><label>이전 result.json<input id="warm-file" type="file" accept=".json,application/json"></label></div>
+  <p id="warm-summary" role="status"></p><button id="warm-clear" type="button">시작점 선택 해제</button>
+</section>
+<section class="step-panel" aria-labelledby="run-title">
+  <h2 id="run-title"><span class="step-number">4</span>계산</h2>
+  <label>실행 프리셋<select id="preset"><option value="fast">빠르게 · 0 / 120 / 60 / 30초</option><option value="normal" selected>기본 · 0 / 1800 / 600 / 120초</option><option value="thorough">충분히 · 0 / 3600 / 1200 / 300초</option><option value="custom">직접 설정</option></select></label>
+  <p id="preset-summary" class="hint" role="status"></p>
+  <details id="advanced"><summary>고급 · 단계별 시간과 워커 수</summary><div class="time-grid">
+    <label>0단계 · 완화 시작점(초)<input id="startLimit" type="number" min="0" max="86400" value="0" required></label>
+    <label>1단계 · 배치 최대화(초)<input id="limit1" type="number" min="0" max="86400" value="1800" required></label>
+    <label>2단계 · 최고 불편(초)<input id="limit2" type="number" min="0" max="86400" value="600" required></label>
+    <label>2.5단계 · 총 불편(초)<input id="limit3" type="number" min="0" max="86400" value="120" required></label>
+  </div><label class="worker-field">워커 수<input id="workers" type="number" min="1" max="32" required></label><p class="hint">0·2·2.5단계는 0초로 생략합니다. 이전 결과를 쓰면 0단계는 생략합니다.</p></details>
+  <div class="actions"><button id="run" class="primary" type="submit" disabled>계산 시작</button><button id="cancel" type="button" disabled>취소</button><span id="message" role="status" aria-live="polite"></span></div>
+  <div class="progress-area"><h3>계산 진행</h3><p id="progress" role="status" aria-live="polite">대기 중</p><p id="keep-open" hidden>계산 중에는 탭을 열어 두세요.</p><div id="stages"></div></div>
+</section>
+</form>
+<section class="step-panel" id="result-section" hidden aria-labelledby="result-title"><h2 id="result-title"><span class="step-number">5</span>결과</h2><p id="result-status" role="status"></p><div class="actions"><button id="excel" type="button">엑셀 내려받기</button><button id="json" type="button">result.json 내려받기</button><button id="save" type="button">이 브라우저에 저장</button></div><p id="storage-status" role="status"></p><div id="result"></div></section>
 </div></main><footer class="solver-shell">이 기기에서 계산하며 결과는 서버에 전송하지 않습니다.</footer>
 </body></html>

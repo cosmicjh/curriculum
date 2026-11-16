@@ -36,7 +36,9 @@ try{
   await page.locator('#login:visible').waitFor();await page.locator('#password').fill('1234');await page.locator('#login button').click();
   await page.locator('#run:enabled').waitFor();assert.match(await page.locator('#validation').innerText(),/점검 통과/);
   assert.match(await page.locator('#warm-summary').innerText(),/수십 분/);
-  await page.getByText('계산 옵션',{exact:true}).click();
+  assert.equal(await page.locator('textarea').count(),0);assert.equal(await page.locator('#allocation-stats .stat').count(),10);
+  assert.equal(await page.locator('#preset').inputValue(),'normal');
+  await page.locator('#advanced summary').click();
   for(const [id,value] of Object.entries({limit1:'20',limit2:'0',limit3:'0',workers:'1'}))await page.locator('#'+id).fill(value);
   await page.locator('#run').click();await page.waitForFunction(()=>document.getElementById('result-status').textContent.includes('검증 통과'),{},{timeout:60000});
   await page.waitForFunction(()=>document.getElementById('storage-status').textContent.includes('저장했습니다'));
@@ -55,9 +57,10 @@ try{
   await mkdir('test-results',{recursive:true});await page.screenshot({path:'test-results/browser-solver-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:'test-results/browser-solver-mobile.png',fullPage:true});
   await page.reload();await page.locator('#run:enabled').waitFor();assert.equal(await page.locator('#warm-run').inputValue(),'saved');assert.match(await page.locator('#warm-summary').innerText(),/100%/);assert(await page.locator('#login').isHidden());
+  assert.equal(await page.locator('#limit1').inputValue(),'20');assert.equal(await page.locator('#limit2').inputValue(),'0');assert.equal(await page.locator('#workers').inputValue(),'1');
   // Exercise the shipped fallback and pthread assets, even on Edge with JSPI.
   await page.route('**/solver/worker.js',async route=>{const response=await route.fetch();await route.fulfill({response,body:'WebAssembly.promising=undefined;\n'+await response.text()});});
-  await page.getByText('계산 옵션',{exact:true}).click();
+  await page.locator('#advanced summary').click();
   for(const [id,value] of Object.entries({limit1:'20',limit2:'0',limit3:'0',workers:'2'}))await page.locator('#'+id).fill(value);
   await page.locator('#run').click();await page.waitForFunction(()=>document.getElementById('result-status').textContent.includes('검증 통과'),{},{timeout:60000});
   const againDownload=page.waitForEvent('download');await page.locator('#json').click();const again=JSON.parse(await readFile(await(await againDownload).path(),'utf8'));assert.equal(again.warmStart.matchRate,1);assert.equal(again.stages[0].reason,'previous_result');
