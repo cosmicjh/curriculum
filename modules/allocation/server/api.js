@@ -15,13 +15,15 @@ function store(db) {
   };
 }
 const requireAdmin=session=>{if(session.role!=='admin')fail(403,'admin_required','관리자 모드에서 실행하세요.');};
-function guard(id,globalRevision=null,accessEpoch=null,adminEpoch=null,sheetRevisions=null){return ['INSERT INTO write_guards(id,global_revision,access_epoch,admin_epoch,sheet_revisions) VALUES (?,?,?,?,?)',id,globalRevision,accessEpoch,adminEpoch,sheetRevisions];}
+function guard(id,session,now,globalRevision=null,sheetRevisions=null){
+  return ['INSERT INTO ca_write_guards(id,global_revision,sheet_revisions,token_hash,checked_at) VALUES (?,?,?,?,?)',id,globalRevision,sheetRevisions,session.token_hash,now];
+}
 async function workspace(s,options={},admin=false) {
   const all=options.all===true||options.all==='true';
   // Both results come from the same D1 batch transaction/snapshot.
   const [globals,rows]=await s.batch([
-    ['SELECT payload,revision FROM workspace WHERE id=1'],
-    ['SELECT id,revision,json_extract(payload,\'$.department\') AS department, CASE WHEN ? OR id=COALESCE(?,(SELECT json_extract(payload,\'$.departmentIds[0]\') FROM workspace WHERE id=1)) THEN payload ELSE NULL END AS payload FROM sheets',all?1:0,options.departmentId??null]
+    ['SELECT payload,revision FROM ca_workspace WHERE id=1'],
+    ['SELECT id,revision,json_extract(payload,\'$.department\') AS department, CASE WHEN ? OR id=COALESCE(?,(SELECT json_extract(payload,\'$.departmentIds[0]\') FROM ca_workspace WHERE id=1)) THEN payload ELSE NULL END AS payload FROM ca_sheets',all?1:0,options.departmentId??null]
   ]);
   const global=JSON.parse(globals[0].payload),byId=new Map(rows.map(r=>[r.id,r]));
   const ordered=global.departmentIds.map(id=>byId.get(id));
@@ -33,20 +35,20 @@ async function workspace(s,options={},admin=false) {
     selectedDepartmentId:selected,globalRevision:globals[0].revision,revisions:Object.fromEntries(ordered.map(r=>[r.id,r.revision])),admin};
 }
 async function priorOperation(s,id,kind,sheetId,hash) {
-  const prior=await s.first('SELECT * FROM operations WHERE id=?',id);if(!prior)return null;
+  const prior=await s.first('SELECT * FROM ca_operations WHERE id=?',id);if(!prior)return null;
   if(prior.kind!==kind || prior.sheet_id!==sheetId || prior.request_hash!==hash)fail(409,'operation_conflict','저장 작업 식별자가 다른 요청에 이미 사용되었습니다.');
   return JSON.parse(prior.result);
 }
 async function prune(s,now) {
   // Bounded maintenance on explicit writes, with indexed expiry lookups. No polling/cron.
-  await s.all('DELETE FROM operations WHERE id IN (SELECT id FROM operations WHERE created_at<? ORDER BY created_at LIMIT 100)',now-7*DAY);
+  await s.all('DELETE FROM ca_operations WHERE id IN (SELECT id FROM ca_operations WHERE created_at<? ORDER BY created_at LIMIT 100)',now-7*DAY);
 }
 async function saveSheet(s,id,data,session,now) {
   revision(data.revision);revision(data.globalRevision);operationId(data.operationId);
   boundedJson(data.part,'교과군 자료');
   const hash=await digest(JSON.stringify({id,part:data.part,revision:data.revision,globalRevision:data.globalRevision}));
   const prior=await priorOperation(s,data.operationId,'sheet',id,hash);if(prior)return prior;
-  const [globals,rows]=await s.batch([['SELECT * FROM workspace WHERE id=1'],['SELECT * FROM sheets WHERE id=?',id]]);
+  const [globals,rows]=await s.batch([['SELECT * FROM ca_workspace WHERE id=1'],['SELECT * FROM ca_sheets WHERE id=?',id]]);
   if(!rows[0])fail(404,'not_found','교과군을 찾을 수 없습니다.');
   if(globals[0].revision!==data.globalRevision || rows[0].revision!==data.revision){
     const done=await priorOperation(s,data.operationId,'sheet',id,hash);if(done)return done;
@@ -56,10 +58,11 @@ async function saveSheet(s,id,data,session,now) {
   const global=JSON.parse(globals[0].payload),before=JSON.parse(rows[0].payload);
   validatePart(global,data.part,id);authorizePart(global,before,data.part,session.role==='admin');
   const identityHash=await digest(S.identityKey(data.part));
+  const guardId=randomToken();
   let updated;
-  try{updated=await s.first(`UPDATE sheets SET payload=?, revision=revision+1, last_operation=?,request_hash=?,updated_at=?,identity_hash=?
-      WHERE id=? AND revision=? AND (SELECT revision FROM workspace WHERE id=1)=? RETURNING revision`,
-    JSON.stringify(data.part),data.operationId,hash,now,identityHash,id,data.revision,data.globalRevision);}
+  try{const [,rows]=await s.batch([guard(guardId,session,now),[`UPDATE ca_sheets SET payload=?, revision=revision+1, last_operation=?,request_hash=?,updated_at=?,identity_hash=?
+      WHERE id=? AND revision=? AND (SELECT revision FROM ca_workspace WHERE id=1)=? RETURNING revision`,
+    JSON.stringify(data.part),data.operationId,hash,now,identityHash,id,data.revision,data.globalRevision],['DELETE FROM ca_write_guards WHERE id=?',guardId]]);updated=rows[0];}
   catch(e){const done=await priorOperation(s,data.operationId,'sheet',id,hash);if(done)return done;if(String(e).includes('entity_ids'))fail(400,'duplicate_id','다른 교과군에서 사용 중인 자료 식별자입니다.');throw e;}
   if(!updated){const done=await priorOperation(s,data.operationId,'sheet',id,hash);if(done)return done;fail(409,'save_conflict','저장 중 자료가 변경되었습니다. 입력을 보존하고 최신 내용을 확인하세요.');}
   await prune(s,now);return {revision:updated.revision};
@@ -68,7 +71,7 @@ async function saveGlobal(s,data,session,now) {
   requireAdmin(session);revision(data.revision);operationId(data.operationId);
   const hash=await digest(JSON.stringify({global:data.global,newSheets:data.newSheets,revision:data.revision}));
   const prior=await priorOperation(s,data.operationId,'global',null,hash);if(prior)return prior;
-  const [globals,rows]=await s.batch([['SELECT * FROM workspace WHERE id=1'],['SELECT * FROM sheets']]);
+  const [globals,rows]=await s.batch([['SELECT * FROM ca_workspace WHERE id=1'],['SELECT * FROM ca_sheets']]);
   if(globals[0].revision!==data.revision){const done=await priorOperation(s,data.operationId,'global',null,hash);if(done)return done;fail(409,'global_conflict','학교 설정이 변경되었습니다. 최신 내용을 확인하세요.');}
   const oldGlobal=JSON.parse(globals[0].payload),parts=new Map(rows.map(r=>[r.id,JSON.parse(r.payload)]));
   if(data.global?.school&&termOf(data.global)!==termOf(oldGlobal))fail(409,'term_mismatch','학기 전환을 먼저 실행하세요.');
@@ -89,12 +92,12 @@ async function saveGlobal(s,data,session,now) {
   const addedRows=await Promise.all(added.map(async part=>({part,identityHash:await digest(S.identityKey(part))})));
   const id=randomToken();
   try{await s.batch([
-    guard(id,data.revision,null,null,JSON.stringify(Object.fromEntries(rows.map(r=>[r.id,r.revision])))),
-    ['UPDATE workspace SET payload=?,revision=revision+1 WHERE id=1',boundedJson(data.global,'학교 설정')],
-    ['INSERT INTO sheets(id,payload,revision,updated_at,identity_hash) SELECT json_extract(value,\'$.part.department.id\'),json_extract(value,\'$.part\'),1,?,json_extract(value,\'$.identityHash\') FROM json_each(?)',now,boundedJson(addedRows,'새 교과군 자료')],
-    ['DELETE FROM sheets WHERE id NOT IN (SELECT value FROM json_each(?))',JSON.stringify(data.global.departmentIds)],
-    ['INSERT INTO operations(id,kind,sheet_id,request_hash,result,created_at) VALUES (?,\'global\',NULL,?,?,?)',data.operationId,hash,JSON.stringify(result),now],
-    ['DELETE FROM write_guards WHERE id=?',id]
+    guard(id,session,now,data.revision,JSON.stringify(Object.fromEntries(rows.map(r=>[r.id,r.revision])))),
+    ['UPDATE ca_workspace SET payload=?,revision=revision+1 WHERE id=1',boundedJson(data.global,'학교 설정')],
+    ['INSERT INTO ca_sheets(id,payload,revision,updated_at,identity_hash) SELECT json_extract(value,\'$.part.department.id\'),json_extract(value,\'$.part\'),1,?,json_extract(value,\'$.identityHash\') FROM json_each(?)',now,boundedJson(addedRows,'새 교과군 자료')],
+    ['DELETE FROM ca_sheets WHERE id NOT IN (SELECT value FROM json_each(?))',JSON.stringify(data.global.departmentIds)],
+    ['INSERT INTO ca_operations(id,kind,sheet_id,request_hash,result,created_at) VALUES (?,\'global\',NULL,?,?,?)',data.operationId,hash,JSON.stringify(result),now],
+    ['DELETE FROM ca_write_guards WHERE id=?',id]
   ]);}catch(e){const done=await priorOperation(s,data.operationId,'global',null,hash);if(done)return done;if(/global_conflict|sheet_conflict/.test(String(e)))fail(409,'global_conflict','학교 설정 또는 배당표가 다른 곳에서 변경되었습니다.');throw e;}
   await prune(s,now);return result;
 }
@@ -102,7 +105,7 @@ async function switchTerm(s,term,session,now){
   requireAdmin(session);
   if(!/^(?:20\d{2}|2100)-[12]$/.test(term))fail(400,'invalid_term','학기를 확인하세요.');
   const [workspaceRows,sheets,saved]=await s.batch([
-    ['SELECT * FROM workspace WHERE id=1'],['SELECT id,revision FROM sheets'],['SELECT payload FROM term_archives WHERE term=? AND sheet_id=\'\'',term]
+    ['SELECT * FROM ca_workspace WHERE id=1'],['SELECT id,revision FROM ca_sheets'],['SELECT payload FROM ca_term_archives WHERE term=? AND sheet_id=\'\'',term]
   ]);
   const current=workspaceRows[0],global=JSON.parse(current.payload),oldTerm=termOf(global);
   if(oldTerm===term)return {term};
@@ -111,19 +114,20 @@ async function switchTerm(s,term,session,now){
   const blank={department:{id:'d1',name:'새 교과군',status:'draft',sourceTotal:null,note:''},teachers:[],courses:[],groups:[],assignments:[],unmapped:[]};
   const id=randomToken();
   try{await s.batch([
-    guard(id,current.revision,null,null,JSON.stringify(Object.fromEntries(sheets.map(r=>[r.id,r.revision])))),
-    ['DELETE FROM term_archives WHERE term=?',oldTerm],
-    ['INSERT INTO term_archives(term,sheet_id,payload) VALUES (?,\'\',?)',oldTerm,current.payload],
-    ['INSERT INTO term_archives(term,sheet_id,payload,identity_hash) SELECT ?,id,payload,identity_hash FROM sheets',oldTerm],
-    ['DELETE FROM sheets'],
-    ['UPDATE workspace SET payload=?,revision=revision+1 WHERE id=1',saved[0]?.payload||JSON.stringify(next)],
-    saved.length?['INSERT INTO sheets(id,payload,identity_hash,updated_at) SELECT sheet_id,payload,identity_hash,? FROM term_archives WHERE term=? AND sheet_id!=\'\'',now,term]:['INSERT INTO sheets(id,payload,updated_at) VALUES (?,?,?)','d1',JSON.stringify(blank),now],
-    ['DELETE FROM write_guards WHERE id=?',id]
+    guard(id,session,now,current.revision,JSON.stringify(Object.fromEntries(sheets.map(r=>[r.id,r.revision])))),
+    ['DELETE FROM ca_term_archives WHERE term=?',oldTerm],
+    ['INSERT INTO ca_term_archives(term,sheet_id,payload) VALUES (?,\'\',?)',oldTerm,current.payload],
+    ['INSERT INTO ca_term_archives(term,sheet_id,payload,identity_hash) SELECT ?,id,payload,identity_hash FROM ca_sheets',oldTerm],
+    ['DELETE FROM ca_sheets'],
+    ['UPDATE ca_workspace SET payload=?,revision=revision+1 WHERE id=1',saved[0]?.payload||JSON.stringify(next)],
+    saved.length?['INSERT INTO ca_sheets(id,payload,identity_hash,updated_at) SELECT sheet_id,payload,identity_hash,? FROM ca_term_archives WHERE term=? AND sheet_id!=\'\'',now,term]:['INSERT INTO ca_sheets(id,payload,updated_at) VALUES (?,?,?)','d1',JSON.stringify(blank),now],
+    ['DELETE FROM ca_write_guards WHERE id=?',id]
   ]);}catch(error){if(/global_conflict|sheet_conflict/.test(String(error)))fail(409,'global_conflict','학기 전환 중 자료가 변경되었습니다. 다시 시도하세요.');throw error;}
   return {term};
 }
-export async function courseRequest(db,role,path,method,data,sendTransfer,receiveHours){
-  const s=store(db),session={role},admin=role==='admin',now=Date.now();
+export async function courseRequest(db,session,path,method,data,sendTransfer,receiveHours){
+  const s=store(db),admin=session.role==='admin',now=Date.now();
+  if(!await s.first('SELECT id FROM ca_workspace WHERE id=1'))fail(503,'allocation_unavailable','???? ?? ??? ??? ???.');
   if(method==='GET'&&path==='/workspace')return workspace(s,data,admin);
   if(method==='GET'&&path==='/state'){
     const w=await workspace(s,{all:true},admin);
@@ -132,7 +136,7 @@ export async function courseRequest(db,role,path,method,data,sendTransfer,receiv
   if(method==='POST'&&path==='/term')return switchTerm(s,data.term,session,now);
   if(method==='GET'&&path==='/assignment-hours'){
     requireAdmin(session);
-    const row=await s.first('SELECT payload FROM workspace WHERE id=1');
+    const row=await s.first('SELECT payload FROM ca_workspace WHERE id=1');
     const term=termOf(JSON.parse(row.payload));
     if(data.term&&data.term!==term)fail(409,'term_mismatch',data.term+' 학기로 전환한 뒤 서버 분반배정을 불러오세요.');
     return receiveHours(term);

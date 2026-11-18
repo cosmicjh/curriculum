@@ -18,9 +18,9 @@ try{
   const course=C.addCourse(source,{deptId:'test',name:'가상과목',grade:3,baseHours:31});
   const group=C.addGroup(source,course.id,'3-1','homeroom',31);C.setAssignment(source,group.slots[0].id,teacher.id,31);
   C.changeStatus(source,'test','submitted');C.changeStatus(source,'test','locked');
-  await h.courseSql('DELETE FROM sheets');
-  await h.courseSql('UPDATE workspace SET payload=? WHERE id=1',JSON.stringify(S.globalPart(source)));
-  await h.courseSql('INSERT INTO sheets(id,payload,revision) VALUES(?,?,?)','test',JSON.stringify(S.departmentPart(source,'test')),7);
+  await h.sql('DELETE FROM ca_sheets');
+  await h.sql('UPDATE ca_workspace SET payload=? WHERE id=1',JSON.stringify(S.globalPart(source)));
+  await h.sql('INSERT INTO ca_sheets(id,payload,revision) VALUES(?,?,?)','test',JSON.stringify(S.departmentPart(source,'test')),7);
   const model=exportSolverModel(source).model,base=await h.listen();
   const redirect=await fetch(base+'/solver.html',{redirect:'manual'});assert.equal(redirect.status,307);assert.equal(new URL(redirect.headers.get('location'),base).pathname,'/solver');
   for(const path of ['/solver','/solver.html','/solver/worker.js','/solver/lib/wasm/cp_sat_runtime.wasm','/solver/lib/wasm/cp_sat_runtime_asyncify.wasm']){
@@ -67,7 +67,7 @@ try{
   assert(wasmRequests.some(url=>url.endsWith('cp_sat_runtime_asyncify.wasm')));
   await page.locator('#warm-clear').click();await page.locator('#warm-file').setInputFiles({name:'result.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(result))});await page.waitForFunction(()=>document.getElementById('warm-summary').textContent.includes('100%'));
   await page.locator('#run').click();await page.locator('#cancel').click();assert.match(await page.locator('#progress').innerText(),/취소/);assert(await page.locator('#run').isEnabled());await page.waitForTimeout(1000);assert.match(await page.locator('#progress').innerText(),/취소/);
-  await h.courseSql("UPDATE sheets SET payload=json_set(payload,'$.department.status','draft') WHERE id='test'");await page.locator('#reload').click();await page.waitForFunction(()=>document.getElementById('validation').textContent.includes('오류'));assert(await page.locator('#run').isDisabled());
+  await h.sql("UPDATE ca_sheets SET payload=json_set(payload,'$.department.status','draft') WHERE id='test'");await page.locator('#reload').click();await page.waitForFunction(()=>document.getElementById('validation').textContent.includes('오류'));assert(await page.locator('#run').isDisabled());
   for(const role of ['teacher','student']){
     const session=await h.login(role),context=await browser.newContext();
     await context.addCookies(session.cookie.split('; ').filter(Boolean).map(value=>{const i=value.indexOf('=');return {name:value.slice(0,i),value:value.slice(i+1),domain:'127.0.0.1',path:'/',secure:true,httpOnly:true,sameSite:'Strict'};}));

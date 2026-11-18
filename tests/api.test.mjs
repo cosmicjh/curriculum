@@ -32,7 +32,7 @@ test('course launch inherits the role and can transfer to an inactive term',asyn
 });
 test('integrated allocation uses the existing workspace, role, and independent term',async t=>{
  const h=await harness({course:true});t.after(()=>h.close());
- for(const sql of (await readFile('tests/course-fixture.sql','utf8')).trim().split(/;\s*/).filter(Boolean))await h.courseSql(sql);
+ for(const sql of (await readFile('tests/course-fixture.sql','utf8')).trim().split(/;\s*/).filter(Boolean))await h.sql(sql);
  const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
  const request=(cookie,role,path='/workspace',method='GET',data={})=>h.api('courseWorkspace',{role,path,method,data},cookie);
  assert.equal((await request('','admin')).status,401);
@@ -55,7 +55,7 @@ test('integrated allocation uses the existing workspace, role, and independent t
  assert.equal((await request(admin,'admin')).data.global.school.year,2027);
  assert((await request(admin,'admin','/term','POST',{term:'2026-1'})).ok);
  assert.equal((await request(admin,'admin')).data.parts[0].teachers[0].name,'가상교사수정');
- await h.courseSql("UPDATE sheets SET payload=json_set(payload,'$.department.status','locked') WHERE id='d1'");
+ await h.sql("UPDATE ca_sheets SET payload=json_set(payload,'$.department.status','locked') WHERE id='d1'");
  const sent=await request(admin,'admin','/timetable-transfer','POST',{term:'2026-1'});
  assert.deepEqual(sent.data,{term:'2026-1',sections:1});
  assert.equal((await h.api('bootstrap')).data.term,'2026-2');

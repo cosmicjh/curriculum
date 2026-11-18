@@ -1,0 +1,2 @@
+INSERT INTO ca_workspace(id,payload) VALUES (1,'{"schemaVersion":1,"uiVersion":3,"school":{"name":"새 학교","year":2026,"semester":1,"grades":[{"grade":1,"classCount":0,"movingCount":0},{"grade":2,"classCount":0,"movingCount":0},{"grade":3,"classCount":0,"movingCount":0}]},"source":{},"customCatalog":[],"departmentIds":["d1"]}');
+INSERT INTO ca_sheets(id,payload) VALUES ('d1','{"department":{"id":"d1","name":"새 교과군","status":"draft","sourceTotal":null,"note":""},"teachers":[],"courses":[],"groups":[],"assignments":[],"unmapped":[]}');

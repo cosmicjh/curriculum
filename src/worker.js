@@ -226,11 +226,11 @@ async function api(request,env){
   let data;
   if(action==='courseWorkspace'){
    if(!['admin','teacher'].includes(req.role))Auth.fail(400,'INVALID_REQUEST','권한을 확인하세요.');
-   await Auth.authenticate(db,request,req.role,env);
+   const session=await Auth.authenticate(db,request,req.role,env);
    if(req.role==='teacher')requireEnabled(await S.context(db));
    if(!env.COURSE_DB)Auth.fail(503,'SETUP_REQUIRED','시수배당 저장소를 확인하세요.');
    if(typeof req.path!=='string'||!['GET','POST','PUT'].includes(req.method)||!req.data||typeof req.data!=='object'||Array.isArray(req.data))Auth.fail(400,'INVALID_REQUEST','시수배당 요청을 확인하세요.');
-   data=await courseRequest(env.COURSE_DB,req.role,req.path,req.method,req.data,transfer=>storeCourseTransfer(db,transfer),term=>readToolTransfer(db,term,'hours',true));
+   data=await courseRequest(env.DB,{...session,role:req.role},req.path,req.method,req.data,transfer=>storeCourseTransfer(db,transfer),term=>readToolTransfer(db,term,'hours',true));
   }
   else if(action==='passwordParameters')data=await Auth.parameters(db,env,req.role);
   else if(action==='logout'){await Auth.revoke(db,request,env);if(!pagesRequest(request,env)){for(const role of Auth.roles)headers.append('Set-Cookie',Auth.cookie(role));}data=true;}

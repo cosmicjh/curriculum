@@ -17,9 +17,9 @@ try{
  const course=C.addCourse(source,{deptId:'test',name:'가상과목',grade:3,baseHours:31});
  const group=C.addGroup(source,course.id,'3-1','homeroom',31);C.setAssignment(source,group.slots[0].id,teacher.id,31);
  C.changeStatus(source,'test','submitted');C.changeStatus(source,'test','locked');
- await h.courseSql('DELETE FROM sheets');
- await h.courseSql('UPDATE workspace SET payload=? WHERE id=1',JSON.stringify(S.globalPart(source)));
- await h.courseSql('INSERT INTO sheets(id,payload,revision) VALUES(?,?,?)','test',JSON.stringify(S.departmentPart(source,'test')),7);
+ await h.sql('DELETE FROM ca_sheets');
+ await h.sql('UPDATE ca_workspace SET payload=? WHERE id=1',JSON.stringify(S.globalPart(source)));
+ await h.sql('INSERT INTO ca_sheets(id,payload,revision) VALUES(?,?,?)','test',JSON.stringify(S.departmentPart(source,'test')),7);
  const base=await h.listen(),errors=[],requests=[];
  browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'msedge'}:{})});
  const page=await browser.newPage({viewport:{width:1440,height:960}});
@@ -48,10 +48,10 @@ try{
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  assert(await page.locator('#admin-content .notice-list').evaluateAll(lists=>lists.every(list=>list.scrollWidth<=list.clientWidth&&list.getBoundingClientRect().right<=innerWidth)));
  await page.screenshot({path:'test-results/solver-mobile.png',fullPage:true});
- await h.courseSql("UPDATE sheets SET payload=json_set(payload,'$.department.status','draft') WHERE id='test'");
+ await h.sql("UPDATE ca_sheets SET payload=json_set(payload,'$.department.status','draft') WHERE id='test'");
  await page.locator('[data-action=refresh-admin]').click();await idle();assert(await button.isDisabled());
  assert.match(await page.locator('[aria-label="내보내기 오류"]').innerText(),/가상교과군:.*확정/);
- await h.courseSql("UPDATE workspace SET payload=json_set(payload,'$.school.semester',1) WHERE id=1");
+ await h.sql("UPDATE ca_workspace SET payload=json_set(payload,'$.school.semester',1) WHERE id=1");
  await page.locator('[data-action=refresh-admin]').click();await idle();assert(await button.isDisabled());
  assert.match(await page.locator('[aria-label="내보내기 오류"]').innerText(),/2026-1.*2026-2/);
  await page.route('**/api/courseWorkspace',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({ok:false,error:'가상 조회 실패'})}));
