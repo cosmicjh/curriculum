@@ -1,6 +1,8 @@
 # Design: 단일 저장소·단일 DB 일원화
 
 Status: Approved by user (2026-11-18)
+2026-11-18 사용자 승인: 독립 검토 반영 이관 순서 갱신
+2026-11-18 사용자 결정: 공통 DB 전체 SQL은 Time Travel 복구 지점과 ca_ 스냅샷으로 대체한다.
 
 ## Objective and scope
 
@@ -55,14 +57,15 @@ Status: Approved by user (2026-11-18)
 - 이전 주소: GitHub Pages `/course-allocation`, Cloudflare Pages `course-allocation.pages.dev`, GitHub Pages `/cheomdancs`는 통합 화면의 해당 메뉴로 안내하는 정적 연결 페이지만 남긴다.
   Worker `class-swap`(302)과 Apps Script QR 진입점은 인쇄 QR·이전 주소 보존을 위해 유지한다.
 
-### 운영 이관 절차(별도 승인 후 실행; 이번 작업에서는 도구와 로컬 리허설만)
-`scripts/migrate-course-allocation.mjs`(기존 `migrate-class-swap.mjs` 방식 참고):
-1. 사전 검사(읽기 전용): 원본 행 수·본문 해시·버전 보고.
-2. `--apply`: 시수배당 수정 일시 중단 → 두 DB 전체 SQL과 시수배당 앱 JSON 백업을 Git 제외 `private/`에 저장 →
-   새 마이그레이션 적용 → `ca_` 테이블로 복사 → 행 수·본문 SHA-256·버전·ID 집합 대조, 불일치 시 중단.
-3. Worker 배포(새 코드가 `ca_` 테이블 사용) → 이전 주소 연결 페이지 게시.
-4. `--release`: 수정 재개.
-5. 원복 경로: 원본 DB는 수정하지 않고 보존하므로, 배포 이전 버전 재배포 + `COURSE_DB` 사용 코드로 복귀 가능해야 한다.
+### 운영 이관 절차(별도 승인 후 실행, 이번 작업은 로컬 리허설)
+`scripts/migrate-course-allocation.mjs`와 [운영 이관·원복](../COURSE_ALLOCATION_MIGRATION.md)을 따른다.
+
+1. 이전 Pages API와 기존 Worker의 원본 DB 쓰기 경로를 차단하고 진행 중인 요청을 소진한다. Builds의 main 자동 배포는 이관 해제가 끝날 때까지 유예한다.
+2. 공통 DB에 `ca_` 스키마를 적용하고, 전환 플래그·Worker 버전 식별자·임시 읽기 전용 사용 목적의 `COURSE_DB` 바인딩을 갖춘 이관 Worker를 수동 배포한다. 이 Worker는 시수배당 수정만 잠그며 다른 모듈은 공통 DB를 계속 사용한다.
+3. 읽기 전용 사전 검사로 원본 행 수·본문 해시·버전을 확인한다. 원본 DB 전체 SQL과 앱 JSON을 Git 제외 `private/`에 보관한다. 공통 DB의 전체 SQL 백업은 서비스 중단 가능성 때문에 Time Travel 복구 지점(bookmark)으로 대체한다. 복사 직전 대상 `ca_` 업무 테이블이 비어 있음을 기록한다. 관리자 전용 Worker 내부 경로에서 바인딩 매개변수·D1 batch로 페이지별 복사하고 원본과 대조한다. 대상의 대조 스냅샷과 해시는 `private/`에 보관한다.
+4. 예상 Worker 배포 버전·이전 쓰기 차단 HTTP 응답·원본 및 대상 해시를 재확인한 뒤 쓰기를 해제한다.
+5. 해제 후 main에 병합하고 정상 Builds에서 같은 기능이 배포되며 전환 플래그와 `COURSE_DB` 바인딩이 제거됐는지 확인한다. 이전 주소를 연결 페이지로 게시한다.
+6. 해제 전 원복할 때 대상 `ca_`의 백업을 남긴 후 미해제 이관분만 원자적으로 정리한다. 후속 원본 저장을 보존해 다음 이관을 할 수 있다. Time Travel은 공통 DB 전체를 되돌릴 수 있으므로 다른 모듈 변경에 대한 영향 확인과 별도 승인을 거친 경우에만 사용한다. 해제 후에는 양쪽 쓰기를 멈추고 새 `ca_` 수정과 전달 이력을 대조한다.
 
 ## Selected approach and rationale
 

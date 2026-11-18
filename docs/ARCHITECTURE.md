@@ -8,7 +8,7 @@
 
 플랫폼 `POST /api/courseWorkspace`는 세션과 교사 사용 정책을 확인한 뒤 모듈 서버 함수를 호출한다. `/workspace`, `/state`, `/global`, `/sheets/:id`, `/term`, `/assignment-hours`, `/timetable-transfer`는 이 요청 안의 모듈 경로다. 교사는 입력·제출이 가능하고, 관리자는 구조 변경·확정·재개·학기 전환을 처리한다. 학생과 비로그인은 접근할 수 없다. 분반배정 자료 전달은 같은 DB에서 학기별로 보관한다.
 
-공통 `DB`에 `ca_workspace`, `ca_sheets`, `ca_entity_ids`, `ca_operations`, `ca_write_guards`, `ca_term_archives`와 이관 상태 `ca_import`를 둔다. 시수배당 자체 인증 테이블은 이전 원본에 남는다. 교과군 저장은 교과군·전역 버전과 활성 세션을 확인하고, 같은 operationId의 재시도에는 같은 결과를 반환한다. 전역·학기 저장은 검증에 사용한 교과군 버전까지 검사하는 트랜잭션이다. 교과군 JSON의 ID 집합 SHA-256이 바뀔 때 엔터티 인덱스를 갱신하고, ID 중복은 SQL 제약으로 거부한다. 백업은 schemaVersion 1을 유지하며 클라이언트 변경 이력 최근 200개를 담을 수 있다.
+공통 `DB`에 `ca_workspace`, `ca_sheets`, `ca_entity_ids`, `ca_operations`, `ca_write_guards`, `ca_term_archives`와 이관 상태 `ca_import`와 페이지별 진행·잠금 테이블을 둔다. 임시 배포의 관리자 이관 경로만 `COURSE_DB`를 읽으며, 정상 배포는 공유 DB 하나를 사용한다. 시수배당 자체 인증 테이블은 이전 원본에 남는다. 교과군 저장은 교과군·전역 버전과 활성 세션을 확인하고, 같은 operationId의 재시도에는 같은 결과를 반환한다. 전역·학기 저장은 검증에 사용한 교과군 버전까지 검사하는 트랜잭션이다. 교과군 JSON의 ID 집합 SHA-256이 바뀔 때 엔터티 인덱스를 갱신하고, ID 중복은 SQL 제약으로 거부한다. 백업은 schemaVersion 1을 유지하며 클라이언트 변경 이력 최근 200개를 담을 수 있다.
 
 루트 `timetable-solver/`에는 Windows Python 풀이, 독립 검사, 엑셀 출력이 있다. 브라우저 솔버 모델·CP-SAT·검사기 JS는 `modules/allocation/shared/`에 한 벌만 둔다. [승인 설계](design/platform-consolidation.md) · [이관과 원복](COURSE_ALLOCATION_MIGRATION.md)
 
