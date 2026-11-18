@@ -7,8 +7,10 @@
 - `pnpm test`는 두 모듈의 단위·D1 시험을 실행한다. 과목·분반 권한, 학생·비로그인·교사 정책, 버전 충돌, operationId 재시도, ID 중복, 글로벌 트랜잭션, JS 모델 내보내기와 CP-SAT/Python 골든 비교를 확인한다.
 - `pnpm test:browser`에는 실제 플랫폼 교사·관리자 로그인, 입력·충돌·유실 응답 재시도, 제출·확정·재개, 분반배정 가져오기, JSON 백업·복원, CSV, 양식과 입력 내용 인쇄 SVG, 데스크톱·390px UI가 포함된다. `pnpm test:pages-browser`는 두 출처 환경의 메모리 세션으로 같은 시수배당 iframe을 확인한다.
 - `pnpm test:course-migration`은 관리자 전용 이관 Worker의 바인딩·분할 복사·원본/대상 전체 해시, 대조 스냅샷, 150,000바이트 및 1,500,000바이트 교과군과 보관 학기를 검증한다. 이전 경로 차단, 배포 버전, 재실행, 불일치 거부, 해제 후 쓰기 및 명령·자식 로그의 민감값 비노출을 가상 자료로 확인한다.
-- 원복 리허설은 이전 배포로 되돌렸다고 가정하고 원본 D1에 새 저장을 한 뒤, 미해제 대상만 백업·정리하고 새 원본을 재이관한다. 실제 이전 Worker/Pages 재배포, 원격 Time Travel bookmark 발급·복구, 원격 D1 성능은 별도 운영 검증 범위다. [이관과 원복](COURSE_ALLOCATION_MIGRATION.md)
-- API 시험에서 미적용 스키마 503과 빈 저장소 503의 오류 코드를 구분하고, 검증 뒤 플랫폼 세션이 만료되거나 폐기된 경우 D1의 쓰기 가드가 직접 차단하는지 확인한다. 분반배정 가져오기는 단일 유효 기존 시수 4를 원본 파일의 시수 3보다 우선한다.
+- 이관 시험은 원본 업무·인증 테이블의 동결 트리거 설치·확인·제거와 쓰기 거부를 검사한다. 해제 재스캔에서 이미 읽은 원본 교과군에 늦은 저장을 보내면 거부된다. 동결 트리거가 하나라도 빠지면 해제를 거부하며, 해제 뒤에도 27개가 남는다.
+- 실제 `eb75f3c` 핸들러에 이전 주소 검사용 GET 요청을 보내고 SQL 실행이 없는지 확인한다. 잘못된 교사 참조와 손상된 엔터티 ID 인덱스는 무결성 검사에서 중단된다. 운영 DB는 시험에서 사용하지 않는다.
+- 원복 리허설은 이전 배포로 되돌렸다고 가정하고 동결 트리거를 제거해 원본 D1에 새 저장을 한 뒤, 다시 동결하고 미해제 대상만 백업·정리하여 새 원본을 재이관한다. 실제 이전 Worker/Pages의 재배포, 원격 Time Travel 발급·복구, 원격 D1 성능은 별도 운영 검증 범위다. [이관과 원복](COURSE_ALLOCATION_MIGRATION.md)
+- API 시험은 미적용 스키마 503과 빈 저장소 503을 구분하고, 검증 뒤 세션 만료·폐기를 D1 쓰기 가드가 차단하는지 확인한다. 분반배정 가져오기는 명시된 같은 학년에서 유효한 기존 시수 4를 파일 시수 3보다 우선한다. 학년 없는 시트는 파일 시수 3을 사용한다.
 - Python은 저장소 루트에서 `timetable-solver/runtime/python.exe -m unittest discover -s timetable-solver/tests`를 실행한다. `PYTHONPATH`는 `timetable-solver`로 지정한다. 원본의 Windows runtime을 재사용할 때 임베디드 Python은 원본 모듈을 우선할 수 있다. 이 경우 `-c "import sys,runpy; sys.path.insert(0, 'timetable-solver'); runpy.run_module('unittest', run_name='__main__')" discover -s timetable-solver/tests`로 현재 체크아웃을 먼저 지정한다.
 
 ## 2026-11-16 모듈 UI 통일 검증

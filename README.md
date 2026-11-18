@@ -80,7 +80,7 @@ Linux/macOS에서 브라우저가 없으면 `pnpm exec playwright install --with
 | API | `https://school-timetable.cosmicjh.workers.dev/api/*` |
 | 허용된 화면 출처 | `https://cosmicjh.github.io` |
 | D1 | `DB`, 새 `school-timetable-db`, `migrations/` |
-| 시수배당 저장 | 같은 `DB`, `ca_` 업무 테이블, `0012_course_allocation.sql` · `0013_course_allocation_import.sql` · `0014_course_allocation_progress.sql` |
+| 시수배당 저장 | 같은 `DB`, `ca_` 업무 테이블, `0012_course_allocation.sql` · `0013_course_allocation_import.sql` · `0014_course_allocation_progress.sql` · `0015_course_allocation_source_freeze.sql` |
 | 결보강 저장 | 같은 `DB`, `swap_plans`·`swap_reservations`, `migrations/0002_shared_class_swap.sql` |
 
 새 Worker와 Pages를 게시하기 전에 D1 마이그레이션을 적용합니다. `0009_student_login.sql`은 학생 로그인을, `0010_tool_transfers.sql`은 학기별 도구 전달 자료를 추가합니다. 기존 교사·관리자 비밀번호와 세션을 보존합니다. 다른 계정의 최초 구성과 재배포·이관·복구 순서는 [배포 안내](docs/DEPLOYMENT.md)를 따릅니다. 화면은 GitHub Pages로 게시하며 Cloudflare Pages 프로젝트는 사용하지 않습니다.
