@@ -1,0 +1,21 @@
+node_modules/
+dist/
+dist-github/
+.wrangler/
+.cache/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+!.env.example
+test-results/
+*.local.json
+
+# Separate projects
+/timetable-cloudflare/
+/class-swap-cloudflare/
+/studyroom_codex_handoff/
+
+/timetable-solver/runtime/
+/timetable-solver/runs/
