@@ -8,7 +8,7 @@ import {checkUi} from './ui-contract.mjs';
 const label=process.argv[2]||'after',directory=`test-results/solver-ui-${label}`;
 await mkdir(directory,{recursive:true});
 const runs=await mkdtemp(resolve('test-results/solver-ui-runs-'));
-const server=spawn(process.env.ALLOCATION_SOLVER_PYTHON||resolve('timetable-solver/runtime/python.exe'),['-u','-c','from tt_solver.server import make_server; import sys; s=make_server(0,sys.argv[1]); print(s.server_port,flush=True); s.serve_forever()',runs],{cwd:resolve('timetable-solver'),stdio:['ignore','pipe','pipe']});
+const server=spawn(process.env.ALLOCATION_SOLVER_PYTHON||resolve('timetable-solver/runtime/python.exe'),['-u','-c',"import sys; sys.path.insert(0, '.'); from tt_solver.server import make_server; s=make_server(0,sys.argv[1]); print(s.server_port,flush=True); s.serve_forever()",runs],{cwd:resolve('timetable-solver'),stdio:['ignore','pipe','pipe']});
 let browser,stderr='';server.stderr.on('data',chunk=>stderr+=chunk);
 try{
   const port=await new Promise((resolve,reject)=>{

@@ -7,7 +7,7 @@
 - `pnpm test`는 두 모듈의 단위·D1 시험을 실행한다. 과목·분반 권한, 학생·비로그인·교사 정책, 버전 충돌, operationId 재시도, ID 중복, 글로벌 트랜잭션, JS 모델 내보내기와 CP-SAT/Python 골든 비교를 확인한다.
 - `pnpm test:browser`에는 실제 플랫폼 교사·관리자 로그인, 입력·충돌·유실 응답 재시도, 제출·확정·재개, 분반배정 가져오기, JSON 백업·복원, CSV, 양식과 입력 내용 인쇄 SVG, 데스크톱·390px UI가 포함된다. `pnpm test:pages-browser`는 두 출처 환경의 메모리 세션으로 같은 시수배당 iframe을 확인한다.
 - `pnpm test:course-migration`은 원본과 대상의 행 수, 원문 테이블·백업 본문 SHA-256, 전역·교과군 버전과 ID 집합을 대조한다. 재실행, 불일치 시 종료 코드 1과 잠금 유지, 해제 후 새 저장, 이전 바인딩의 스냅샷 보존을 확인한다. [이관 리허설 및 원복](COURSE_ALLOCATION_MIGRATION.md)
-- Python은 저장소 루트에서 `timetable-solver/runtime/python.exe -m unittest discover -s timetable-solver/tests`를 실행한다. `PYTHONPATH`는 `timetable-solver`로 지정한다. 원본의 기존 Windows runtime도 사용할 수 있다.
+- Python은 저장소 루트에서 `timetable-solver/runtime/python.exe -m unittest discover -s timetable-solver/tests`를 실행한다. `PYTHONPATH`는 `timetable-solver`로 지정한다. 원본의 Windows runtime을 재사용할 때 임베디드 Python은 원본 모듈을 우선할 수 있다. 이 경우 `-c "import sys,runpy; sys.path.insert(0, 'timetable-solver'); runpy.run_module('unittest', run_name='__main__')" discover -s timetable-solver/tests`로 현재 체크아웃을 먼저 지정한다.
 
 ## 2026-11-16 모듈 UI 통일 검증
 
