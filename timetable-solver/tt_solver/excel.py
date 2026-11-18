@@ -17,13 +17,13 @@ def write_excel(model, result, path):
     thin=Side(style='thin',color='CCCCCC'); bd=Border(left=thin,right=thin,top=thin,bottom=thin)
     hdr=PatternFill('solid',fgColor='305496'); hf=Font(color='FFFFFF',bold=True); ctr=Alignment(horizontal='center',wrap_text=True)
     GREEN=PatternFill('solid',fgColor='D6F0E0'); YELLOW=PatternFill('solid',fgColor='FCEFCB'); GRAY=PatternFill('solid',fgColor='EFEFEF')
-    
+
     # 실시간(rt) 라벨: 교시→실시간은 학년마다 다름. 표시는 실시간 슬롯(1~8, 5는 없음)으로.
     # rt: 1,2,3,4,5,6,7,8 (rt4=1·2학년 4교시 / rt5=3학년 4교시 → 별도 행으로 안 겹침)
     RT_SLOTS=[1,2,3,4,5,6,7,8]
     def rt_label(rt):
         return {1:'1교시',2:'2교시',3:'3교시',4:'4교시(1·2학년)',5:'4교시(3학년)',6:'5교시',7:'6교시',8:'7교시'}[rt]
-    
+
     # ── 시트1: 교사별 시간표 (실시간 기준 → 4교시 겹침 없음) ──
     ws=wb.active; ws.title="교사별 시간표"
     by_t=defaultdict(dict)   # t -> (d,rt) -> text
@@ -43,7 +43,7 @@ def write_excel(model, result, path):
             row+=1
         row+=1
     for col,wd in [('A',14),('B',18),('C',18),('D',18),('E',18),('F',18)]: ws.column_dimensions[col].width=wd
-    
+
     # ── 시트2: 이동수업 배치표 (요일×교시 격자, 2학년/3학년 블록) ──
     ws2=wb.create_sheet("이동수업 배치표")
     ws2["A1"]="2·3학년 이동수업 블록 배치표 — 한 칸에 2학년·3학년 블록이 함께 열릴 수 있음 (하위분반 3C1/3C2 등은 기본 블록 3C로 표시)"
@@ -77,7 +77,7 @@ def write_excel(model, result, path):
     ws2.column_dimensions['A'].width=6
     for c in 'BCDEF': ws2.column_dimensions[c].width=18
     for rr in range(hr+1,r0): ws2.row_dimensions[rr].height=34
-    
+
     # ── 시트3: 이동수업 분반 상세 (분반·과목·교사) ──
     ws3=wb.create_sheet("이동수업 분반 상세")
     ws3.append(["학년","블록","요일","교시","분반","과목","담당교사"])
@@ -86,7 +86,7 @@ def write_excel(model, result, path):
         ws3.append([f"{r['g']}학년", r['block'], DAYS[r['d']], f"{r['p']}교시", r['div'], r['sub'], r['t']])
     for c,wd in zip('ABCDEFG',[8,8,6,8,10,22,12]): ws3.column_dimensions[c].width=wd
     ws3.freeze_panes="A2"
-    
+
     # ── 시트4: 검증 요약 ──
     ws4=wb.create_sheet("검증 요약")
     ws4.append(["항목","값"])
@@ -99,8 +99,8 @@ def write_excel(model, result, path):
         ws4.append([]); ws4.append(["미배치 목록",""])
         for u in UNPLACED: ws4.append([f"{u['g']}학년 {u['cls']}반", f"{u['sub']} / {u['t']}"])
     ws4.column_dimensions['A'].width=24; ws4.column_dimensions['B'].width=32
-    
-    
+
+
     ws4.append(['결과 상태', result['status']])
     ws4.append(['독립 검사기', result.get('checker', {}).get('status', '미실행')])
     for error in result.get('checker', {}).get('errors', []):
