@@ -43,7 +43,7 @@ pnpm dev
 
 로컬 명령은 자동 생성되는 Git 제외 파일 `wrangler.local.json`과 로컬 D1 에뮬레이터를 사용합니다. `local-timetable-emulator`는 로컬 저장소 식별자이며 Cloudflare DB ID가 아닙니다. 운영용 `wrangler.jsonc`에는 실제 배포한 계정과 개인시간표 전용 D1 ID를 설정했습니다.
 
-새 로컬 DB의 시수배당 모듈에 가상 자료를 넣으려면 격리된 상태에서 `node tests/course-migration.mjs`를 실행합니다. 운영 시수배당 자료는 이전 DB에서 대조 후 이관합니다. [절차](docs/COURSE_ALLOCATION_MIGRATION.md)
+새 개발용 시수배당을 열려면 빈 로컬 DB에서 `node scripts/wrangler.mjs d1 execute DB --local --file tests/course-empty-fixture.sql`로 가상 교과군을 한 번 넣습니다. 이전 DB 두 개를 사용하는 리허설은 `node tests/course-migration.mjs`로 별도 실행합니다. 운영 자료는 원본 DB에서 대조 후 이관합니다. [절차](docs/COURSE_ALLOCATION_MIGRATION.md)
 
 실제 자료는 관리자 → 설정 → 학기·운영 설정 → 백업 불러오기에서 기존 JSON을 복원하거나, 자료 등록에서 기존 엑셀 5개를 미리보기 후 등록합니다. 학교의 전체교사시간표 행·열을 변경할 필요가 없습니다. 운영 자료·비밀값은 `private/` 등 Git 제외 위치에 보관합니다.
 
