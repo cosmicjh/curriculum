@@ -16,7 +16,7 @@
 
 ## 2. 임시 이관 Worker 수동 배포
 
-이전 원본 쓰기가 중단되고 요청이 소진된 뒤에만 실행한다. 공통 DB에 이관 마이그레이션 0012~0016을 적용한 뒤 임시 Worker를 배포한다. 정상 배포 설정에는 `DB` 바인딩만 있다.
+이전 원본 쓰기가 중단되고 요청이 소진된 뒤에만 실행한다. 공통 DB에 이관 마이그레이션 0012~0017을 적용한 뒤 임시 Worker를 배포한다. 정상 배포 설정에는 `DB` 바인딩만 있다.
 
 ```sh
 node scripts/migrate-course-allocation.mjs --prepare-config
@@ -32,7 +32,7 @@ pnpm exec wrangler deploy --config wrangler.allocation-migration.local.json
 node scripts/migrate-course-allocation.mjs --remote --expected-version <Version ID> --status
 ```
 
-이 명령이 예상 배포 버전과 관리자 API의 이관 스키마 조회를 모두 통과해야 원본 동결로 넘어간다. 최초 실행의 상태는 `empty`다. 스키마 적용이나 임시 배포·확인이 실패하면 아래의 동결 전 원복 절차를 따른다.
+이 명령이 예상 배포 버전과 0017을 포함한 관리자 API의 이관 스키마 조회를 모두 통과해야 원본 동결로 넘어간다. 최초 실행의 상태는 `empty`다. 스키마 적용이나 임시 배포·확인이 실패하면 아래의 동결 전 원복 절차를 따른다.
 
 ## 3. 원본 동결, 백업·복사·대조
 
@@ -75,7 +75,7 @@ node scripts/migrate-course-allocation.mjs --remote --expected-version <Version 
 node scripts/migrate-course-allocation.mjs --remote --db-status
 ```
 
-`released`면 해제 후 절차를 따른다. `release-check`나 `release-ready`에서 중단했다면, 이전 경로를 복구한 뒤 `--release`로 전체 재검증을 다시 실행하거나 아래 명령으로 진행을 명시적으로 취소한다. 취소에는 관리자 세션이 필요하다. 도구가 현재 진행 토큰을 읽어 제출하고 Worker는 취소와 동시에 토큰을 교체한다. 이전 주소가 404여도 취소할 수 있다.
+`released`면 해제 후 절차를 따른다. `release-check`나 `release-ready`에서 중단했다면, 이전 경로를 복구한 뒤 `--release`로 전체 재검증을 다시 실행하거나 아래 명령으로 진행을 명시적으로 취소한다. 취소에는 관리자 세션이 필요하다. 도구가 현재 진행 토큰을 읽어 제출하고 Worker는 취소와 동시에 토큰을 교체한다. 이전 주소가 404여도 취소할 수 있다. `thawReserved: true`이면 상태가 `empty`여도 원복을 끝낸 뒤 원본을 다시 동결한다.
 
 ```sh
 node scripts/migrate-course-allocation.mjs --remote --expected-version <Version ID> --cancel-release
@@ -91,11 +91,12 @@ node scripts/migrate-course-allocation.mjs --remote --expected-version <Version 
 
 - **동결 전 실패:** 공통 DB 마이그레이션, 임시 배포 또는 버전·관리 API 확인에서 실패하면 원본 트리거는 아직 설치되지 않았다. 기존 Worker 버전과 `COURSE_DB` 경로를 복구하고 기존 경로의 유지보수를 해제한다. 이관 스키마를 되돌리기 위해 공통 DB 전체를 복구할 필요는 없다.
 - **동결 후 일반 원복:** 이전 주소의 유지보수를 유지하고 현재 이관 Worker에 관리자로 로그인한다. 예상 배포 버전과 관리자 환경 쿠키를 사용해 `node scripts/migrate-course-allocation.mjs --remote --expected-version <Version ID> --thaw-source`를 실행한다. 대상이 해제 검증 중이거나 해제됐으면 종료 코드 1로 중단된다. 진행 중인 해제는 위의 `--cancel-release`로 취소할 수 있다. 승인된 원복은 공통 DB에서 원복을 예약하고 원본 트리거만 제거한 뒤 예약을 끝낸다. 도중에 연결이 끊기면 같은 명령으로 이어서 확인한다. 성공 확인 뒤 기존 Worker 버전과 `COURSE_DB` 경로를 돌리고 필요하면 이전 Pages 배포를 복구한 다음, 원본 스냅샷을 확인해 유지보수를 해제한다.
-- **동결 후 임시 Worker 장애:** 이관 관리 경로가 요청을 받을 수 없게 유지하고 이미 진행 중인 이관·해제 요청을 소진한다. 비상 원복을 마칠 때까지 임시 Worker를 다시 배포하거나 해제 명령을 실행하지 않는다. Wrangler 접근 권한으로 `node scripts/migrate-course-allocation.mjs --remote --emergency-thaw`를 실행한다. 도구는 공통 DB의 이관 상태 테이블만 읽는다. 해제 상태를 확인할 수 없거나 `release-check`, `release-ready`, `released`이면 종료 코드 1로 중단한다. 허용된 경우 원본 트리거를 조회한 뒤 대상 상태를 다시 읽고, 같은 세대임을 원본 D1 배치에서 재확인해 트리거만 제거한다. 이 명령은 대상 DB에 예약을 쓰는 일반 원복과 달리, 이관 관리 경로가 계속 비활성이고 진행 중인 요청이 없다는 운영 조건에 의존한다. 해제 검증 단계에서 장애가 났다면 확인된 임시 버전을 복구한 뒤 관리자 세션으로 취소한다. 비상 원복은 공통 DB를 변경하지 않으므로 기존 일반 원복 예약이 있었다면 다음 이관 때 임시 Worker에서 `--thaw-source`를 재실행해 예약을 끝낸 후 다시 동결한다. 비상 원복 성공 뒤에 기존 쓰기 경로를 복구한다.
+- **동결 후 임시 Worker 장애:** 두 D1에 대한 Wrangler 쓰기 권한으로 `node scripts/migrate-course-allocation.mjs --remote --emergency-thaw`를 실행한다. 도구는 고정 SQL로 공통 DB의 이관 상태와 일반 원복과 같은 `ca_import_thaw` 예약 한 행만 다룬다. 예약과 해제의 상호 배제는 공통 DB의 SQLite 가드가 보장한다. `release-check`, `release-ready`, `released`이거나 예약에 실패하면 원본 트리거를 건드리기 전에 종료 코드 1로 중단한다. 예약 뒤 원본 D1 배치에서 동결 세대를 재확인해 트리거만 제거하고, 제거를 확인한 뒤 같은 예약을 정리한다. 예약이 남아 있는 동안 해제와 재동결이 거부된다. 이관 관리 경로와 진행 중인 요청을 정리해 두면 운영 충돌을 줄일 수 있다.
+- **비상 원복을 재개할 때:** 동결 제거 전후에 연결이 끊기면 `--db-status`로 예약을 확인하고 같은 비상 명령을 재실행하거나 복구된 임시 Worker에서 `--thaw-source`를 실행한다. 해제 검증 단계에서 장애가 났다면 확인된 임시 버전을 복구한 뒤 관리자 세션으로 취소한다. 원복 성공 뒤 기존 쓰기 경로를 복구하며, 다음 이관의 재동결은 예약 정리 뒤 진행한다.
 - **미해제 이관분 정리:** 이전 쓰기가 다시 차단되고 원본이 새로 동결되며 이관 Worker 버전이 확인되면 `node scripts/migrate-course-allocation.mjs --remote --expected-version <Version ID> --reset-paused`로 대상의 업무 스냅샷을 먼저 보관한다. 이후 백업한 이관 버전과 대상 해시를 확인하고, 같은 트랜잭션에서 `ca_` 업무 행과 이관 표지만 제거한다. 한 번이라도 해제한 이관분에는 이 명령을 사용할 수 없다. 정리 후 기존 원본의 새 저장을 포함한 `--apply`를 다시 진행한다.
 - **해제 전 Time Travel 대안:** 공통 DB 차원의 장애 복구가 필요하다면 `target-recovery.json`의 복구 지점을 검토한다. 공통 DB 전체를 되돌리므로 다른 모듈의 변경 손실과 영향에 대한 별도 승인을 받아야 한다. 시수배당 이관만 되돌릴 때는 위 `ca_` 정리를 사용한다.
 - **해제 후:** 양쪽 쓰기를 중단하고 원본 동결 스냅샷, 대조 스냅샷, 해제 후 `ca_` 업무 변경·작업 버전·도구 간 전달 기록을 비교한다. 원본 편집 재개가 필요하면 별도로 사용자 승인을 받는다. 현재 이관·원복 도구는 해제 후 원본 동결 제거를 지원하지 않는다. 공통 DB 전체 복구는 이 경로에 적용하지 않는다.
 
 ## 로컬 리허설
 
-`node tests/course-migration.mjs`는 독립적인 Miniflare Worker·두 D1과 가상 이전 Pages 응답으로 복사·대조·해제·취소를 검증한다. 이전 경로가 열린 경우 가져온 이력의 실제 원본 핸들러를 호출한다. `node --test tests/course-migration-recovery.test.mjs`는 동결 전 스키마·버전 검증 실패와 임시 Worker 종료 후의 비상 원복을 시험한다. 동결·비상 원복 명령의 로컬 실행에는 같은 격리 `--persist-to`를 준다. `test-results/course-migration-*/comparison.json`과 `commands.json`에 비교와 명령별 종료 코드가 있다. 옵션 없이 실행한 도구는 로컬 읽기 전용 사전 검사로 동작한다. `--url`에는 루프백 주소만 사용하고, Worker 명령에는 `--expected-version`과 가상 관리자 환경 쿠키를 제공한다. 로컬 `--apply`의 `--persist-to`는 실행 중인 이관 Worker의 격리 상태 경로와 같아야 한다. 가상 복구 정보는 실제 Cloudflare bookmark가 아니다.
+`node tests/course-migration.mjs`는 독립적인 Miniflare Worker·두 D1과 가상 이전 Pages 응답으로 복사·대조·해제·취소를 검증한다. 이전 경로가 열린 경우 가져온 이력의 실제 원본 핸들러를 호출한다. `node --test tests/course-migration-recovery.test.mjs`는 동결 전 스키마·버전 검증 실패, 임시 Worker 종료 후의 비상 원복, 해제와 비상 원복의 두 실행 순서, 빈 대상에 남은 예약의 재동결 차단을 시험한다. 동결·비상 원복 명령의 로컬 실행에는 같은 격리 `--persist-to`를 준다. `test-results/course-migration-*/comparison.json`과 `commands.json`에 비교와 명령별 종료 코드가 있다. 옵션 없이 실행한 도구는 로컬 읽기 전용 사전 검사로 동작한다. `--url`에는 루프백 주소만 사용하고, Worker 명령에는 `--expected-version`과 가상 관리자 환경 쿠키를 제공한다. 로컬 `--apply`의 `--persist-to`는 실행 중인 이관 Worker의 격리 상태 경로와 같아야 한다. 가상 복구 정보는 실제 Cloudflare bookmark가 아니다.
