@@ -5,7 +5,8 @@ import {resolve} from 'node:path';
 import test from 'node:test';
 import {promisify} from 'node:util';
 import {Miniflare} from 'miniflare';
-import {freezeCatalogSql,inspectFreeze} from '../modules/allocation/server/source-freeze.js';
+import {freezeCatalogSql,inspectFreeze,removeFreeze,thawGenerationSql} from '../modules/allocation/server/source-freeze.js';
+import {emergencyReservationSql} from '../scripts/migrate-course-allocation.mjs';
 import {harness} from './harness.mjs';
 
 const runFile=promisify(execFile);
@@ -35,7 +36,7 @@ async function fixture(migrateThrough){
 }
 
 test('failed schema or Worker version verification leaves the source unchanged and writable',async()=>{
- const {h,cli}=await fixture('0015');
+ const {h,cli}=await fixture('0016');
  try{
   const url=await h.listen(),{cookie}=await h.login();
   await h.sourceSql('UPDATE workspace SET payload=?,revision=1 WHERE id=1',payload);
@@ -49,7 +50,7 @@ test('failed schema or Worker version verification leaves the source unchanged a
  }finally{await h.close();}
 });
 
-test('emergency thaw checks only migration state without a Worker and blocks every release stage',async()=>{
+test('emergency thaw reserves and clears a D1 ticket without a Worker and blocks every release stage',async()=>{
  const {h,cli,persistTo}=await fixture();
  let url,freeze;
  try{
@@ -89,4 +90,66 @@ test('emergency thaw checks only migration state without a Worker and blocks eve
   assert.equal((await source.prepare('SELECT revision FROM workspace').first()).revision,2);
   assert.deepEqual(await cli(['--db-status']),{state:'paused',phase:'verified',thawReserved:false});
  }finally{await mf.dispose();}
+});
+
+test('release and emergency thaw reservations fence each other in both orders',async()=>{
+ const {h,cli}=await fixture();
+ try{
+  const url=await h.listen(),{cookie}=await h.login();
+  const operation=(op,data={})=>h.api('courseAllocationMigration',{version:'rehearsal-cutover',op,...data},cookie);
+  const flags=['--expected-version','rehearsal-cutover'];
+  await cli(['--freeze-source',...flags],{cookie,url});
+  const {generation}=inspectFreeze((await h.sourceSql(freezeCatalogSql)).results);
+  await h.sql("INSERT INTO ca_import(id,source_hash,state,source_freeze) VALUES(1,?,'paused',?)",marker,generation);
+  await h.sql("INSERT INTO ca_import_progress(id,token,phase) VALUES(1,?,'verified')",marker);
+
+  assert.deepEqual(await cli(['--db-status']),{state:'paused',phase:'verified',thawReserved:false});
+  const release=(await operation('verifyRelease',{token:marker})).data;
+  assert.equal(release.phase,'release-check');
+  await assert.rejects(h.sql(emergencyReservationSql(generation)),/allocation_thaw_blocked/);
+  await assert.rejects(h.sourceSql('UPDATE workspace SET revision=2 WHERE id=1'),/ca_source_frozen/);
+  assert.equal((await operation('status')).data.thawReserved,false);
+  assert((await operation('cancelRelease',{token:release.token})).ok);
+
+  const staleToken=(await operation('status')).data.token;
+  await h.sql(emergencyReservationSql(generation));
+  assert.equal((await operation('verifyRelease',{token:staleToken})).code,'allocation_thaw_active');
+  const {token_hash:adminHash}=(await h.sql("SELECT token_hash FROM sessions WHERE role='admin'")).results[0];
+  await assert.rejects(h.sql('INSERT INTO ca_import_lock(id,token,token_hash,checked_at) VALUES(1,?,?,?)',staleToken,adminHash,Date.now()),/allocation_thaw_active/);
+  assert.equal((await cli(['--emergency-thaw'])).mode,'source-thawed');
+  await h.sourceSql('UPDATE workspace SET revision=2 WHERE id=1');
+  assert.equal((await h.sourceSql('SELECT revision FROM workspace')).results[0].revision,2);
+  const current=(await operation('status')).data;
+  assert.equal(current.state,'paused');
+  assert.equal(current.phase,'verified');
+  assert.equal(current.thawReserved,false);
+  assert.notEqual(current.token,staleToken);
+  assert.equal((await operation('verifyRelease',{token:staleToken})).code,'allocation_import_conflict');
+  const edit=await h.api('courseWorkspace',{role:'admin',path:'/global',method:'PUT',data:{}},cookie);
+  assert.equal(edit.code,'allocation_import_paused');
+ }finally{await h.close();}
+});
+
+test('an empty target still reports a thaw reservation and blocks refreeze after the source DDL',async()=>{
+ const {h,cli}=await fixture();
+ try{
+  const url=await h.listen(),{cookie}=await h.login();
+  const flags=['--expected-version','rehearsal-cutover'];
+  const opts={cookie,url};
+  await cli(['--freeze-source',...flags],opts);
+  const {generation}=inspectFreeze((await h.sourceSql(freezeCatalogSql)).results);
+  const begun=await h.api('courseAllocationMigration',{version:'rehearsal-cutover',op:'beginThaw'},cookie);
+  assert(begun.ok,begun.error);
+  await h.sourceSql(thawGenerationSql(generation));
+  for(const sql of removeFreeze())await h.sourceSql(sql);
+
+  const reserved={state:'empty',phase:null,thawReserved:true};
+  assert.deepEqual(await cli(['--status',...flags],opts),reserved);
+  assert.deepEqual(await cli(['--db-status']),reserved);
+  assert.match(await cli(['--freeze-source',...flags],{...opts,exit:1}),/원복 예약/);
+  assert.deepEqual(inspectFreeze((await h.sourceSql(freezeCatalogSql)).results),{generation:null,complete:false});
+  assert.equal((await cli(['--emergency-thaw'])).mode,'source-thawed');
+  assert.deepEqual(await cli(['--status',...flags],opts),{...reserved,thawReserved:false});
+  assert.equal((await cli(['--freeze-source',...flags],opts)).triggers,27);
+ }finally{await h.close();}
 });

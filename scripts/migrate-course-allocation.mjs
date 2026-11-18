@@ -18,6 +18,8 @@ const tables=['workspace','sheets','entity_ids','operations','write_guards','ter
 const targetStatusSql=`SELECT (SELECT state FROM ca_import WHERE id=1) AS state,
  (SELECT phase FROM ca_import_progress WHERE id=1) AS phase,
  EXISTS (SELECT 1 FROM ca_import_thaw WHERE id=1) AS thawReserved`;
+const thawTicketSql='SELECT token,generation FROM ca_import_thaw WHERE id=1';
+const thawBlocked='해제 검증 중이거나 해제된 이관은 원복할 수 없습니다.';
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 class SafeError extends Error {}
 function check(ok,message){if(!ok)throw new SafeError(message);}
@@ -76,31 +78,50 @@ async function sourceExport(directory,options){
 function statusSummary({state,phase,thawReserved}){
  return {state,phase,thawReserved};
 }
-async function targetStatus(options){
+async function targetSql(options,statements){
  const config=JSON.parse(await readFile(targetConfig,'utf8'));
  check(config.d1_databases.length===1&&config.d1_databases[0].binding==='DB'&&config.d1_databases[0].database_id===targetId,'공통 DB 바인딩을 확인하세요.');
  check(options.remote||options['persist-to'],'격리된 공통 DB 상태 경로를 지정하세요.');
  const location=options.remote?['--remote']:['--local','--persist-to',resolve(options['persist-to'])];
- const [result]=JSON.parse(await wrangler(['d1','execute','DB',...location,'--json','--command',targetStatusSql],targetConfig,true));
- const row=result?.results?.[0];
- check(result?.success&&result.results.length===1&&[0,1].includes(row.thawReserved)&&(
+ const output=await wrangler(['d1','execute','DB',...location,'--json','--command',statements.join(';\n')],targetConfig,true,'allocation_thaw_blocked');
+ check(output!==true,thawBlocked);
+ const results=JSON.parse(output);
+ check(results.length===statements.length&&results.every(row=>row.success),'공통 DB 이관 상태 명령이 실패했습니다.');
+ return results.at(-1).results[0];
+}
+async function targetStatus(options){
+ const row=await targetSql(options,[targetStatusSql]);
+ check(row&&[0,1].includes(row.thawReserved)&&(
   row.state===null&&row.phase===null||row.state==='paused'&&['copy','copied','verify','verified','release-check','release-ready'].includes(row.phase)||
   row.state==='released'&&row.phase==='release-ready'),'공통 DB 이관 상태를 확인할 수 없습니다.');
  return statusSummary({state:row.state??'empty',phase:row.phase,thawReserved:Boolean(row.thawReserved)});
 }
 
+export function emergencyReservationSql(generation){
+ check(/^[a-f0-9]{32}$/.test(generation),'원본 동결 세대를 확인하세요.');
+ return `INSERT INTO ca_import_thaw(id,token,generation,token_hash,checked_at)
+  VALUES(1,lower(hex(randomblob(16))),'${generation}','wrangler',0)
+  ON CONFLICT(id) DO UPDATE SET token=excluded.token,generation=excluded.generation,token_hash=excluded.token_hash,checked_at=excluded.checked_at
+  WHERE ca_import_thaw.generation<>excluded.generation`;
+}
 async function emergencyThaw(options){
- // The runbook keeps the Worker unavailable and drains its requests while both databases are checked.
- const confirm=async()=>{
-  const status=await targetStatus(options);
-  check(status.state!=='released'&&!['release-check','release-ready'].includes(status.phase),'해제 검증 중이거나 해제된 이관은 원복할 수 없습니다.');
+ const status=await targetStatus(options);
+ check(status.state!=='released'&&!['release-check','release-ready'].includes(status.phase),thawBlocked);
+ const reserve=async generation=>{
+  const statements=generation?[emergencyReservationSql(generation),thawTicketSql]:[thawTicketSql];
+  const ticket=await targetSql(options,statements);
+  if(generation)check(ticket?.generation===generation,'원본 동결 해제 예약을 확인하세요.');
+  return ticket&&{token:ticket.token,freezeHash:hash(ticket.generation)};
  };
- await confirm();
- await freezeSource(options,'thaw-source',{confirm});
+ const token=await freezeSource(options,'thaw-source',{reserve});
+ if(token){
+  check(/^(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/.test(token),'원본 동결 해제 예약을 확인하세요.');
+  await targetSql(options,["DELETE FROM ca_import_thaw WHERE id=1 AND token='"+token+"'"]);
+ }
  return {mode:'source-thawed'};
 }
 
-async function freezeSource(options,action,{freezeHash,confirm}={}){
+async function freezeSource(options,action,ticket){
  const config=JSON.parse(await readFile(sourceConfig,'utf8'));
  check(config.d1_databases.length===1&&config.d1_databases[0].binding==='DB'&&config.d1_databases[0].database_id===sourceId,'원본 DB 바인딩을 확인하세요.');
  const change=async(execute,probe)=>{
@@ -110,14 +131,14 @@ async function freezeSource(options,action,{freezeHash,confirm}={}){
   };
   const before=await catalog();
   if(action==='thaw-source'){
+   const reservation=ticket.reserve?await ticket.reserve(before.generation):ticket;
    if(before.generation){
-    if(!confirm)check(hash(before.generation)===freezeHash,'원복 대상의 원본 동결을 다시 확인하세요.');
-    await confirm?.();
+    check(hash(before.generation)===reservation?.freezeHash,'원복 대상의 원본 동결을 다시 확인하세요.');
     try{await execute([thawGenerationSql(before.generation),...removeFreeze()]);}
     catch(error){if((await catalog()).generation)throw error;}
    }
    check(!(await catalog()).generation,'동결 트리거가 남아 있습니다.');
-   return;
+   return reservation?.token;
   }
   if(action==='freeze-source'&&!before.complete){
    await execute([...removeFreeze(),...installFreeze(randomBytes(16).toString('hex'))]);
@@ -214,7 +235,7 @@ async function migrate(options){
  async function call(op,data={}){
   const response=await post('courseAllocationMigration',{op,version,...data});
   const payload=await response.json();
-  if(op==='beginThaw'&&payload.code==='allocation_thaw_blocked')throw new SafeError('해제 검증 중이거나 해제된 이관은 원복할 수 없습니다.');
+  if(op==='beginThaw'&&payload.code==='allocation_thaw_blocked')throw new SafeError(thawBlocked);
   check(response.ok&&payload.ok,'이관 요청 실패 ('+op+', HTTP '+response.status+').');
   return payload.data;
  }

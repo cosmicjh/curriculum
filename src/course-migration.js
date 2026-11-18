@@ -35,7 +35,12 @@ export function migrationVersion(env){
  return env.COURSE_ALLOCATION_MIGRATION==='true'&&env.COURSE_DB?env.COURSE_ALLOCATION_VERSION?.id||null:null;
 }
 async function status(db){
- return db.first('SELECT m.state,m.source_hash,m.source_freeze,p.token,p.phase,p.table_index,p.cursor,p.hash,p.verified_at,t.token AS thaw_token FROM ca_import m LEFT JOIN ca_import_progress p ON p.id=m.id LEFT JOIN ca_import_thaw t ON t.id=m.id WHERE m.id=1');
+ const current=await db.first(`SELECT m.state,m.source_hash,m.source_freeze,p.token,p.phase,p.table_index,p.cursor,p.hash,p.verified_at,
+  t.token AS thaw_token, EXISTS(SELECT 1 FROM sqlite_schema WHERE name='ca_invalidate_import_after_thaw' AND type='trigger') AS thaw_guard
+  FROM (SELECT 1 AS id) cutover LEFT JOIN ca_import m ON m.id=cutover.id
+  LEFT JOIN ca_import_progress p ON p.id=m.id LEFT JOIN ca_import_thaw t ON t.id=cutover.id`);
+ if(!current.thaw_guard)unset();
+ return current;
 }
 export async function allocationAccess(db,env,method){
  if(env.COURSE_ALLOCATION_MIGRATION!=='true')return;
@@ -200,7 +205,7 @@ export async function courseMigration(db,env,session,request){
    return true;
   }
   if(request.op==='begin'){
-   if(current)refuse('allocation_import_exists','이전에 시작한 이관을 확인하세요.');
+   if(current.state)refuse('allocation_import_exists','이전에 시작한 이관을 확인하세요.');
    await probeLegacy();
    const generation=await frozenSource(source,null,true);
    await begin(db,session,request.hash,generation);
