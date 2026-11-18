@@ -143,6 +143,7 @@ export async function courseRequest(db,session,path,method,data,sendTransfer,rec
   }
   if(method==='POST'&&path==='/timetable-transfer'){
     requireAdmin(session);
+    if(await s.first("SELECT id FROM ca_import WHERE state='paused'"))fail(503,'allocation_import_paused','시수배당 자료 이관 중입니다.');
     const current=await workspace(s,{all:true},true),transfer=C.timetableTransfer(assemble(current.global,current.parts));
     if(data.term!==transfer.term)fail(409,'term_mismatch','시수배당 학기가 변경됐습니다. 자료를 다시 불러와 주세요.');
     return sendTransfer(transfer);

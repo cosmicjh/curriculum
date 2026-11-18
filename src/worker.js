@@ -212,7 +212,7 @@ async function api(request,env){
    if(!pagesRequest(request,env)||request.headers.get('Access-Control-Request-Method')!=='POST'||requested.some(h=>!['content-type','authorization'].includes(h)))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
    headers.set('Access-Control-Allow-Methods','POST');headers.set('Access-Control-Allow-Headers','Content-Type, Authorization');headers.set('Access-Control-Max-Age','600');return new Response(null,{status:204,headers});
   }
-  if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1',sharedTimetable:true}},{headers});}
+  if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1',sharedTimetable:true,courseAllocationStorage:'shared-d1'}},{headers});}
   const action=path.slice(5);if(!reads.has(action)&&!writes.has(action)&&!['login','logout','passwordParameters','courseWorkspace'].includes(action)&&!(action==='studyroom'&&env.STUDYROOM_ENABLED==='true'))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
   if(request.method!=='POST')Auth.fail(405,'METHOD_NOT_ALLOWED','POST 요청을 사용하세요.');
   if(!allowedRequest(request,env))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
@@ -259,6 +259,7 @@ async function api(request,env){
   if(action==='bootstrap')data.features={studyroom:env.STUDYROOM_ENABLED==='true'};
   payload={ok:true,data};
  }catch(e){
+  if(String(e.message).includes('allocation_import_paused')){e.status=503;e.code='allocation_import_paused';e.message='시수배당 자료 이관 중입니다.';}
   if(String(e.message).includes('revision_conflict')){e.status=409;e.code='CONFLICT';}
   if(String(e.message).includes('auth_required')){e.status=401;e.code='AUTH_REQUIRED';}
   if(String(e.message).includes('sr_revision_conflict')){e.status=409;e.code='SR_CONFLICT';e.message='자료가 변경되었습니다. 새로고침한 뒤 다시 시도하세요.';}
