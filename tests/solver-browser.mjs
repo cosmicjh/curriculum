@@ -4,9 +4,9 @@ import {chromium} from 'playwright';
 import {harness} from './harness.mjs';
 import {backup} from './fixture.mjs';
 import {clickMenu} from './navigation-helper.mjs';
-import * as C from '../vendor/course-allocation/shared/domain.js';
-import * as S from '../vendor/course-allocation/shared/state.js';
-import {exportSolverModel} from '../vendor/course-allocation/shared/timetable-model.js';
+import * as C from '../modules/allocation/shared/domain.js';
+import * as S from '../modules/allocation/shared/state.js';
+import {exportSolverModel} from '../modules/allocation/shared/timetable-model.js';
 import '../scripts/build.mjs';
 
 const h=await harness({course:true});let browser;

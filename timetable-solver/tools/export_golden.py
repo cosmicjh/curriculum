@@ -238,7 +238,7 @@ def checker_rule_cases():
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--out',default='tests/fixtures/timetable-cpsat');parser.add_argument('--model');parser.add_argument('--warm-start');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--out',default='modules/allocation/tests/fixtures/timetable-cpsat');parser.add_argument('--model');parser.add_argument('--warm-start');args=parser.parse_args()
     root=Path(args.out)
     if args.model:
         cache=Path('.cache/timetable-verify').resolve()

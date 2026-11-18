@@ -1,7 +1,7 @@
 import * as Auth from './auth.js';
 import * as D from './domain.js';
 import Core from './core.js';
-import {parse as parseHours} from '../vendor/course-allocation/shared/hours-import.js';
+import {parse as parseHours} from '../modules/allocation/shared/hours-import.js';
 
 export const validTerm=term=>typeof term==='string'&&/^(?:20[2-9][0-9]|2100)-[12]$/.test(term);
 export function newTermSettings(settings,term){

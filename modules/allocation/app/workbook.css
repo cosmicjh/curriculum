@@ -114,10 +114,6 @@ input:focus,select:focus{border-color:#777;box-shadow:none}
 .sheet-dock{display:flex;align-items:flex-end;gap:8px;padding-right:12px;flex-shrink:0;min-width:0;border-top:1px solid #e6e6e6;background:#fff}
 .sheet-tabs{flex:1;min-width:0;display:flex;align-items:center;gap:4px;padding:7px 20px;overflow:auto;white-space:nowrap;scrollbar-width:thin}
 /* Keep the admin entry at the bottom right, outside the scrolling department tabs. */
-.sheet-dock .admin-entry{flex:0 0 auto;align-self:flex-end;margin:0 0 6px;padding:4px 6px;font-size:12px;line-height:1.4;white-space:nowrap}
-.sheet-dock .admin-entry:hover:not(:disabled){text-decoration:underline}
-.sheet-dock .admin-entry[aria-pressed=true]{text-decoration:underline}
-.sheet-dock .admin-entry:focus-visible{outline:1px solid #888;outline-offset:1px;text-decoration:underline}
 .sheet-tabs .sheet-tab{flex-shrink:0;padding:7px 11px;font-size:12px;min-width:0}
 .sheet-tabs .sheet-tab.active{color:var(--ui-ink);font-weight:600;text-decoration:underline}
 .sheet-tabs .sheet-add{flex-shrink:0;padding:2px 10px;font-size:20px}
@@ -221,10 +217,6 @@ dialog::backdrop{background:#0003;backdrop-filter:none}
 body>*{display:none!important}
 body>#print-root{display:block!important;width:281mm!important;height:190mm!important;margin:0!important;padding:0!important;overflow:hidden!important;break-inside:avoid;break-before:avoid;break-after:avoid}
 #print-root>.blank-print-sheet{display:block!important;width:281mm!important;height:190mm!important;max-width:100%!important;print-color-adjust:exact;-webkit-print-color-adjust:exact;break-inside:avoid}}
-.access-screen{display:grid;place-items:center;min-height:100dvh;padding:24px}
-.access-screen form{width:100%;max-width:320px}
-.access-screen h1{font-size:22px;margin-bottom:28px}
-.access-screen button{width:100%}
 #access-error{min-height:22px;font-size:12px;color:#555;margin:12px 0}
 dialog.hours-import-dialog{width:min(1180px,96vw);max-width:96vw}
 .hours-import-sheet{margin:20px 0;border-top:1px solid var(--ui-line);padding:12px 0}
@@ -278,4 +270,7 @@ body.row-order-dragging,body.row-order-dragging *{cursor:grabbing!important;user
 /* Dense table labels remain 12px; only split-slot annotations use 10px. */
 .split-plan-button small,.split-assignment small{font-size:10px}
 .cell-detail{width:32px;height:32px;line-height:1}.allocation-table .row-drag-handle{height:32px}.split-plan-button,.split-assignment{height:auto;min-height:32px}
-@media(max-width:640px){.workbook-header{display:grid;grid-template-columns:1fr;gap:8px;padding:10px 16px}.workbook-nav{flex-direction:column;align-items:stretch}.workbook-nav nav{flex-wrap:wrap;gap:16px}.file-actions{flex-wrap:wrap;margin-left:0;gap:0 8px}.file-actions button{white-space:normal}.workbook>main.page-main{padding:20px 16px}.form-grid,.dialog-body .form-grid{grid-template-columns:1fr}.panel-head{flex-wrap:wrap}.page-heading{display:block}.sheet-title-line{flex-wrap:wrap}.sheet-overview{margin-left:0}.sheet-dock{align-items:center}.sheet-tabs{padding:0 8px}.sheet-dock .admin-entry{margin:0;align-self:center}.allocation-table button{min-height:44px;height:auto}.allocation-table .row-drag-handle{min-width:24px}.allocation-table .cell-detail{position:static;width:100%;height:auto}.cell-button{height:auto}.allocation-table .teacher-identity{flex-wrap:wrap}.teacher-row-actions{flex-wrap:wrap}.allocation-table .teacher-name-cell{padding-top:4px}.course-cell-tools{flex-wrap:wrap;gap:4px}.allocation-table .subject-heading .header-add{min-height:44px}.dialog-head,.dialog-body{padding:20px}.dialog-footer{padding:10px 20px}.issue-row{flex-wrap:wrap}}
+@media(max-width:640px){.workbook-header{display:grid;grid-template-columns:1fr;gap:8px;padding:10px 16px}.workbook-nav{flex-direction:column;align-items:stretch}.workbook-nav nav{flex-wrap:wrap;gap:16px}.file-actions{flex-wrap:wrap;margin-left:0;gap:0 8px}.file-actions button{white-space:normal}.workbook>main.page-main{padding:20px 16px}.form-grid,.dialog-body .form-grid{grid-template-columns:1fr}.panel-head{flex-wrap:wrap}.page-heading{display:block}.sheet-title-line{flex-wrap:wrap}.sheet-overview{margin-left:0}.sheet-dock{align-items:center}.sheet-tabs{padding:0 8px}.allocation-table button{min-height:44px;height:auto}.allocation-table .row-drag-handle{min-width:24px}.allocation-table .cell-detail{position:static;width:100%;height:auto}.cell-button{height:auto}.allocation-table .teacher-identity{flex-wrap:wrap}.teacher-row-actions{flex-wrap:wrap}.allocation-table .teacher-name-cell{padding-top:4px}.course-cell-tools{flex-wrap:wrap;gap:4px}.allocation-table .subject-heading .header-add{min-height:44px}.dialog-head,.dialog-body{padding:20px}.dialog-footer{padding:10px 20px}.issue-row{flex-wrap:wrap}}
+
+@media(max-width:900px){.workbook-brand>span{display:inline}}
+@media(max-width:600px){.workbook-header .header-actions{width:auto;margin-left:auto}}

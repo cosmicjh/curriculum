@@ -6,6 +6,5 @@
   "assets/solver/style.css": "7b27028423c6d2c91594093bead1e6c4fd1d0a4ef3dbb25e48def152c438bdc7",
   "assets/section-assignment/style.css": "ef81932bebaf882b06a4086585da85e07f2e476e7457ebf437ce89ee98f962bc",
   "assets/class-swap/view.html": "0c99212b65e97ed0410962697c8163f1f7838614bb363818c743be47f75c001b",
-  "vendor/course-allocation/shared/ui.css": "bf659d307c8415be999c4eff609a6b6b2fc8ab35a670b8b60dde6714be5428ae",
-  "vendor/course-allocation/assets/workbook-APTSXI6R.css": "050712726d97241063e9a570a21ce32fb590c752b0b37e4558954186c8000602"
+  "assets/ui.css": "bf659d307c8415be999c4eff609a6b6b2fc8ab35a670b8b60dde6714be5428ae"
 }

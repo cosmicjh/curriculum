@@ -19,7 +19,7 @@ assert(!/or-tools-wasm|solveTimetable|buildCpModel|checkTimetable|cp_sat_runtime
 try{
  const url='http://127.0.0.1:'+port;let ready=false;
  for(let i=0;i<160;i++){if(p.exitCode!==null)throw Error(output());try{const r=await fetch(url+'/api/health');if(r.ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,250));}assert(ready,output());
- for(const path of ['/','/student.html','/teacher.html','/admin.html','/assets/app.js','/class-swap/view.html','/class-swap/app.js','/course-allocation/view.html','/course-allocation/shared/ui.css']){const r=await fetch(url+path);assert(r.ok,path);}
+ for(const path of ['/','/student.html','/teacher.html','/admin.html','/assets/app.js','/class-swap/view.html','/class-swap/app.js','/course-allocation/view.html','/assets/ui.css']){const r=await fetch(url+path);assert(r.ok,path);}
  const solverRedirect=await fetch(url+'/solver.html',{redirect:'manual'});assert.equal(solverRedirect.status,307);assert.equal(new URL(solverRedirect.headers.get('location'),url).pathname,'/solver');
  for(const path of ['/solver','/solver.html','/solver/worker.js','/solver/lib/wasm/cp_sat_runtime.wasm']){const r=await fetch(url+path);assert(r.ok);assert.equal(r.headers.get('cross-origin-opener-policy'),'same-origin');assert.equal(r.headers.get('cross-origin-embedder-policy'),'require-corp');}
  for(const path of ['/','/admin','/admin.html']){const r=await fetch(url+path);assert.equal(r.headers.get('cross-origin-opener-policy'),null);assert.equal(r.headers.get('cross-origin-embedder-policy'),null);}

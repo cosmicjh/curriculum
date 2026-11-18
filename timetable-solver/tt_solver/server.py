@@ -168,7 +168,7 @@ def make_server(port, root):
                 return
             # Exact paths only: the shared stylesheet is the repository's single source.
             files = {'/': APP/'web/index.html', '/app.js': APP/'web/app.js',
-                     '/style.css': APP/'web/style.css', '/shared/ui.css': APP.parent/'shared/ui.css'}
+                     '/style.css': APP/'web/style.css', '/shared/ui.css': APP.parent/'assets/ui.css'}
             if self.path in files:
                 path = files[self.path]
                 self.reply(200, path.read_bytes(), (mimetypes.guess_type(path.name)[0] or 'text/plain')+'; charset=utf-8')
