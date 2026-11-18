@@ -213,3 +213,36 @@ test('allocation D1 write guard rejects an expired or revoked platform session',
  await assert.rejects(guard,/auth_required/);
  assert.equal((await h.sql('SELECT count(*) n FROM ca_write_guards')).results[0].n,0);
 });
+
+test('allocation reports the missing source-freeze column as a schema error',async t=>{
+ const h=await harness({migration:true,migrateThrough:'0014'});t.after(()=>h.close());
+ const {cookie}=await h.login();
+ // Supply the newer guard table so the status query fails specifically on m.source_freeze.
+ await h.sql('CREATE TABLE ca_import_thaw(id INTEGER PRIMARY KEY, token TEXT)');
+ for(const [action,data] of [
+  ['courseWorkspace',{role:'admin',path:'/workspace',method:'GET',data:{}}],
+  ['courseAllocationMigration',{version:'rehearsal-cutover',op:'status'}]
+ ]){
+  const response=await h.api(action,data,cookie);
+  assert.equal(response.status,503);
+  assert.equal(response.code,'allocation_schema_required');
+  assert.match(response.error,/마이그레이션/);
+  assert.doesNotMatch(response.error,/source_freeze/);
+ }
+});
+test('allocation normalizes raw freeze errors to a 503 without the generation',async t=>{
+ const h=await harness({course:true});t.after(()=>h.close());
+ const {cookie}=await h.login();
+ const workspace={role:'admin',path:'/workspace',method:'GET',data:{}};
+ const {data}=await h.api('courseWorkspace',workspace,cookie);
+ const part=structuredClone(data.parts[0]);part.department.note='가상 동결 확인';
+ const generation='a'.repeat(32);
+ await h.sql("CREATE TRIGGER test_freeze_error BEFORE INSERT ON ca_write_guards BEGIN SELECT RAISE(ABORT,'ca_source_frozen:"+generation+"'); END;");
+ const response=await h.api('courseWorkspace',{role:'admin',path:'/sheets/d1',method:'PUT',data:{
+  part,globalRevision:data.globalRevision,revision:data.revisions.d1,operationId:'test-freeze-display'
+ }},cookie);
+ assert.equal(response.status,503);
+ assert.equal(response.code,'allocation_source_unfrozen');
+ assert.equal(response.error,'시수배당 원본 동결을 확인하세요.');
+ assert(!JSON.stringify(response).includes(generation));
+});

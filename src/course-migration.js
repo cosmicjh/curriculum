@@ -17,16 +17,24 @@ class MigrationError extends Error {}
 function fail(status,code,message){throw Object.assign(new MigrationError(message),{status,code});}
 const unset=()=>fail(503,'allocation_schema_required','시수배당 DB 마이그레이션을 적용하세요.');
 const refuse=(code,message)=>fail(409,code,message);
+const unfrozen=()=>fail(503,'allocation_source_unfrozen','시수배당 원본 동결을 확인하세요.');
+const thawActive=()=>refuse('allocation_thaw_active','원본 동결 해제를 먼저 마치세요.');
+const thawBlocked=()=>refuse('allocation_thaw_blocked','해제 검증 중이거나 해제된 이관은 원복할 수 없습니다.');
 const paused=()=>fail(503,'allocation_import_paused','시수배당 자료 이관 중입니다.');
 
 export function allocationSchemaMissing(error){
- return /no such table:\s*(?:main\.)?ca_(?:workspace|sheets|entity_ids|operations|write_guards|term_archives|import(?:_progress|_lock)?)(?=[\s:]|$)/i.test(String(error?.message));
+ const message=String(error?.message);
+ return /no such table:\s*(?:main\.)?ca_(?:workspace|sheets|entity_ids|operations|write_guards|term_archives|import(?:_progress|_lock|_thaw)?)(?=[\s:]|$)/i.test(message)||
+  /no such column:\s*(?:(?:m|ca_import)\.)?source_freeze\b|table ca_import has no column named source_freeze\b/i.test(message);
+}
+export function allocationFreezeError(error){
+ return error?.code==='allocation_source_unfrozen'||String(error?.message).includes('ca_source_frozen:');
 }
 export function migrationVersion(env){
  return env.COURSE_ALLOCATION_MIGRATION==='true'&&env.COURSE_DB?env.COURSE_ALLOCATION_VERSION?.id||null:null;
 }
 async function status(db){
- return db.first('SELECT m.state,m.source_hash,m.source_freeze,p.token,p.phase,p.table_index,p.cursor,p.hash,p.verified_at FROM ca_import m LEFT JOIN ca_import_progress p ON p.id=m.id WHERE m.id=1');
+ return db.first('SELECT m.state,m.source_hash,m.source_freeze,p.token,p.phase,p.table_index,p.cursor,p.hash,p.verified_at,t.token AS thaw_token FROM ca_import m LEFT JOIN ca_import_progress p ON p.id=m.id LEFT JOIN ca_import_thaw t ON t.id=m.id WHERE m.id=1');
 }
 export async function allocationAccess(db,env,method){
  if(env.COURSE_ALLOCATION_MIGRATION!=='true')return;
@@ -44,17 +52,42 @@ async function probeLegacy(){
  refuse('allocation_legacy_open','이전 시수배당 API의 차단 응답을 확인하세요.');
 }
 
+async function sourceFreeze(source){
+ try{return inspectFreeze(await source.all(freezeCatalogSql));}catch{unfrozen();}
+}
+
 async function frozenSource(source,expected,prove=false){
- let state;
- try{state=inspectFreeze(await source.all(freezeCatalogSql));}catch{}
- if(!state?.complete||expected&&state.generation!==expected)
-  refuse('allocation_source_unfrozen','원본 DB 동결 트리거를 확인하세요.');
+ const state=await sourceFreeze(source);
+ if(!state.complete||expected&&state.generation!==expected)unfrozen();
  if(prove){
   let rejected=false;
   try{await source.all(freezeProbeSql);}catch(error){rejected=String(error.message).includes(freezeError(state.generation));}
-  if(!rejected)refuse('allocation_source_unfrozen','원본 DB 쓰기 차단을 확인하세요.');
+  if(!rejected)unfrozen();
  }
  return state.generation;
+}
+
+async function beginThaw(source,db,current,session){
+ if(current?.state==='released'||['release-check','release-ready'].includes(current?.phase))thawBlocked();
+ const freeze=await sourceFreeze(source);
+ let ticket=await db.first('SELECT token,generation FROM ca_import_thaw WHERE id=1');
+ if(!ticket||freeze.generation&&freeze.generation!==ticket.generation){
+  if(!freeze.generation)return null;
+  const next={token:crypto.randomUUID(),generation:freeze.generation};
+  await db.batch([
+   ...(ticket?[db.prepare('DELETE FROM ca_import_thaw WHERE id=1 AND token=?',ticket.token)]:[]),
+   db.prepare('INSERT INTO ca_import_thaw(id,token,generation,token_hash,checked_at) VALUES(1,?,?,?,?)',
+    next.token,next.generation,session.token_hash,Date.now())
+  ]);
+  ticket=next;
+ }
+ return {token:ticket.token,freezeHash:await digest(JSON.stringify(ticket.generation))};
+}
+
+async function finishThaw(source,db,token){
+ if((await sourceFreeze(source)).generation)unfrozen();
+ await db.batch([db.prepare('DELETE FROM ca_import_thaw WHERE id=1 AND token=?',token)]);
+ return true;
 }
 
 async function readPage(db,prefix,name,cursor){
@@ -139,6 +172,9 @@ export async function courseMigration(db,env,session,request){
    const revisions=['workspace','sheets'].includes(request.table)?page.rows.map(row=>row.revision):[];
    return {next:page.next,count:page.count,hash:page.hash,revisions,...(request.dump?{rows:page.rows}:{})};
   }
+  if(request.op==='beginThaw')return await beginThaw(source,db,current,session);
+  if(request.op==='finishThaw')return await finishThaw(source,db,request.token);
+  if(current?.thaw_token&&['verifyRelease','release'].includes(request.op))thawActive();
   if(request.op==='checkFreeze'){await frozenSource(source,current?.source_freeze,true);return true;}
   if(current?.state==='released')refuse('allocation_released','이미 해제한 이관입니다.');
   if(request.op==='checkLegacy'){
@@ -153,7 +189,7 @@ export async function courseMigration(db,env,session,request){
    await begin(db,session,request.hash,generation);
   }else{
    if(!current?.token)refuse('allocation_import_missing','이관을 먼저 시작하세요.');
-   if(!current.source_freeze&&request.op!=='reset')refuse('allocation_source_unfrozen','원본 DB 동결 세대가 기록된 이관을 시작하세요.');
+   if(!current.source_freeze&&request.op!=='reset')unfrozen();
    if(request.op==='step')await step(source,db,current,session);
    else if(request.op==='verify'||request.op==='verifyRelease'){
     await frozenSource(source,current.source_freeze,true);
@@ -175,6 +211,9 @@ export async function courseMigration(db,env,session,request){
  }catch(error){
   if(allocationSchemaMissing(error))unset();
   if(error instanceof MigrationError)throw error;
+  if(allocationFreezeError(error))unfrozen();
+  if(String(error.message).includes('allocation_thaw_blocked'))thawBlocked();
+  if(String(error.message).includes('allocation_thaw_active'))thawActive();
   if(String(error.message).includes('auth_required'))fail(401,'AUTH_REQUIRED','다시 로그인하세요.');
   if(/allocation_(?:import_changed|target_not_empty)|UNIQUE constraint/.test(String(error.message)))refuse('allocation_import_conflict','이관 상태 또는 대상 자료가 변경되었습니다.');
   // Driver errors can contain row text. Keep the management response free of SQL and data.

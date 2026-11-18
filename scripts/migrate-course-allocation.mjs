@@ -6,7 +6,7 @@ import {dirname,resolve} from 'node:path';
 import {parseArgs,promisify} from 'node:util';
 import {assemble,validateGlobal} from '../modules/allocation/server/validation.js';
 import {identityKey} from '../modules/allocation/shared/state.js';
-import {freezeCatalogSql,freezeError,freezeProbeSql,inspectFreeze,installFreeze,removeFreeze} from '../modules/allocation/server/source-freeze.js';
+import {freezeCatalogSql,freezeError,freezeProbeSql,inspectFreeze,installFreeze,removeFreeze,thawGenerationSql} from '../modules/allocation/server/source-freeze.js';
 
 const root=resolve(import.meta.dirname,'..');
 const sourceConfig=resolve(root,'modules/allocation/migrations/wrangler.source.json');
@@ -70,7 +70,7 @@ async function sourceExport(directory,options){
   await writeFile(path,lines.join('\n'));
  });
 }
-async function freezeSource(options,action){
+async function freezeSource(options,action,ticket){
  const config=JSON.parse(await readFile(sourceConfig,'utf8'));
  check(config.d1_databases.length===1&&config.d1_databases[0].binding==='DB'&&config.d1_databases[0].database_id===sourceId,'원본 DB 바인딩을 확인하세요.');
  const change=async(execute,probe)=>{
@@ -80,11 +80,17 @@ async function freezeSource(options,action){
   };
   const before=await catalog();
   if(action==='thaw-source'){
-   await execute(removeFreeze());
+   if(before.generation){
+    check(hash(before.generation)===ticket.freezeHash,'원복 대상의 원본 동결을 다시 확인하세요.');
+    try{await execute([thawGenerationSql(before.generation),...removeFreeze()]);}
+    catch(error){if((await catalog()).generation)throw error;}
+   }
    check(!(await catalog()).generation,'동결 트리거가 남아 있습니다.');
-   return {mode:'source-thawed'};
+   return;
   }
-  if(action==='freeze-source'&&!before.complete)await execute(installFreeze(before.generation||randomBytes(16).toString('hex')));
+  if(action==='freeze-source'&&!before.complete){
+   await execute([...removeFreeze(),...installFreeze(randomBytes(16).toString('hex'))]);
+  }
   const after=await catalog();
   check(after.complete,'원본 DB 동결 트리거를 확인하세요.');
   check(await probe(freezeError(after.generation)),'원본 DB 쓰기 차단을 확인하세요.');
@@ -157,8 +163,8 @@ async function backupDirectory(){
 }
 async function migrate(options){
  const {apply,release,remote}=options,reset=options['reset-paused'];
- const sourceActions=['freeze-source','check-source-freeze','thaw-source'].filter(action=>options[action]);
- check([apply,release,reset,options['prepare-config'],...sourceActions].filter(Boolean).length<=1&&!(remote&&options.local),
+ const sourceActions=['freeze-source','check-source-freeze'].filter(action=>options[action]);
+ check([apply,release,reset,options['prepare-config'],options['thaw-source'],...sourceActions].filter(Boolean).length<=1&&!(remote&&options.local),
   '이관 동작과 실행 위치를 하나씩 선택하세요.');
  check(!remote||!options.url&&!options['persist-to'],'원격 실행에서는 로컬 옵션을 사용하지 않습니다.');
  if(options['prepare-config'])return prepareConfig();
@@ -175,6 +181,7 @@ async function migrate(options){
  async function call(op,data={}){
   const response=await post('courseAllocationMigration',{op,version,...data});
   const payload=await response.json();
+  if(op==='beginThaw'&&payload.code==='allocation_thaw_blocked')throw new SafeError('해제 검증 중이거나 해제된 이관은 원복할 수 없습니다.');
   check(response.ok&&payload.ok,'이관 요청 실패 ('+op+', HTTP '+response.status+').');
   return payload.data;
  }
@@ -191,6 +198,15 @@ async function migrate(options){
   await deployCheck();
  }
  await deployCheck();
+ if(options['thaw-source']){
+  if(!remote)check(options['persist-to'],'격리된 원본 DB 상태 경로를 지정하세요.');
+  const ticket=await call('beginThaw');
+  if(ticket){
+   await freezeSource(options,'thaw-source',ticket);
+   await call('finishThaw',{token:ticket.token});
+  }
+  return {mode:'source-thawed'};
+ }
  let state=await call('status');
  if(state.state==='released'){
   check(!reset,'이미 해제한 이관은 정리할 수 없습니다.');

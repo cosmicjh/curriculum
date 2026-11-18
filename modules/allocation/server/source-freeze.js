@@ -7,6 +7,14 @@ export const freezeCatalogSql="SELECT type,name,tbl_name,sql FROM sqlite_schema 
 export const freezeProbeSql='INSERT INTO workspace(id,payload,revision) SELECT id,payload,revision FROM workspace WHERE id=1';
 export const freezeError=generation=>'ca_source_frozen:'+generation;
 
+// Abort the source batch if a delayed retry sees a different freeze generation.
+export function thawGenerationSql(generation){
+ if(!generationPattern.test(generation||''))throw Error('Invalid freeze generation');
+ const match="instr(sql,'"+freezeError(generation)+"')";
+ const scope=" FROM sqlite_schema WHERE type='trigger' AND name GLOB 'ca_source_freeze_*' AND ";
+ return 'SELECT CASE WHEN EXISTS (SELECT 1'+scope+match+'>0) AND NOT EXISTS (SELECT 1'+scope+match+"=0) THEN 1 ELSE json_extract('', '$') END";
+}
+
 function definitions(generation,verb){
  if(verb==='create'&&!generationPattern.test(generation||''))throw Error('Invalid freeze generation');
  return sourceTables.flatMap(table=>events.map(event=>{
