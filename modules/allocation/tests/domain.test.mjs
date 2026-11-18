@@ -54,3 +54,12 @@ test('reset, CSV escaping and blank/current SVG print remain available',()=>{
   assert.match(P.blankFormSvg(state,'d1'),/<svg/);assert.match(P.currentFormSvg(state,'d1',true),/가상수식/);
   const reset=Reset.apply(state,'hours','d1');assert.equal(C.teacherHours(reset.state,'teacher-d1'),0);assert.equal(C.teacherHours(reset.state,'teacher-d2'),3);
 });
+
+test('section import proposes the single valid existing weekly-hours value',()=>{
+  const state=demoState(),file=hoursFixture();
+  file.sheets[0].courses[0].courseName=state.courses[0].name;
+  state.courses[0].baseHours=4;
+  const data=H.parse(file);
+  assert.equal(data.sheets[0].courses[0].hours,3);
+  assert.equal(H.defaults(data,state).sheets[0].courses[0].hours,4);
+});
