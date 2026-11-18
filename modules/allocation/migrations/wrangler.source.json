@@ -1,0 +1,13 @@
+{
+  "name": "course-allocation",
+  "compatibility_date": "2026-07-30",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "course-allocation-db",
+      "database_id": "2f1b7cde-5ea8-453b-b810-f372cf138c60",
+      "migrations_dir": "."
+    }
+  ],
+  "account_id": "965071bae1ca798003675034b0ce7ce5"
+}

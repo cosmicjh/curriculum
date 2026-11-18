@@ -5,13 +5,14 @@ import {mkdir,mkdtemp,readFile,unlink,writeFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname,resolve} from 'node:path';
 import {parseArgs,promisify} from 'node:util';
+import {Miniflare} from 'miniflare';
 import {assemble,validateGlobal} from '../modules/allocation/server/validation.js';
 import {identityKey} from '../modules/allocation/shared/state.js';
 
 const root=resolve(import.meta.dirname,'..');
 const cli=resolve(dirname(createRequire(import.meta.url).resolve('wrangler/package.json')),'bin/wrangler.js');
 const runFile=promisify(execFile);
-const sourceConfig=resolve(root,'modules/allocation/wrangler.jsonc');
+const sourceConfig=resolve(root,'modules/allocation/migrations/wrangler.source.json');
 const targetConfig=resolve(root,'wrangler.jsonc');
 const sourceId='2f1b7cde-5ea8-453b-b810-f372cf138c60';
 const targetId='c4c3186c-bcfa-4bb9-959f-5086151abce8';
@@ -80,6 +81,19 @@ async function migrate(options){
   })).stdout;}
   catch(error){throw Error('D1 '+args.slice(0,2).join(' ')+' failed ('+(error.code??'unknown')+').');}
  }
+ async function exportDatabase(config,id,output){
+  if(remote){
+   await command(config,['d1','export','DB','--skip-confirmation','--output',output]);
+   return;
+  }
+  // Wrangler's export command has no --persist-to option. Use the same local D1 exporter on the isolated state.
+  const mf=new Miniflare({modules:true,script:'export default {}',d1Databases:{DB:id},d1Persist:resolve(persist,'v3/d1')});
+  try{
+   const db=await mf.getD1Database('DB');
+   const [lines]=await db.prepare('PRAGMA miniflare_d1_export(?,?,?);').bind(false,false).raw();
+   await writeFile(output,lines.join('\n'));
+  }finally{await mf.dispose();}
+ }
  async function execute(config,flag,value){
   const result=JSON.parse(await command(config,['d1','execute','DB','--json',flag,value]));
   assert(result.every(item=>item.success),'D1 statement failed.');
@@ -110,9 +124,8 @@ async function migrate(options){
   backupDir=await mkdtemp(resolve(privateRoot,'course-allocation-'));
   env.WRANGLER_LOG_PATH=resolve(backupDir,'wrangler.log');
   console.log('Backup directory: '+backupDir);
-  for(const [config,name] of [[sourceConfig,'source'],[targetConfig,'target']]){
-   await command(config,['d1','export','DB','--output',resolve(backupDir,name+'.sql')]);
-  }
+  await exportDatabase(sourceConfig,sourceId,resolve(backupDir,'source.sql'));
+  await exportDatabase(targetConfig,targetId,resolve(backupDir,'target.sql'));
   await writeFile(resolve(backupDir,'source.json'),JSON.stringify(before.backup,null,2));
   await command(targetConfig,['d1','migrations','apply','DB']);
   const file=resolve(backupDir,'transfer.local.sql');

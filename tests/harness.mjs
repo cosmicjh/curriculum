@@ -6,10 +6,10 @@ import {resolve,sep,extname} from 'node:path';
 import {provisionCredential,randomToken} from '../src/crypto.js';
 import {stretchPassword,newSalt} from '../src/password.js';
 let bundle,bindings;
-export async function harness({frontendOrigin='https://cosmicjh.github.io',studyroom=false,course=false,staticAssets=false,workerScript}={}){
+export async function harness({frontendOrigin='https://cosmicjh.github.io',studyroom=false,course=false,staticAssets=false,workerScript,persistTo}={}){
  bundle??=(await build({entryPoints:['tests/worker.mjs'],bundle:true,write:false,format:'esm',platform:'browser'})).outputFiles[0].text;
  if(!bindings){const pepper=randomToken();bindings={PASSWORD_PEPPER:pepper,BOOTSTRAP_TEACHER_HASH:await provisionCredential('1234',pepper,'teacher'),BOOTSTRAP_ADMIN_HASH:await provisionCredential('1234',pepper,'admin')};}
- const mf=new Miniflare({modules:true,script:workerScript??bundle,compatibilityDate:'2026-07-30',...(staticAssets?{assets:{directory:resolve('dist'),binding:'ASSETS',routerConfig:{has_user_worker:true,static_routing:{user_worker:['/api','/api/*','/__fixture_sql']}}}}:{}),d1Databases:{DB:'timetable-test-'+crypto.randomUUID()},bindings:{...bindings,FRONTEND_ORIGIN:frontendOrigin,STUDYROOM_ENABLED:studyroom?'true':'false',STUDYROOM_CRON_ENABLED:studyroom?'true':'false',STUDYROOM_TEST_MODE:studyroom?'true':'false'},host:'127.0.0.1',port:0,log:new Log(LogLevel.ERROR)});
+ const mf=new Miniflare({modules:true,script:workerScript??bundle,compatibilityDate:'2026-07-30',...(staticAssets?{assets:{directory:resolve('dist'),binding:'ASSETS',routerConfig:{has_user_worker:true,static_routing:{user_worker:['/api','/api/*','/__fixture_sql']}}}}:{}),...(persistTo?{d1Persist:resolve(persistTo,'v3/d1')}:{}),d1Databases:{DB:persistTo?'c4c3186c-bcfa-4bb9-959f-5086151abce8':'timetable-test-'+crypto.randomUUID()},bindings:{...bindings,FRONTEND_ORIGIN:frontendOrigin,STUDYROOM_ENABLED:studyroom?'true':'false',STUDYROOM_CRON_ENABLED:studyroom?'true':'false',STUDYROOM_TEST_MODE:studyroom?'true':'false'},host:'127.0.0.1',port:0,log:new Log(LogLevel.ERROR)});
  async function fixtureSql(sql,args){const r=await mf.dispatchFetch('http://localhost/__fixture_sql',{method:'POST',body:JSON.stringify({sql,args})});if(!r.ok)throw Error(await r.text());return r.json();}
  const sql=(query,...args)=>fixtureSql(query,args);
  async function migrate(dir,execute){
@@ -18,7 +18,7 @@ export async function harness({frontendOrigin='https://cosmicjh.github.io',study
   schema=schema.replace(/CREATE TRIGGER[\s\S]*?\nEND;/g,trigger=>{triggers.push(trigger);return '';});
   for(const statement of [...schema.split(';').map(s=>s.trim()).filter(Boolean),...triggers])await execute(statement);
  }}
- try{await migrate('migrations',sql);if(course)for(const statement of (await readFile('tests/course-empty-fixture.sql','utf8')).split(';').filter(s=>s.trim()))await sql(statement);}catch(error){await mf.dispose();throw error;}
+ try{if(!persistTo)await migrate('migrations',sql);if(course)for(const statement of (await readFile('tests/course-empty-fixture.sql','utf8')).split(';').filter(s=>s.trim()))await sql(statement);}catch(error){await mf.dispose();throw error;}
  let seq=0,server;
  async function api(action,data={},cookie='',extraHeaders={}){
   const start=performance.now(),response=await mf.dispatchFetch('http://localhost/api/'+action,{method:'POST',headers:{Origin:'http://localhost','Content-Type':'application/json','CF-Connecting-IP':'test-'+(++seq),...(cookie?{Cookie:cookie}:{}),...extraHeaders},body:JSON.stringify(data)});
