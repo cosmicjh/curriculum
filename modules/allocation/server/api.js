@@ -127,7 +127,7 @@ async function switchTerm(s,term,session,now){
 }
 export async function courseRequest(db,session,path,method,data,sendTransfer,receiveHours){
   const s=store(db),admin=session.role==='admin',now=Date.now();
-  if(!await s.first('SELECT id FROM ca_workspace WHERE id=1'))fail(503,'allocation_unavailable','???? ?? ??? ??? ???.');
+  if(!await s.first('SELECT id FROM ca_workspace WHERE id=1'))fail(503,'allocation_unavailable','시수배당 자료 이관을 확인해 주세요.');
   if(method==='GET'&&path==='/workspace')return workspace(s,data,admin);
   if(method==='GET'&&path==='/state'){
     const w=await workspace(s,{all:true},admin);
