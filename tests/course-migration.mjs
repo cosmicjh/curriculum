@@ -3,6 +3,8 @@ import {execFile} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {access,mkdir,mkdtemp,readFile,writeFile} from 'node:fs/promises';
 import {dirname,resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {build} from 'esbuild';
 import {promisify} from 'node:util';
 import {harness} from './harness.mjs';
 import {privateChild} from '../scripts/migrate-course-allocation.mjs';
@@ -15,6 +17,21 @@ const runFile=promisify(execFile);
 await mkdir('test-results',{recursive:true});
 const run=await mkdtemp(resolve('test-results/course-migration-'));
 const persist=resolve(run,'state'),log=[];
+const oldRoot=resolve(run,'legacy-handler');
+const oldRevision='eb75f3c071cdd19b4d0ba7243d6f58da73890e14';
+const git=async args=>(await runFile('git',args,{windowsHide:true})).stdout;
+const legacyFiles=(await git(['ls-tree','-r','--name-only',oldRevision,'server','shared'])).trim().split(/\r?\n/).filter(name=>name.endsWith('.js'));
+for(const file of legacyFiles){
+ const path=resolve(oldRoot,file);
+ await mkdir(dirname(path),{recursive:true});
+ await writeFile(path,await git(['show',oldRevision+':'+file]));
+}
+const oldBundle=resolve(oldRoot,'legacy.mjs');
+await build({entryPoints:[resolve(oldRoot,'server/api.js')],outfile:oldBundle,bundle:true,format:'esm',platform:'browser'});
+const {handleRequest:legacyHandler}=await import(pathToFileURL(oldBundle));
+const legacySql=[];
+let legacyStatus;
+
 const tag='rehearsal-private-payload';
 const operationId='virtual-private-operation-id';
 const secretUrl='https://example.invalid/export?signature=virtual-test';
@@ -25,7 +42,15 @@ const probes=[];
 const h=await harness({persistTo:persist,migration:true,legacyProbe:async request=>{
  const path=new URL(request.url).pathname;
  probes.push([request.method,path]);
- return new Response(null,{status:legacyOpen?200:410,headers:legacyOpen?{}:{'X-Course-Allocation-Frozen':'1'}});
+ if(legacyOpen){
+  const response=await legacyHandler(request,{PASSWORD_PEPPER:'a'.repeat(64),DB:{prepare(sql){
+   legacySql.push(sql);throw Error('Unexpected DB access by the legacy probe');
+  }}});
+  legacyStatus=response.status;
+  return response;
+ }
+ return new Response(null,{status:410,headers:{'X-Course-Allocation-Frozen':'1'}});
+
 }});
 try{
  const url=await h.listen();
@@ -43,6 +68,9 @@ try{
   return exit?result.stderr:JSON.parse(result.stdout);
  }
  const operation=async(op,data={})=>h.api('courseAllocationMigration',{version:'rehearsal-cutover',op,...data},cookie);
+ const freeze=()=>migrate(['--freeze-source']);
+ const thaw=()=>migrate(['--thaw-source']);
+ const checkFrozen=()=>migrate(['--check-source-freeze']);
  const edit=view=>h.api('courseWorkspace',{role:'admin',path:'/global',method:'PUT',data:view},cookie);
 
  const {cookie:teacher}=await h.login('teacher');
@@ -56,6 +84,22 @@ try{
  for(const sql of demoSeed().trim().split(/;\s*/).filter(Boolean))await h.sourceSql(sql);
 
  const fixture=demoState(),global=globalPart(fixture),parts=fixture.departments.map(d=>departmentPart(fixture,d.id));
+ const invalid=structuredClone(parts[0]);
+ invalid.assignments[0].teacherId='virtual-missing-teacher';
+ await h.sourceSql("UPDATE sheets SET payload=? WHERE id='d1'",JSON.stringify(invalid));
+ assert.match(await migrate(['--apply'],1),/checkLegacy, HTTP 409/);
+ assert.equal((await freeze()).triggers,27);
+ assert.equal((await checkFrozen()).writeRejected,true);
+ assert.match(await migrate(['--apply'],1),/원본 업무 무결성/);
+ assert.equal((await operation('status')).data.state,'empty');
+ await thaw();
+ await h.sourceSql("UPDATE sheets SET payload=? WHERE id='d1'",JSON.stringify(parts[0]));
+ const idRow=(await h.sourceSql("SELECT kind,entity_id,sheet_id FROM entity_ids ORDER BY kind,entity_id LIMIT 1")).results[0];
+ await h.sourceSql('DELETE FROM entity_ids WHERE kind=? AND entity_id=?',idRow.kind,idRow.entity_id);
+ await freeze();
+ assert.match(await migrate([],1),/원본 업무 무결성/);
+ await thaw();
+ await h.sourceSql('INSERT INTO entity_ids(kind,entity_id,sheet_id) VALUES(?,?,?)',idRow.kind,idRow.entity_id,idRow.sheet_id);
  const large=(part,bytes)=>{
   const next={...part,fixtureExtension:tag};
   next.fixtureExtension+='x'.repeat(bytes-Buffer.byteLength(JSON.stringify(next)));
@@ -78,6 +122,8 @@ try{
   await h.sourceSql("INSERT INTO term_archives(term,sheet_id,payload,identity_hash) VALUES('2025-2',?,?,?)",
    id,JSON.stringify(payload),digest(identityKey(payload)));
  }
+ assert.equal((await freeze()).triggers,27);
+ assert.deepEqual(await freeze(),await checkFrozen());
  const first=await migrate();
  assert.equal(first.before.rows.term_archives,13);
  assert.equal(first.before.rows.operations,1);
@@ -86,6 +132,11 @@ try{
  legacyOpen=true;
  assert.match(await migrate(['--apply'],1),/checkLegacy, HTTP 409/);
  assert.equal((await operation('status')).data.state,'empty');
+ assert.equal(legacyStatus,401);
+ assert.deepEqual(legacySql,[]);
+ for(const table of ['login_limits','credentials','sessions']){
+  assert.equal((await h.sourceSql('SELECT COUNT(*) n FROM '+table)).results[0].n,0);
+ }
  legacyOpen=false;
  const applied=await migrate(['--apply']);
  assert.equal(applied.mode,'applied');
@@ -110,7 +161,10 @@ try{
  assert.equal((await operation('status')).data.state,'paused');
 
  // Simulate returning writes to the old deployment and making a new original save.
+ assert.equal((await thaw()).mode,'source-thawed');
+ assert.match(await migrate(['--check-source-freeze'],1),/동결 트리거/);
  await h.sourceSql("UPDATE sheets SET revision=8,last_operation=NULL WHERE id='d1'");
+ await freeze();
  assert.match(await migrate(['--apply'],1),/원본 해시/);
  legacyOpen=true;
  assert.match(await migrate(['--reset-paused'],1),/checkLegacy, HTTP 409/);
@@ -128,12 +182,33 @@ try{
  legacyOpen=true;
  assert.match(await migrate(['--release'],1),/checkLegacy, HTTP 409/);
  legacyOpen=false;
+
+ let state=(await operation('verifyRelease')).data;
+ let injected=false;
+ while(state.phase==='release-check'){
+  const result=await operation('step');
+  assert(result.ok,result.error);
+  state=result.data;
+  const {table_index:index}=(await h.sql('SELECT table_index FROM ca_import_progress WHERE id=1')).results[0];
+  if(!injected&&index===2){
+   injected=true;
+   await assert.rejects(h.sourceSql("UPDATE sheets SET revision=revision+1,last_operation=NULL WHERE id='d1'"),/ca_source_frozen/);
+   assert.equal((await h.sourceSql("SELECT revision FROM sheets WHERE id='d1'")).results[0].revision,8);
+  }
+ }
+ assert(injected);
+ assert.equal(state.phase,'release-ready');
+ await h.sourceSql('DROP TRIGGER ca_source_freeze_sheets_update');
+ assert.equal((await operation('release',{hash:second.after.snapshotSha256})).code,'allocation_source_unfrozen');
+ assert.match(await migrate(['--release'],1),/checkLegacy, HTTP 409/);
+ await freeze();
  const release=await migrate(['--release']);
  assert.equal(release.mode,'released');
  assert.deepEqual(release.after,second.after);
  assert.match(await migrate(['--reset-paused'],1),/이미 해제/);
  assert.equal((await operation('reset',{hash:second.after.snapshotSha256})).code,'allocation_released');
  assert.equal((await migrate(['--apply'])).mode,'already-released');
+ assert.equal((await checkFrozen()).triggers,27);
  const editPart=structuredClone(parts[0]);
  editPart.teachers[0].name='가상 이관 후 편집';
  const saved=await h.api('courseWorkspace',{role:'admin',path:'/sheets/d1',method:'PUT',data:{
@@ -141,8 +216,8 @@ try{
  }},cookie);
  assert.deepEqual(saved.data,{revision:9},saved.error);
  assert.equal((await h.sourceSql("SELECT revision FROM sheets WHERE id='d1'")).results[0].revision,8);
- assert(probes.some(([method,path])=>method==='PUT'&&path==='/api/global'));
- assert(probes.some(([method,path])=>method==='POST'&&path==='/api/term'));
+ assert(probes.length>0&&probes.every(([method,path])=>method==='GET'&&path==='/api/global'));
+ assert.deepEqual(legacySql,[]);
 
  // An isolated child models Wrangler's successful export URL and a verbose failure.
  // If file logging were inherited, it would write the synthetic markers to this path.
@@ -164,8 +239,8 @@ try{
   if(priorLogs===undefined)delete process.env.WRANGLER_WRITE_LOGS;else process.env.WRANGLER_WRITE_LOGS=priorLogs;
  }
  const result={initial:applied.before,verified:applied.after,reimported:second.after,maxSheetBytes:1500000,
-  maxArchiveBytes:1500000,otherModuleAvailable:true,releaseRevision:9,sourceRevision:8,logLeak:false,
-  cases:'wrong deployment, prior writes open, duplicate copy, target mismatch, paused reset, original re-save, repopulate, release'};
+  maxArchiveBytes:1500000,lateWriteBlocked:true,freezeRemovalBlockedRelease:true,legacyProbeWrites:0,integrityRejected:true,otherModuleAvailable:true,releaseRevision:9,sourceRevision:8,logLeak:false,
+  cases:'wrong deployment, source freeze, legacy GET, invalid references and IDs, late write denied, missing freeze, duplicate copy, target mismatch, paused reset, original re-save, repopulate, release'};
  await writeFile(resolve(run,'comparison.json'),JSON.stringify(result,null,2)+'\n');
  console.log(JSON.stringify({report:resolve(run,'comparison.json'),...result},null,2));
 }finally{

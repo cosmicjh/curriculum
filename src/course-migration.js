@@ -1,5 +1,6 @@
 import {digest} from './crypto.js';
 import {database} from './storage.js';
+import {freezeCatalogSql,freezeError,freezeProbeSql,inspectFreeze} from '../modules/allocation/server/source-freeze.js';
 
 const tables={
  workspace:{keys:['id'],fields:['id','payload','revision'],limit:1},
@@ -25,7 +26,7 @@ export function migrationVersion(env){
  return env.COURSE_ALLOCATION_MIGRATION==='true'&&env.COURSE_DB?env.COURSE_ALLOCATION_VERSION?.id||null:null;
 }
 async function status(db){
- return db.first('SELECT m.state,m.source_hash,p.token,p.phase,p.table_index,p.cursor,p.hash,p.verified_at FROM ca_import m LEFT JOIN ca_import_progress p ON p.id=m.id WHERE m.id=1');
+ return db.first('SELECT m.state,m.source_hash,m.source_freeze,p.token,p.phase,p.table_index,p.cursor,p.hash,p.verified_at FROM ca_import m LEFT JOIN ca_import_progress p ON p.id=m.id WHERE m.id=1');
 }
 export async function allocationAccess(db,env,method){
  if(env.COURSE_ALLOCATION_MIGRATION!=='true')return;
@@ -34,16 +35,26 @@ export async function allocationAccess(db,env,method){
 }
 
 async function probeLegacy(){
- // These deliberately empty requests cannot save valid data even on the previous deployment.
- const results=await Promise.all(['/api/global','/api/sheets/freeze-probe','/api/term','/api/access/login'].map(async path=>{
-  try{
-   const method=path==='/api/term'||path==='/api/access/login'?'POST':'PUT';
-   const response=await fetch(legacy+path,{method,headers:{Origin:legacy,'Content-Type':'application/json','Cache-Control':'no-store'},body:'{}',redirect:'manual',signal:AbortSignal.timeout(5000)});
-   await response.body?.cancel();
-   return response.status===410&&response.headers.get('X-Course-Allocation-Frozen')==='1';
-  }catch{return false;}
- }));
- if(results.some(result=>!result))refuse('allocation_legacy_open','이전 시수배당 API의 쓰기 차단을 확인하세요.');
+ // GET /global without credentials reaches only the legacy authentication read path.
+ try{
+  const response=await fetch(legacy+'/api/global',{headers:{'Cache-Control':'no-store'},redirect:'manual',signal:AbortSignal.timeout(5000)});
+  await response.body?.cancel();
+  if(response.status===410&&response.headers.get('X-Course-Allocation-Frozen')==='1')return;
+ }catch{}
+ refuse('allocation_legacy_open','이전 시수배당 API의 차단 응답을 확인하세요.');
+}
+
+async function frozenSource(source,expected,prove=false){
+ let state;
+ try{state=inspectFreeze(await source.all(freezeCatalogSql));}catch{}
+ if(!state?.complete||expected&&state.generation!==expected)
+  refuse('allocation_source_unfrozen','원본 DB 동결 트리거를 확인하세요.');
+ if(prove){
+  let rejected=false;
+  try{await source.all(freezeProbeSql);}catch(error){rejected=String(error.message).includes(freezeError(state.generation));}
+  if(!rejected)refuse('allocation_source_unfrozen','원본 DB 쓰기 차단을 확인하세요.');
+ }
+ return state.generation;
 }
 
 async function readPage(db,prefix,name,cursor){
@@ -65,24 +76,25 @@ function lock(db,token,session){
 }
 const unlock=db=>db.prepare('DELETE FROM ca_import_lock WHERE id=1');
 
-async function begin(db,session,sourceHash){
+async function begin(db,session,sourceHash,generation){
  if(!hashPattern.test(sourceHash||''))fail(400,'allocation_bad_hash','원본 대조 해시를 확인하세요.');
  const token=crypto.randomUUID();
  await db.batch([
-  db.prepare("INSERT INTO ca_import(id,source_hash,state) VALUES(1,?,'paused')",sourceHash),
+  db.prepare("INSERT INTO ca_import(id,source_hash,state,source_freeze) VALUES(1,?,'paused',?)",sourceHash,generation),
   db.prepare("INSERT INTO ca_import_progress(id,token,phase) VALUES(1,?,'copy')",token),
   lock(db,token,session),unlock(db)
  ]);
 }
 async function startVerify(db,current,session,phase){
- if(current.phase===phase)return;
- const allowed=phase==='release-check'?['verified','release-ready']:['copied','verified','release-check','release-ready'];
+ if(current.phase===phase&&phase!=='release-check')return;
+ const allowed=phase==='release-check'?['verified','release-check','release-ready']:['copied','verified','release-check','release-ready'];
  if(!allowed.includes(current.phase))refuse('allocation_copy_incomplete','이관 복사와 대조를 먼저 완료하세요.');
  await db.batch([lock(db,current.token,session),
   db.prepare("UPDATE ca_import_progress SET phase=?,token=?,table_index=0,cursor=NULL,hash='',verified_at=NULL WHERE id=1",phase,crypto.randomUUID()),unlock(db)]);
 }
 async function step(source,db,current,session){
  if(!['copy','verify','release-check'].includes(current.phase))return;
+ await frozenSource(source,current.source_freeze);
  const name=names[current.table_index],cursor=JSON.parse(current.cursor??'null');
  const page=await readPage(source,'',name,cursor);
  if(name==='workspace'&&page.count===0&&cursor===null)refuse('allocation_source_empty','시수배당 원본이 비어 있습니다.');
@@ -94,6 +106,7 @@ async function step(source,db,current,session){
  const running=await digest(JSON.stringify([current.hash,name,page.hash,page.count]));
  const index=current.table_index+(page.next===null?1:0);
  const complete=index===names.length;
+ if(complete)await frozenSource(source,current.source_freeze,true);
  if(complete&&running!==current.source_hash)refuse('allocation_source_changed','원본 해시가 바뀌었습니다.');
  const statements=[lock(db,current.token,session)];
  if(current.phase==='copy'&&name!=='entity_ids'&&name!=='write_guards'){
@@ -126,25 +139,34 @@ export async function courseMigration(db,env,session,request){
    const revisions=['workspace','sheets'].includes(request.table)?page.rows.map(row=>row.revision):[];
    return {next:page.next,count:page.count,hash:page.hash,revisions,...(request.dump?{rows:page.rows}:{})};
   }
+  if(request.op==='checkFreeze'){await frozenSource(source,current?.source_freeze,true);return true;}
   if(current?.state==='released')refuse('allocation_released','이미 해제한 이관입니다.');
   if(request.op==='checkLegacy'){
+   await frozenSource(source,null,true);
    await probeLegacy();
    return true;
   }
   if(request.op==='begin'){
    if(current)refuse('allocation_import_exists','이전에 시작한 이관을 확인하세요.');
    await probeLegacy();
-   await begin(db,session,request.hash);
+   const generation=await frozenSource(source,null,true);
+   await begin(db,session,request.hash,generation);
   }else{
    if(!current?.token)refuse('allocation_import_missing','이관을 먼저 시작하세요.');
+   if(!current.source_freeze&&request.op!=='reset')refuse('allocation_source_unfrozen','원본 DB 동결 세대가 기록된 이관을 시작하세요.');
    if(request.op==='step')await step(source,db,current,session);
-   else if(request.op==='verify'||request.op==='verifyRelease')await startVerify(db,current,session,request.op==='verify'?'verify':'release-check');
+   else if(request.op==='verify'||request.op==='verifyRelease'){
+    await frozenSource(source,current.source_freeze,true);
+    await startVerify(db,current,session,request.op==='verify'?'verify':'release-check');
+   }
    else if(request.op==='reset'){
     if(request.hash!==current.source_hash||request.token!==current.token)refuse('allocation_reset_mismatch','백업한 이관과 현재 이관이 다릅니다.');
+    await frozenSource(source,null,true);
     await reset(db,current,session);
    }else if(request.op==='release'){
     if(current.phase!=='release-ready'||request.hash!==current.hash||Date.now()-current.verified_at>120000)refuse('allocation_not_verified','원본·대상 재대조를 완료하세요.');
     await probeLegacy();
+    await frozenSource(source,current.source_freeze,true);
     await db.batch([lock(db,current.token,session),db.prepare("UPDATE ca_import SET state='released' WHERE id=1"),unlock(db)]);
    }else fail(400,'allocation_bad_action','이관 동작을 확인하세요.');
   }

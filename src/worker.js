@@ -215,7 +215,7 @@ async function api(request,env){
   }
   if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1',sharedTimetable:true,courseAllocationStorage:'shared-d1',...(migrationVersion(env)?{courseAllocationMigrationVersion:migrationVersion(env)}:{})}},{headers});}
   const action=path.slice(5);
-  if(action==='courseBridge'&&migrationVersion(env)&&request.method==='POST'){
+  if(action==='courseBridge'&&migrationVersion(env)&&['GET','POST'].includes(request.method)){
    headers.set('X-Course-Allocation-Frozen','1');
    return Response.json({ok:false,code:'COURSE_MOVED'},{status:410,headers});
   }
