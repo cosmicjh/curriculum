@@ -3,6 +3,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import {mkdir,mkdtemp,open,readFile,writeFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname,resolve} from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
 import {parseArgs,promisify} from 'node:util';
 import {assemble,validateGlobal} from '../modules/allocation/server/validation.js';
 import {identityKey} from '../modules/allocation/shared/state.js';
@@ -22,6 +23,7 @@ const thawTicketSql='SELECT token,generation FROM ca_import_thaw WHERE id=1';
 const thawBlocked='해제 검증 중이거나 해제된 이관은 원복할 수 없습니다.';
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 class SafeError extends Error {}
+class SourceCatalogUnavailable extends SafeError {}
 function check(ok,message){if(!ok)throw new SafeError(message);}
 
 export async function privateChild(executable,args,capture=false,expectedError){
@@ -126,7 +128,10 @@ async function freezeSource(options,action,ticket){
  check(config.d1_databases.length===1&&config.d1_databases[0].binding==='DB'&&config.d1_databases[0].database_id===sourceId,'원본 DB 바인딩을 확인하세요.');
  const change=async(execute,probe)=>{
   const catalog=async()=>{
-   try{return inspectFreeze((await execute([freezeCatalogSql]))[0].results);}
+   let result;
+   try{[result]=await execute([freezeCatalogSql]);}
+   catch{throw new SourceCatalogUnavailable('원본 스키마와 동결 트리거 정의를 확인하세요.');}
+   try{return inspectFreeze(result.results);}
    catch{throw new SafeError('원본 스키마와 동결 트리거 정의를 확인하세요.');}
   };
   const before=await catalog();
@@ -156,10 +161,18 @@ async function freezeSource(options,action,ticket){
    return rows;
   },async expected=>(await wrangler(d1([freezeProbeSql]),sourceConfig,true,expected))===true);
  }
- return localSource(options,db=>change(statements=>db.batch(statements.map(sql=>db.prepare(sql))),async expected=>{
+ const run=db=>change(statements=>db.batch(statements.map(sql=>db.prepare(sql))),async expected=>{
   try{await db.prepare(freezeProbeSql).run();return false;}
   catch(error){return String(error.message).includes(expected);}
- }));
+ });
+ // The local Worker can still be releasing SQLite when a separate CLI opens the same database.
+ for(let attempt=0;;attempt++){
+  try{return await localSource(options,run);}
+  catch(error){
+   if(!(error instanceof SourceCatalogUnavailable)||attempt===2)throw error;
+   await delay(150*(attempt+1));
+  }
+ }
 }
 async function bookmark(directory,remote){
  const record=remote
