@@ -30,7 +30,7 @@ export async function checkUi(page,name,directory,frame=page){
     assert.match(result.hostFont,/^"Pretendard Host Subset"/,'host :root font takes precedence over shared defaults');
     assert.equal(result.overflow,false,`${name} document overflow`);
     assert.deepEqual(result.escaped,[],`${name} controls overflow`);
-    await page.screenshot({path:`${directory}/ui-${name}-${viewport.width}.png`,fullPage:true});
+    await page.screenshot({path:`${directory}/ui-${name}-${viewport.width}.png`,fullPage:true,animations:'disabled'});
   }
   await page.setViewportSize(original);
 }
