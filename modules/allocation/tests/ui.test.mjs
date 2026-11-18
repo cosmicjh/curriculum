@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 test('shared, workbook, and local solver CSS use only grayscale colors and documented dense annotations',async()=>{
-  for(const file of ['shared/ui.css','app/workbook.css','timetable-solver/web/style.css']){
+  for(const file of ['assets/ui.css','modules/allocation/app/workbook.css','timetable-solver/web/style.css']){
     const css=(await readFile(file,'utf8')).replace(/\/\*[\s\S]*?\*\//g,'');
     for(const [color] of css.matchAll(/#[\da-f]{3,8}\b/gi)){
       let hex=color.slice(1);if(hex.length<=4)hex=[...hex].map(c=>c+c).join('');

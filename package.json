@@ -15,11 +15,11 @@
     "setup:production": "node scripts/setup.mjs --production",
     "db:migrate:local": "node scripts/wrangler.mjs d1 migrations apply DB --local",
     "db:migrate:remote": "node scripts/check-deploy.mjs && wrangler d1 migrations apply DB --remote",
-    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
-    "test:browser": "node tests/browser.mjs && node tests/solver-browser.mjs && node tests/browser-solver.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs modules/allocation/tests/*.test.mjs",
+    "test:browser": "node tests/browser.mjs && node tests/solver-browser.mjs && node tests/browser-solver.mjs && node modules/allocation/tests/browser.mjs",
     "test:section-assignment": "node tests/section-assignment-browser.mjs",
     "test:worker": "node tests/wrangler.mjs",
-    "test:all": "pnpm test && pnpm test:browser && pnpm test:section-assignment && pnpm test:pages-browser && pnpm test:worker && pnpm test:teacher-tools && pnpm test:allocation && pnpm test:studyroom-browser && pnpm test:ui",
+    "test:all": "pnpm test && pnpm test:browser && pnpm test:section-assignment && pnpm test:pages-browser && pnpm test:worker && pnpm test:teacher-tools && pnpm test:allocation && pnpm test:studyroom-browser && pnpm test:ui && pnpm test:course-migration",
     "test:studyroom-browser": "node tests/studyroom-browser.mjs",
     "test:allocation": "node tests/allocation-browser.mjs",
     "benchmark": "node scripts/benchmark.mjs",
@@ -29,6 +29,7 @@
     "build:pages": "node scripts/build-pages.mjs",
     "test:pages-browser": "node tests/pages-browser.mjs",
     "test:teacher-tools": "node tests/teacher-tools-browser.mjs",
+    "test:course-migration": "node tests/course-migration.mjs",
     "test:ui": "node tests/ui-browser.mjs"
   },
   "devDependencies": {

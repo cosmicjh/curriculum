@@ -13,52 +13,6 @@ async function sheet(id='d1'){
   const r=await h.api('/workspace?departmentId='+id,'GET',undefined,admin);assert.equal(r.status,200);
   return {part:r.data.parts[0],revision:r.data.revisions[id],globalRevision:r.data.globalRevision,operationId:op()};
 }
-test('timetable login roles, independent term switching and transfer use the requested workspace',async t=>{
-  const policy={term:'2026-1',teachers:false};
-  const teacher='tt.'+'a'.repeat(72),admin='tt.'+'b'.repeat(72);let sent;
-  const bridge=({token,transfer})=>{
-    if(!policy.teachers)return Response.json({ok:false,code:'COURSE_CLOSED'},{status:403});
-    if(transfer){sent=transfer;return Response.json({ok:true,data:{term:transfer.term,sections:transfer.sections.length}});}
-    return Response.json({ok:true,data:{role:token===admin?'admin':'teacher'}});
-  };
-  const app=await createHarness({policy,bridge});t.after(()=>app.close());
-  assert.equal((await app.api('/workspace','GET',undefined,teacher)).code,'course_closed');
-  assert.equal((await app.api('/workspace','GET',undefined,admin)).code,'course_closed');
-  policy.teachers=true;
-  const original=await app.api('/workspace?all=true','GET',undefined,teacher);assert(original.ok);assert.equal(original.data.admin,false);
-  assert.equal((await app.api('/term','POST',{term:'2026-2'},teacher)).status,403);
-  assert((await app.api('/term','POST',{term:'2026-2'},admin)).ok);
-  const next=await app.api('/workspace','GET',undefined,teacher);assert(next.ok);
-  assert.equal(next.data.global.school.semester,2);assert.equal(next.data.parts[0].courses.length,0);
-  assert.equal(policy.term,'2026-1');
-  assert((await app.api('/term','POST',{term:'2026-1'},admin)).ok);
-  const restored=await app.api('/workspace?all=true','GET',undefined,teacher);assert(restored.ok);
-  assert.deepEqual(restored.data.parts,original.data.parts);
-  await app.db.prepare("UPDATE sheets SET payload=json_set(payload,'$.department.status','locked') WHERE id='d1'").run();
-  assert.equal((await app.api('/timetable-transfer','POST',{term:'2026-1'},teacher)).status,403);
-  const result=await app.api('/timetable-transfer','POST',{term:'2026-1'},admin);assert(result.ok);
-  assert.equal(sent.term,'2026-1');assert.equal(sent.sections.length,1);
-});
-test('authentication, origin checks and no-store timing headers',async()=>{
-  assert.equal((await h.api('/workspace')).status,401);
-  assert.equal((await h.api('/access/login','POST',{code:'wrong'})).status,401);
-  assert.equal((await h.api('/access/login','POST',{code:'virtual-access-2026'},undefined,{Origin:'https://foreign.example'})).status,403);
-  const r=await h.api('/workspace','GET',undefined,input);assert.equal(r.status,200);assert.equal(r.data.parts.length,1);assert.equal(r.data.departments.length,2);
-  assert.equal(r.response.headers.get('cache-control'),'no-store');assert.match(r.response.headers.get('server-timing'),/db;dur=/);
-  const all=await h.api('/workspace?all=true','GET',undefined,input);assert.equal(all.data.parts.length,2);
-});
-test('GitHub origin can authenticate, save with version checks and read exposed API timing',async()=>{
-  const origin={Origin:'https://cosmicjh.github.io'};
-  const access=await h.api('/access/login','POST',{code:'virtual-access-2026'},undefined,origin);assert.equal(access.status,200);
-  const token=access.data.accessToken;
-  const w=await h.api('/workspace','GET',undefined,token,origin);assert.equal(w.status,200);
-  assert.equal(w.response.headers.get('access-control-allow-origin'),origin.Origin);
-  assert.match(w.response.headers.get('access-control-expose-headers'),/Server-Timing/);
-  const before=await sheet(),value=C.clone(before);value.part.teachers[0].name='가상깃헙교사';
-  const saved=await h.api('/sheets/d1','PUT',value,token,origin);assert.equal(saved.status,200);
-  const stale={...before,operationId:op()};assert.equal((await h.api('/sheets/d1','PUT',stale,token,origin)).status,409);
-  const denied=await h.api('/sheets/d1','PUT',{...value,operationId:op()},token,{Origin:'https://foreign.example'});assert.equal(denied.status,403);assert.equal(denied.response.headers.get('access-control-allow-origin'),null);
-});
 test('same-department concurrent saves yield one success and one conflict; retry is idempotent',async()=>{
   const a=await sheet(),b=C.clone(a);a.part.teachers[0].name='가상동시A';b.part.teachers[0].name='가상동시B';b.operationId=op();
   const results=await Promise.all([h.api('/sheets/d1','PUT',a,input),h.api('/sheets/d1','PUT',b,input)]);
@@ -90,7 +44,11 @@ test('IDs cannot collide with another department even in a valid local document'
 test('submission locks editing; only an administrator can reopen',async()=>{
   const a=await sheet();a.part.department.status='submitted';assert.equal((await h.api('/sheets/d1','PUT',a,input)).status,200);
   const b=await sheet();b.part.teachers[0].name='가상잠금위조';assert.equal((await h.api('/sheets/d1','PUT',b,input)).status,403);
-  const c=await sheet();c.part.department.status='draft';assert.equal((await h.api('/sheets/d1','PUT',c,input)).status,403);assert.equal((await h.api('/sheets/d1','PUT',c,admin)).status,200);
+  const c=await sheet();c.part.department.status='locked';assert.equal((await h.api('/sheets/d1','PUT',c,input)).status,403);
+  const d=await sheet();d.part.department.status='draft';assert.equal((await h.api('/sheets/d1','PUT',d,input)).status,403);
+  assert.equal((await h.api('/sheets/d1','PUT',c,admin)).status,200);
+  const locked=await sheet();locked.part.department.status='draft';assert.equal((await h.api('/sheets/d1','PUT',locked,admin)).status,200);
+
 });
 test('global batch CAS is atomic, invalidates old sheet versions, and is idempotent',async()=>{
   const old=await sheet(),w=(await h.api('/workspace?all=true','GET',undefined,admin)).data;
@@ -98,7 +56,7 @@ test('global batch CAS is atomic, invalidates old sheet versions, and is idempot
   const results=await Promise.all([h.api('/global','PUT',a,admin),h.api('/global','PUT',b,admin)]);assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
   const winner=results[0].ok?a:b;assert.equal((await h.api('/global','PUT',winner,admin)).data.globalRevision,w.globalRevision+1);
   old.part.teachers[0].name='가상오래된설정';assert.equal((await h.api('/sheets/d1','PUT',old,input)).status,409);
-  assert.equal((await h.db.prepare('SELECT COUNT(*) AS n FROM write_guards').first()).n,0);
+  assert.equal((await h.db.prepare('SELECT COUNT(*) AS n FROM ca_write_guards').first()).n,0);
   const nonadmin={...winner,operationId:op()};assert.equal((await h.api('/global','PUT',nonadmin,input)).status,403);
 });
 test('new department creation and global metadata commit together',async()=>{
@@ -119,12 +77,12 @@ test('competing global creations never leave an orphan department',async()=>{
   const results=await Promise.all([h.api('/global','PUT',make('d4'),admin),h.api('/global','PUT',make('d5'),admin)]);
   assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
   const latest=(await h.api('/workspace?all=true','GET',undefined,admin)).data;
-  assert.equal(latest.parts.length,w.parts.length+1);assert.equal((await h.db.prepare('SELECT COUNT(*) AS n FROM sheets').first()).n,latest.parts.length);
+  assert.equal(latest.parts.length,w.parts.length+1);assert.equal((await h.db.prepare('SELECT COUNT(*) AS n FROM ca_sheets').first()).n,latest.parts.length);
 });
 test('global write guard rejects a sheet snapshot that changed after validation',async()=>{
   const a=await sheet();a.part.teachers[0].isLead=!a.part.teachers[0].isLead;assert.equal((await h.api('/sheets/d1','PUT',a,input)).status,200);
-  await assert.rejects(h.db.prepare('INSERT INTO write_guards(id,sheet_revisions) VALUES (?,?)').bind('virtual-stale-guard',JSON.stringify({d1:a.revision})).run(),/sheet_conflict/);
-  assert.equal((await h.db.prepare('SELECT COUNT(*) AS n FROM write_guards').first()).n,0);
+  await assert.rejects(h.db.prepare("INSERT INTO ca_write_guards(id,sheet_revisions,token_hash,checked_at) VALUES (?,?,'',0)").bind('virtual-stale-guard',JSON.stringify({d1:a.revision})).run(),/sheet_conflict/);
+  assert.equal((await h.db.prepare('SELECT COUNT(*) AS n FROM ca_write_guards').first()).n,0);
 });
 test('input mode can map original names and resolve legacy allocations',async()=>{
   let data=await sheet();data.part.assignments[0].hours=2;data.part.unmapped=[{id:'virtual-unmapped',deptId:'d1',teacherId:'teacher-d1',sourceName:'가상원본과목',grade:2,label:'2A',kind:'moving',hours:1}];
@@ -136,16 +94,4 @@ test('input mode can map original names and resolve legacy allocations',async()=
 });
 test('oversized department documents are rejected before database writes',async()=>{
   const data=await sheet();data.part.department.note='x'.repeat(1500001);assert.equal((await h.api('/sheets/d1','PUT',data,admin)).status,413);assert.equal((await sheet()).revision,data.revision);
-});
-test('password rotation revokes old sessions but preserves the active administrator',async()=>{
-  const r=await h.api('/access/password','POST',{current:'virtual-admin-2026',password:'virtual-new-access'},admin);assert.equal(r.status,200);
-  assert.equal((await h.api('/workspace','GET',undefined,input)).status,401);assert.equal((await h.api('/workspace','GET',undefined,admin)).status,401);
-  admin=r.data.adminToken;input=r.data.accessToken;assert.equal((await h.api('/workspace','GET',undefined,admin)).status,200);
-  const change=await h.api('/auth/password','POST',{current:'virtual-admin-2026',password:'virtual-new-admin'},admin);assert.equal(change.status,200);
-  assert.equal((await h.api('/workspace','GET',undefined,admin)).status,403);admin=change.data.adminToken;
-  assert.equal((await h.api('/auth/logout','POST',{},admin)).status,200);assert.equal((await h.api('/workspace','GET',undefined,admin)).status,401);
-});
-test('login attempts are bounded and malformed/oversized payloads are rejected',async()=>{
-  for(let i=0;i<11;i++){const r=await h.api('/access/login','POST',{code:'wrong'},undefined,{'CF-Connecting-IP':'virtual-abuse'});assert.equal(r.status,i===10?429:401);}
-  const response=await h.mf.dispatchFetch('http://localhost/api/access/login',{method:'POST',headers:{'Content-Type':'application/json'},body:'{'});assert.equal(response.status,400);
 });

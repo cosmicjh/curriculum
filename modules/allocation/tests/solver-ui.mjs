@@ -8,7 +8,7 @@ import {checkUi} from './ui-contract.mjs';
 const label=process.argv[2]||'after',directory=`test-results/solver-ui-${label}`;
 await mkdir(directory,{recursive:true});
 const runs=await mkdtemp(resolve('test-results/solver-ui-runs-'));
-const server=spawn(resolve('timetable-solver/runtime/python.exe'),['-u','-c','from tt_solver.server import make_server; import sys; s=make_server(0,sys.argv[1]); print(s.server_port,flush=True); s.serve_forever()',runs],{cwd:resolve('timetable-solver'),stdio:['ignore','pipe','pipe']});
+const server=spawn(process.env.ALLOCATION_SOLVER_PYTHON||resolve('timetable-solver/runtime/python.exe'),['-u','-c','from tt_solver.server import make_server; import sys; s=make_server(0,sys.argv[1]); print(s.server_port,flush=True); s.serve_forever()',runs],{cwd:resolve('timetable-solver'),stdio:['ignore','pipe','pipe']});
 let browser,stderr='';server.stderr.on('data',chunk=>stderr+=chunk);
 try{
   const port=await new Promise((resolve,reject)=>{
@@ -29,7 +29,7 @@ try{
   }else{
     await checkUi(page,'solver',directory);
     const response=await context.request.get(url+'/shared/ui.css');assert.equal(response.status(),200);assert.match(response.headers()['content-type'],/^text\/css/);
-    assert.equal(await response.text(),await readFile('shared/ui.css','utf8'));
+    assert.equal(await response.text(),await readFile('assets/ui.css','utf8'));
     for(const path of ['/shared/%2e%2e/AGENTS.md','/shared/ui.css/extra','/shared/workbook.js'])assert.equal((await context.request.get(url+path)).status(),404,path);
     assert.equal(await page.locator('#run').getAttribute('class'),'primary');
   }

@@ -17,8 +17,8 @@ test('timetable transfer exports confirmed moving sections with semester and tea
 });
 
 test('approved shared and workbook stylesheets match the normalized baseline',async()=>{
-  const html=(await readFile('index.html','utf8')).replace(/\r\n/g,'\n'),baseline=JSON.parse(await readFile('tests/fixtures/ui-baseline.json','utf8'));
-  const css=(await readFile('shared/ui.css','utf8'))+(await readFile('app/workbook.css','utf8'));
+  const html=(await readFile(new URL('../index.html',import.meta.url),'utf8')).replace(/\r\n/g,'\n'),baseline=JSON.parse(await readFile(new URL('./fixtures/ui-baseline.json',import.meta.url),'utf8'));
+  const css=(await readFile('assets/ui.css','utf8'))+(await readFile(new URL('../app/workbook.css',import.meta.url),'utf8'));
   assert.equal(createHash('sha256').update(css.replace(/\r\n/g,'\n')).digest('hex'),baseline.cssSha256);
   assert.doesNotMatch(html,/script\.google|postMessage|gasTransport|pagesBridge/);
 });

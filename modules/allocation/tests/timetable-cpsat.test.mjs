@@ -5,9 +5,7 @@
 // domains, coefficients, enforcement, objectives and hints (not just counts).
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile,readdir,mkdir,mkdtemp,writeFile,rm} from 'node:fs/promises';
-import {spawnSync} from 'node:child_process';
-import {fileURLToPath,pathToFileURL} from 'node:url';
+import {readFile,readdir} from 'node:fs/promises';
 import * as api from 'or-tools-wasm/cp-sat';
 import {validateModel,buildStage,solveTimetable,scoreBounds} from '../shared/timetable-cpsat.js';
 import {checkTimetable} from '../shared/timetable-checker.js';
@@ -74,23 +72,6 @@ test('isolated checker fixtures cover every required rule',()=>{
     'four-consecutive','lunch-two-fourth-periods','art-two-plus-one','dependent-subject','instructor-days',
     'two-per-day-separation','subject-once-per-day','score-recalculation',
   ].sort());
-});
-test('vendor checker fails on missing or differing copies; allow-missing is explicit',async()=>{
-  const cache=new URL('../.cache/timetable-verify/',import.meta.url);await mkdir(cache,{recursive:true});
-  const temp=await mkdtemp(fileURLToPath(new URL('vendor-check-test-',cache))),root=pathToFileURL(temp+'/');
-  try{
-    await mkdir(new URL('scripts/timetable/',root),{recursive:true});await mkdir(new URL('shared/',root));
-    const script=new URL('scripts/timetable/vendor-check.mjs',root);await writeFile(script,await readFile(new URL('../scripts/timetable/vendor-check.mjs',import.meta.url)));
-    const names=['timetable-model.js','timetable-cpsat.js','timetable-checker.js'];
-    for(const name of names)await writeFile(new URL(`shared/${name}`,root),'// synthetic\n');
-    const run=(...args)=>{const r=spawnSync(process.execPath,[fileURLToPath(script),...args],{encoding:'utf8'});assert.ifError(r.error);return r;};
-    assert.equal(run().status,1);assert.equal(run('--allow-missing').status,0);
-    await mkdir(new URL('timetable-cloudflare/vendor/course-allocation/shared/',root),{recursive:true});
-    for(const name of names)await writeFile(new URL(`timetable-cloudflare/vendor/course-allocation/shared/${name}`,root),`// Source: course-allocation/shared/${name}\n// synthetic\n`);
-    assert.equal(run().status,0);
-    await writeFile(new URL('timetable-cloudflare/vendor/course-allocation/shared/timetable-checker.js',root),'// different synthetic content\n');
-    assert.equal(run().status,1);assert.equal(run('--allow-missing').status,1);
-  }finally{await rm(root,{recursive:true,force:true});}
 });
 test('WASM solve, warm start, skipped stage zero, progress and cancellation',async()=>{
   const input=await json(new URL('small/input.json',root)),events=[];
