@@ -33,12 +33,12 @@ export async function allocationAccess(db,env,method){
  if(current?.state!=='released'&&(method!=='GET'||!['verified','release-check','release-ready'].includes(current?.phase)))paused();
 }
 
-export async function probeLegacy(fetcher){
+async function probeLegacy(){
  // These deliberately empty requests cannot save valid data even on the previous deployment.
  const results=await Promise.all(['/api/global','/api/sheets/freeze-probe','/api/term','/api/access/login'].map(async path=>{
   try{
    const method=path==='/api/term'||path==='/api/access/login'?'POST':'PUT';
-   const response=await fetcher(legacy+path,{method,headers:{Origin:legacy,'Content-Type':'application/json','Cache-Control':'no-store'},body:'{}',redirect:'manual',signal:AbortSignal.timeout(5000)});
+   const response=await fetch(legacy+path,{method,headers:{Origin:legacy,'Content-Type':'application/json','Cache-Control':'no-store'},body:'{}',redirect:'manual',signal:AbortSignal.timeout(5000)});
    await response.body?.cancel();
    return response.status===410&&response.headers.get('X-Course-Allocation-Frozen')==='1';
   }catch{return false;}
@@ -128,12 +128,12 @@ export async function courseMigration(db,env,session,request){
   }
   if(current?.state==='released')refuse('allocation_released','이미 해제한 이관입니다.');
   if(request.op==='checkLegacy'){
-   await probeLegacy(env.COURSE_LEGACY_PROBE?(...args)=>env.COURSE_LEGACY_PROBE.fetch(...args):fetch);
+   await probeLegacy();
    return true;
   }
   if(request.op==='begin'){
    if(current)refuse('allocation_import_exists','이전에 시작한 이관을 확인하세요.');
-   await probeLegacy(env.COURSE_LEGACY_PROBE?(...args)=>env.COURSE_LEGACY_PROBE.fetch(...args):fetch);
+   await probeLegacy();
    await begin(db,session,request.hash);
   }else{
    if(!current?.token)refuse('allocation_import_missing','이관을 먼저 시작하세요.');
@@ -144,7 +144,7 @@ export async function courseMigration(db,env,session,request){
     await reset(db,current,session);
    }else if(request.op==='release'){
     if(current.phase!=='release-ready'||request.hash!==current.hash||Date.now()-current.verified_at>120000)refuse('allocation_not_verified','원본·대상 재대조를 완료하세요.');
-    await probeLegacy(env.COURSE_LEGACY_PROBE?(...args)=>env.COURSE_LEGACY_PROBE.fetch(...args):fetch);
+    await probeLegacy();
     await db.batch([lock(db,current.token,session),db.prepare("UPDATE ca_import SET state='released' WHERE id=1"),unlock(db)]);
    }else fail(400,'allocation_bad_action','이관 동작을 확인하세요.');
   }
