@@ -152,6 +152,7 @@ async function migrate(options){
   check(before.rows.workspace===1&&before.rows.write_guards===0,'원본 자료와 진행 중 쓰기를 확인하세요.');
   return {mode:'preflight',before};
  }
+ if(release)check(['verified','release-check','release-ready'].includes(state.phase),'복사·대조를 먼저 완료하세요.');
  await frozen();
  if(reset){
   check(state.state==='paused','일시 중지된 이관이 없습니다.');

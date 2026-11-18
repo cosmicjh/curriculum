@@ -101,6 +101,9 @@ try{
  await access(resolve(applied.backupDirectory,'target-recovery.json'));
  assert.deepEqual((await migrate(['--apply'])).after,applied.after);
  assert.equal((await operation('release',{hash:first.before.snapshotSha256})).code,'allocation_not_verified');
+ await h.sql("UPDATE ca_import_progress SET phase='copied' WHERE id=1");
+ assert.equal((await operation('verifyRelease')).code,'allocation_copy_incomplete');
+ await h.sql("UPDATE ca_import_progress SET phase='verified' WHERE id=1");
 
  await h.sql("UPDATE ca_sheets SET revision=8,last_operation=NULL WHERE id='d1'");
  assert.match(await migrate(['--release'],1),/대조|HTTP 409/);

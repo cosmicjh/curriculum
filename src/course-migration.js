@@ -76,7 +76,8 @@ async function begin(db,session,sourceHash){
 }
 async function startVerify(db,current,session,phase){
  if(current.phase===phase)return;
- if(!['copied','verified','verify','release-check','release-ready'].includes(current.phase))refuse('allocation_copy_incomplete','이관 복사를 완료하세요.');
+ const allowed=phase==='release-check'?['verified','release-ready']:['copied','verified','release-check','release-ready'];
+ if(!allowed.includes(current.phase))refuse('allocation_copy_incomplete','이관 복사와 대조를 먼저 완료하세요.');
  await db.batch([lock(db,current.token,session),
   db.prepare("UPDATE ca_import_progress SET phase=?,token=?,table_index=0,cursor=NULL,hash='',verified_at=NULL WHERE id=1",phase,crypto.randomUUID()),unlock(db)]);
 }
