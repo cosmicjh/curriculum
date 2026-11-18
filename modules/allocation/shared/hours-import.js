@@ -50,7 +50,7 @@ function defaults(data,state){
     const item=R.catalog.find(x=>norm(x.name)===norm(c.name));
     const group=R.groups.find(g=>g.id===item?.groupId||g.id===c.subjectGroup||g.name===c.subjectGroup);
     const candidates=group?state.departments.filter(d=>R.suggestedGroup(d.name)===group.id):[];
-    return {include:true,name:matches.length?matches[0].name:c.name,deptName:depts.length===1?state.departments.find(d=>d.id===depts[0]).name:candidates.length===1?candidates[0].name:group?.name||'',hours:existingHours.length===1?existingHours[0]:c.hours};
+    return {include:true,name:matches.length?matches[0].name:c.name,deptName:depts.length===1?state.departments.find(d=>d.id===depts[0]).name:candidates.length===1?candidates[0].name:group?.name||'',hours:sheet.grade&&existingHours.length===1?existingHours[0]:c.hours};
   })}))};
 }
 function plan(data,original,options){

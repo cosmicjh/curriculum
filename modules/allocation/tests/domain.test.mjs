@@ -63,3 +63,11 @@ test('section import proposes the single valid existing weekly-hours value',()=>
   assert.equal(data.sheets[0].courses[0].hours,3);
   assert.equal(H.defaults(data,state).sheets[0].courses[0].hours,4);
 });
+
+test('section import without a grade uses the file hours',()=>{
+  const state=demoState(),file=hoursFixture();
+  file.sheets[0].grade=null;
+  file.sheets[0].courses[0].courseName=state.courses[0].name;
+  state.courses[0].baseHours=4;
+  assert.equal(H.defaults(H.parse(file),state).sheets[0].courses[0].hours,3);
+});
