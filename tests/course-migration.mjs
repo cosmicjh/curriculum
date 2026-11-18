@@ -1,109 +1,171 @@
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
+import {execFile} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {mkdir,mkdtemp,readFile,writeFile} from 'node:fs/promises';
-import {createRequire} from 'node:module';
+import {access,mkdir,mkdtemp,readFile,writeFile} from 'node:fs/promises';
 import {dirname,resolve} from 'node:path';
+import {promisify} from 'node:util';
 import {harness} from './harness.mjs';
-import {demoSeed} from '../modules/allocation/tests/fixtures/demo.js';
+import {privateChild} from '../scripts/migrate-course-allocation.mjs';
+import {assemble,boundedJson,validatePart} from '../modules/allocation/server/validation.js';
+import {demoState,demoSeed} from '../modules/allocation/tests/fixtures/demo.js';
 import {scaleState} from '../modules/allocation/tests/fixtures/scale.js';
 import {globalPart,departmentPart,identityKey} from '../modules/allocation/shared/state.js';
 
-const cli=resolve(dirname(createRequire(import.meta.url).resolve('wrangler/package.json')),'bin/wrangler.js');
+const runFile=promisify(execFile);
 await mkdir('test-results',{recursive:true});
 const run=await mkdtemp(resolve('test-results/course-migration-'));
 const persist=resolve(run,'state'),log=[];
-const options={encoding:'utf8',windowsHide:true,maxBuffer:10*1024*1024,env:{...process.env,
- CI:'true',WRANGLER_SEND_METRICS:'false',WRANGLER_LOG_PATH:resolve(run,'wrangler.log')}};
-function invoke(args,expected=0){
- const result=spawnSync(process.execPath,args,options);
- log.push({command:['node',...args],exit:result.status,stdout:result.stdout,stderr:result.stderr});
- assert.equal(result.status,expected,result.stderr||result.stdout||String(result.error));
- return result;
-}
-function wrangler(source,args){
- return invoke([cli,...args,'--local','--persist-to',persist,'--config',source?'modules/allocation/migrations/wrangler.source.json':'wrangler.jsonc']).stdout;
-}
-function migrate(flags=[],exit=0){
- const result=invoke(['scripts/migrate-course-allocation.mjs','--local','--persist-to',persist,...flags],exit);
- if(exit){assert.match(result.stderr,/Target report differs from source/);return;}
- return JSON.parse(result.stdout.slice(result.stdout.indexOf('{\n')));
-}
-const sha=value=>createHash('sha256').update(value).digest('hex');
-const escape=value=>"'"+String(value).replaceAll("'","''")+"'";
-const fixture=JSON.parse(await readFile('modules/allocation/tests/fixtures/demo-backup.json','utf8'));
-const originalSql=await readFile('modules/allocation/tests/fixtures/demo.sql','utf8');
-assert.equal(originalSql.replaceAll('\r\n','\n'),demoSeed());
+const tag='rehearsal-private-payload';
+const operationId='virtual-private-operation-id';
+const secretUrl='https://example.invalid/export?signature=virtual-test';
+const noLeak=output=>{for(const value of [tag,operationId,secretUrl])assert(!output.includes(value),'Sensitive rehearsal marker reached an output stream');};
+const digest=value=>createHash('sha256').update(value).digest('hex');
+let legacyOpen=false;
+const probes=[];
+const h=await harness({persistTo:persist,migration:true,legacyProbe:async request=>{
+ const path=new URL(request.url).pathname;
+ probes.push([request.method,path]);
+ return new Response(null,{status:legacyOpen?200:410,headers:legacyOpen?{}:{'X-Course-Allocation-Frozen':'1'}});
+}});
 try{
- wrangler(true,['d1','migrations','apply','DB']);
- const archive=scaleState();
- const insertArchive=(id,payload,hash='')=>'INSERT INTO term_archives(term,sheet_id,payload,identity_hash) VALUES ('+
-  ['2025-2',id,JSON.stringify(payload),hash].map(escape).join(',')+');';
- const scaleArchive=[insertArchive('',globalPart(archive)),...archive.departments.map(({id})=>{
-  const part=departmentPart(archive,id);
-  return insertArchive(id,part,sha(identityKey(part)));
- })];
- const saveRequest={id:'d1',part:departmentPart(fixture,'d1'),revision:6,globalRevision:9};
- const requestHash=sha(JSON.stringify(saveRequest));
- const fixtureSql=resolve(run,'source-fixture.sql');
- await writeFile(fixtureSql,[originalSql,
-  "UPDATE workspace SET revision=9;",
-  "UPDATE sheets SET revision=7,last_operation='rehearsal-retry',request_hash="+escape(requestHash)+",updated_at="+Date.now()+" WHERE id='d1';",
-  ...scaleArchive].join('\n'));
- wrangler(true,['d1','execute','DB','--file',fixtureSql]);
- wrangler(false,['d1','execute','DB','--command','CREATE TABLE rehearsal_platform_witness(id INTEGER PRIMARY KEY); INSERT INTO rehearsal_platform_witness VALUES (1);']);
- const before=migrate();
- assert.equal(before.mode,'preflight');
- assert.equal(before.before.rows.term_archives,13);
- assert.equal(before.before.rows.operations,1);
- assert.equal(before.before.globalRevision,9);
- assert.equal(before.before.revisions.d1,7);
- assert.equal(before.before.bodySha256,sha(JSON.stringify(fixture)));
- const applied=migrate(['--apply']);
+ const url=await h.listen();
+ const {cookie}=await h.login();
+ const migrationArgs=['scripts/migrate-course-allocation.mjs','--local','--url',url,'--persist-to',persist];
+ const env={...process.env,COURSE_ALLOCATION_ADMIN_COOKIE:cookie};
+ async function migrate(flags=[],exit=0,version='rehearsal-cutover'){
+  const args=[...migrationArgs,'--expected-version',version,...flags];
+  const result=await runFile(process.execPath,args,{env,windowsHide:true}).then(
+   ({stdout,stderr})=>({exit:0,stdout,stderr}),error=>({exit:error.code,stdout:error.stdout,stderr:error.stderr})
+  );
+  noLeak(result.stdout+result.stderr);
+  log.push({args:['node',...args],...result});
+  assert.equal(result.exit,exit,result.stderr);
+  return exit?result.stderr:JSON.parse(result.stdout);
+ }
+ const operation=async(op,data={})=>h.api('courseAllocationMigration',{version:'rehearsal-cutover',op,...data},cookie);
+ const edit=view=>h.api('courseWorkspace',{role:'admin',path:'/global',method:'PUT',data:view},cookie);
+
+ const {cookie:teacher}=await h.login('teacher');
+ assert.equal((await h.api('courseAllocationMigration',{version:'rehearsal-cutover',op:'status'},teacher)).status,401);
+ assert.equal((await h.api('courseAllocationMigration',{version:'rehearsal-cutover',op:'page',side:'source',table:'sheets',dump:true})).status,401);
+ assert.equal((await edit({})).code,'allocation_import_paused');
+ assert((await h.api('adminSettings',{},cookie)).ok);
+ assert.match(await migrate([],1,'old-deployment'),/Worker/);
+ const preexisting=await h.sql("SELECT name FROM sqlite_master WHERE name='students'");
+ assert.equal(preexisting.results.length,1);
+ for(const sql of demoSeed().trim().split(/;\s*/).filter(Boolean))await h.sourceSql(sql);
+
+ const fixture=demoState(),global=globalPart(fixture),parts=fixture.departments.map(d=>departmentPart(fixture,d.id));
+ const large=(part,bytes)=>{
+  const next={...part,fixtureExtension:tag};
+  next.fixtureExtension+='x'.repeat(bytes-Buffer.byteLength(JSON.stringify(next)));
+  validatePart(global,next,part.department.id);
+  assert.equal(Buffer.byteLength(boundedJson(next,'fixture')),bytes);
+  return next;
+ };
+ const sized=[large(parts[0],150000),large(parts[1],1500000)];
+ const oldRequest={id:'d1',part:sized[0],revision:6,globalRevision:9};
+ const requestHash=digest(JSON.stringify(oldRequest));
+ await h.sourceSql('UPDATE workspace SET revision=9 WHERE id=1');
+ await h.sourceSql('UPDATE sheets SET payload=?,revision=7,last_operation=?,request_hash=?,updated_at=? WHERE id=?',
+  JSON.stringify(sized[0]),operationId,requestHash,Date.now(),'d1');
+ await h.sourceSql('UPDATE sheets SET payload=? WHERE id=?',JSON.stringify(sized[1]),'d2');
+ const scale=scaleState();
+ await h.sourceSql("INSERT INTO term_archives(term,sheet_id,payload) VALUES('2025-2','',?)",JSON.stringify(globalPart(scale)));
+ for(const {id} of scale.departments){
+  const part=departmentPart(scale,id);
+  const payload=id==='d1'?sized[1]:part;
+  await h.sourceSql("INSERT INTO term_archives(term,sheet_id,payload,identity_hash) VALUES('2025-2',?,?,?)",
+   id,JSON.stringify(payload),digest(identityKey(payload)));
+ }
+ const first=await migrate();
+ assert.equal(first.before.rows.term_archives,13);
+ assert.equal(first.before.rows.operations,1);
+ assert.equal(first.before.globalRevision,9);
+ assert.deepEqual(first.before.revisions,[7,1]);
+ legacyOpen=true;
+ assert.match(await migrate(['--apply'],1),/checkLegacy, HTTP 409/);
+ assert.equal((await operation('status')).data.state,'empty');
+ legacyOpen=false;
+ const applied=await migrate(['--apply']);
  assert.equal(applied.mode,'applied');
  assert.deepEqual(applied.before,applied.after);
- const repeated=migrate(['--apply']);
- assert.equal(repeated.mode,'already-imported');
- assert.deepEqual(repeated.after,applied.after);
+ const appState=(await h.api('courseWorkspace',{role:'admin',path:'/state',method:'GET',data:{}},cookie)).data.state;
+ const appBackup=JSON.parse(await readFile(resolve(applied.backupDirectory,'source.json'),'utf8'));
+ assert.deepEqual(appState,appBackup);
+ assert.deepEqual(appState,assemble(global,parts));
+ assert.equal((await h.sql("SELECT length(CAST(payload AS BLOB)) n FROM ca_sheets WHERE id='d1'")).results[0].n,150000);
+ assert.equal((await h.sql("SELECT length(CAST(payload AS BLOB)) n FROM ca_sheets WHERE id='d2'")).results[0].n,1500000);
+ assert.equal((await h.sql("SELECT length(CAST(payload AS BLOB)) n FROM ca_term_archives WHERE term='2025-2' AND sheet_id='d1'")).results[0].n,1500000);
+ await access(resolve(applied.backupDirectory,'source.sql'));
+ await access(resolve(applied.backupDirectory,'target-recovery.json'));
+ assert.deepEqual((await migrate(['--apply'])).after,applied.after);
+ assert.equal((await operation('release',{hash:first.before.snapshotSha256})).code,'allocation_not_verified');
 
- const h=await harness({persistTo:persist});
- const data={role:'admin',path:'/sheets/d1',method:'PUT',data:{
-  part:structuredClone(saveRequest.part),revision:7,globalRevision:9,operationId:'rehearsal-edit'
- }};
- data.data.part.teachers[0].name='가상 이관 후 편집';
- try{
-  const {cookie}=await h.login();
-  const result=await h.api('courseWorkspace',{role:'admin',path:'/state',method:'GET',data:{}},cookie);
-  assert.deepEqual(result.data.state,fixture);
-  assert.equal(result.data.globalRevision,9);
-  assert.equal(result.data.revisions.d1,7);
-  const retry=await h.api('courseWorkspace',{...data,data:{part:saveRequest.part,revision:6,globalRevision:9,operationId:'rehearsal-retry'}},cookie);
-  assert.deepEqual(retry.data,{revision:7});
-  assert.equal((await h.api('courseWorkspace',data,cookie)).code,'allocation_import_paused');
-  assert.equal((await h.sql('SELECT id FROM rehearsal_platform_witness')).results[0].id,1);
- }finally{await h.close();}
- wrangler(false,['d1','execute','DB','--command',"UPDATE ca_sheets SET revision=8,last_operation=NULL WHERE id='d1';"]);
- migrate(['--apply'],1);
- migrate(['--release'],1);
- const paused=JSON.parse(wrangler(false,['d1','execute','DB','--json','--command','SELECT state FROM ca_import']));
- assert.equal(paused[0].results[0].state,'paused');
- wrangler(false,['d1','execute','DB','--command',"DELETE FROM ca_operations WHERE id='rehearsal-retry'; UPDATE ca_sheets SET revision=7,last_operation='rehearsal-retry',request_hash="+escape(requestHash)+" WHERE id='d1';"]);
- assert.equal(migrate(['--release']).mode,'released');
+ await h.sql("UPDATE ca_sheets SET revision=8,last_operation=NULL WHERE id='d1'");
+ assert.match(await migrate(['--release'],1),/대조|HTTP 409/);
+ assert.equal((await operation('status')).data.state,'paused');
 
- const live=await harness({persistTo:persist});
+ // Simulate returning writes to the old deployment and making a new original save.
+ await h.sourceSql("UPDATE sheets SET revision=8,last_operation=NULL WHERE id='d1'");
+ assert.match(await migrate(['--apply'],1),/원본 해시/);
+ legacyOpen=true;
+ assert.match(await migrate(['--reset-paused'],1),/checkLegacy, HTTP 409/);
+ legacyOpen=false;
+ const reset=await migrate(['--reset-paused']);
+ assert.equal(reset.mode,'reset');
+ await access(resolve(reset.backupDirectory,'target-sheets.jsonl'));
+ assert.equal((await operation('status')).data.state,'empty');
+ assert((await h.api('adminSettings',{},cookie)).ok);
+ assert.equal((await edit({})).code,'allocation_import_paused');
+ const second=await migrate(['--apply']);
+ assert.deepEqual(second.after.revisions,[8,1]);
+ assert.notEqual(second.after.snapshotSha256,first.before.snapshotSha256);
+
+ legacyOpen=true;
+ assert.match(await migrate(['--release'],1),/checkLegacy, HTTP 409/);
+ legacyOpen=false;
+ const release=await migrate(['--release']);
+ assert.equal(release.mode,'released');
+ assert.deepEqual(release.after,second.after);
+ assert.match(await migrate(['--reset-paused'],1),/이미 해제/);
+ assert.equal((await operation('reset',{hash:second.after.snapshotSha256})).code,'allocation_released');
+ assert.equal((await migrate(['--apply'])).mode,'already-released');
+ const editPart=structuredClone(parts[0]);
+ editPart.teachers[0].name='가상 이관 후 편집';
+ const saved=await h.api('courseWorkspace',{role:'admin',path:'/sheets/d1',method:'PUT',data:{
+  part:editPart,revision:8,globalRevision:9,operationId:'virtual-new-save'
+ }},cookie);
+ assert.deepEqual(saved.data,{revision:9},saved.error);
+ assert.equal((await h.sourceSql("SELECT revision FROM sheets WHERE id='d1'")).results[0].revision,8);
+ assert(probes.some(([method,path])=>method==='PUT'&&path==='/api/global'));
+ assert(probes.some(([method,path])=>method==='POST'&&path==='/api/term'));
+
+ // An isolated child models Wrangler's successful export URL and a verbose failure.
+ // If file logging were inherited, it would write the synthetic markers to this path.
+ const childLog=resolve(run,'unexpected-wrangler.log');
+ const childScript=resolve(run,'dummy-wrangler.mjs');
+ await writeFile(childScript,"import {writeFileSync} from 'node:fs';\n"+
+  'const markers='+JSON.stringify([tag,operationId,secretUrl].join('\n'))+';\n'+
+  "if(process.env.WRANGLER_WRITE_LOGS!=='false')writeFileSync(process.argv[2],markers);\n"+
+  'console.log(markers); console.error(markers); process.exitCode=Number(process.argv[3]);\n');
+ const priorLogs=process.env.WRANGLER_WRITE_LOGS;
+ process.env.WRANGLER_WRITE_LOGS='true';
  try{
-  const {cookie}=await live.login();
-  const save=await live.api('courseWorkspace',data,cookie);
-  assert.deepEqual(save.data,{revision:8},JSON.stringify(save));
- }finally{await live.close();}
- assert.equal(migrate(['--apply']).mode,'already-released');
- // Rollback continues from the original binding and its last pre-cutover snapshot.
- const rollback=migrate();
- assert.deepEqual(rollback.before,before.before);
- const result={before:before.before,after:applied.after,rerun:'idempotent',mismatchApplyExit:1,mismatchReleaseExit:1,
-  pausedApiWrite:503,releasedApiRevision:8,originalDbRollbackSnapshot:rollback.before.snapshotSha256};
+  assert.equal(await privateChild(process.execPath,[childScript,childLog,'0']),'');
+  await assert.rejects(privateChild(process.execPath,[childScript,childLog,'1']),error=>{
+   noLeak(error.message);return error.message.includes('명령이 실패');
+  });
+  await assert.rejects(access(childLog),{code:'ENOENT'});
+ }finally{
+  if(priorLogs===undefined)delete process.env.WRANGLER_WRITE_LOGS;else process.env.WRANGLER_WRITE_LOGS=priorLogs;
+ }
+ const result={initial:applied.before,verified:applied.after,reimported:second.after,maxSheetBytes:1500000,
+  maxArchiveBytes:1500000,otherModuleAvailable:true,releaseRevision:9,sourceRevision:8,logLeak:false,
+  cases:'wrong deployment, prior writes open, duplicate copy, target mismatch, paused reset, original re-save, repopulate, release'};
  await writeFile(resolve(run,'comparison.json'),JSON.stringify(result,null,2)+'\n');
  console.log(JSON.stringify({report:resolve(run,'comparison.json'),...result},null,2));
 }finally{
  await writeFile(resolve(run,'commands.json'),JSON.stringify(log,null,2)+'\n');
+ await h.close();
 }

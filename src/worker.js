@@ -8,6 +8,7 @@ import {prepareAllocation} from './allocations.js';
 import {studyroom,runStudyroomSchedule} from './studyroom.js';
 import {requireEnabled,storeCourseTransfer} from './course-transfer.js';
 import {validTerm,newTermSettings,prepareToolTransfer,readToolTransfer,readCourseTransfer,importPayload} from './tool-transfer.js';
+import {allocationAccess,allocationSchemaMissing,courseMigration,migrationVersion} from './course-migration.js';
 import {courseRequest} from '../modules/allocation/server/api.js';
 const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup','courseTransfer','toolTransfer']);
 const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);
@@ -212,13 +213,19 @@ async function api(request,env){
    if(!pagesRequest(request,env)||request.headers.get('Access-Control-Request-Method')!=='POST'||requested.some(h=>!['content-type','authorization'].includes(h)))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
    headers.set('Access-Control-Allow-Methods','POST');headers.set('Access-Control-Allow-Headers','Content-Type, Authorization');headers.set('Access-Control-Max-Age','600');return new Response(null,{status:204,headers});
   }
-  if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1',sharedTimetable:true,courseAllocationStorage:'shared-d1'}},{headers});}
-  const action=path.slice(5);if(!reads.has(action)&&!writes.has(action)&&!['login','logout','passwordParameters','courseWorkspace'].includes(action)&&!(action==='studyroom'&&env.STUDYROOM_ENABLED==='true'))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
+  if(path==='/api/health'&&request.method==='GET'){if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');await S.context(db);return Response.json({ok:true,data:{service:'school-timetable',storage:'D1',sharedTimetable:true,courseAllocationStorage:'shared-d1',...(migrationVersion(env)?{courseAllocationMigrationVersion:migrationVersion(env)}:{})}},{headers});}
+  const action=path.slice(5);
+  if(action==='courseBridge'&&migrationVersion(env)&&request.method==='POST'){
+   headers.set('X-Course-Allocation-Frozen','1');
+   return Response.json({ok:false,code:'COURSE_MOVED'},{status:410,headers});
+  }
+  if(action==='courseAllocationMigration'&&!migrationVersion(env))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
+  if(!reads.has(action)&&!writes.has(action)&&!['login','logout','passwordParameters','courseWorkspace','courseAllocationMigration'].includes(action)&&!(action==='studyroom'&&env.STUDYROOM_ENABLED==='true'))Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
   if(request.method!=='POST')Auth.fail(405,'METHOD_NOT_ALLOWED','POST 요청을 사용하세요.');
   if(!allowedRequest(request,env))Auth.fail(403,'ORIGIN_REJECTED','요청 출처를 확인하세요.');
   if(!request.headers.get('Content-Type')?.startsWith('application/json'))Auth.fail(415,'INVALID_REQUEST','JSON 요청을 사용하세요.');
   if(!db)Auth.fail(503,'SETUP_REQUIRED','DB 바인딩이 필요합니다.');
-  const maxBody=['classSwap','studyroom'].includes(action)?256*1024:action==='courseWorkspace'?5*1024*1024:action==='stageToolTransfer'?1024*1024:10*1024*1024;
+  const maxBody=['classSwap','studyroom'].includes(action)?256*1024:action==='courseAllocationMigration'?8192:action==='courseWorkspace'?5*1024*1024:action==='stageToolTransfer'?1024*1024:10*1024*1024;
   const length=Number(request.headers.get('Content-Length')||0);if(length>maxBody)Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');
   const reader=request.body?.getReader(),chunks=[];let size=0;if(reader){while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>maxBody){await reader.cancel();Auth.fail(413,'TOO_LARGE','요청 크기를 확인하세요.');}chunks.push(value);}}
   const bytes=new Uint8Array(size);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.length;}
@@ -229,8 +236,10 @@ async function api(request,env){
    const session=await Auth.authenticate(db,request,req.role,env);
    if(req.role==='teacher')requireEnabled(await S.context(db));
    if(typeof req.path!=='string'||!['GET','POST','PUT'].includes(req.method)||!req.data||typeof req.data!=='object'||Array.isArray(req.data))Auth.fail(400,'INVALID_REQUEST','시수배당 요청을 확인하세요.');
+   await allocationAccess(db,env,req.method);
    data=await courseRequest(env.DB,{...session,role:req.role},req.path,req.method,req.data,transfer=>storeCourseTransfer(db,transfer),term=>readToolTransfer(db,term,'hours',true));
   }
+  else if(action==='courseAllocationMigration')data=await courseMigration(db,env,await Auth.authenticate(db,request,'admin',env),req);
   else if(action==='passwordParameters')data=await Auth.parameters(db,env,req.role);
   else if(action==='logout'){await Auth.revoke(db,request,env);if(!pagesRequest(request,env)){for(const role of Auth.roles)headers.append('Set-Cookie',Auth.cookie(role));}data=true;}
   else if(action==='login'){
@@ -258,6 +267,7 @@ async function api(request,env){
   if(action==='bootstrap')data.features={studyroom:env.STUDYROOM_ENABLED==='true'};
   payload={ok:true,data};
  }catch(e){
+  if(new URL(request.url).pathname==='/api/courseWorkspace'&&allocationSchemaMissing(e)){e.status=503;e.code='allocation_schema_required';e.message='시수배당 DB 마이그레이션을 적용하세요.';}
   if(String(e.message).includes('allocation_import_paused')){e.status=503;e.code='allocation_import_paused';e.message='시수배당 자료 이관 중입니다.';}
   if(String(e.message).includes('revision_conflict')){e.status=409;e.code='CONFLICT';}
   if(String(e.message).includes('auth_required')){e.status=401;e.code='AUTH_REQUIRED';}
@@ -267,7 +277,7 @@ async function api(request,env){
   if(String(e.message).includes('sr_staff_required')){e.status=401;e.code='STAFF_REQUIRED';e.message='출석 확인자 계정으로 다시 로그인하세요.';}
   if(String(e.message).includes('shared_migration_in_progress')){e.status=503;e.code='MIGRATING';e.message='자료 통합 중입니다. 잠시 후 다시 저장하세요. 입력 내용은 유지됩니다.';}
   if(/UNIQUE constraint failed/.test(e.message)){e.status=409;e.code='CONFLICT';}
-  status=e.status||400;payload={ok:false,code:e.code||'REQUEST_ERROR',error:status>=500&&e.code!=='MIGRATING'?'서버 설정 또는 처리를 확인하세요.':e.message};if(status===429)headers.set('Retry-After','60');
+  status=e.status||400;payload={ok:false,code:e.code||'REQUEST_ERROR',error:status>=500&&!['MIGRATING','allocation_import_paused','allocation_schema_required','allocation_unavailable'].includes(e.code)?'서버 설정 또는 처리를 확인하세요.':e.message};if(status===429)headers.set('Retry-After','60');
  }
  headers.set('Server-Timing',`app;dur=${(performance.now()-start).toFixed(2)}, db;dur=${(db?.stats.ms||0).toFixed(2)}`);headers.set('X-D1-Rows-Read',String(db?.stats.read||0));headers.set('X-D1-Rows-Written',String(db?.stats.written||0));
  return Response.json(payload,{status,headers});

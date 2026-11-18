@@ -186,3 +186,30 @@ test('Workers + actual local D1: authorization, migration, edits, term isolation
  const fresh=await h.login('admin','새관리자4321');for(const action of ['bootstrap','adminBootstrap','adminStudent']){const r=await h.api(action,{id:'student-two'},fresh.cookie);samples.push({action,ms:r.elapsed,bytes:r.bytes,rowsRead:r.headers.get('x-d1-rows-read'),rowsWritten:r.headers.get('x-d1-rows-written')});}
  await mkdir('test-results',{recursive:true});await writeFile('test-results/api-metrics.json',JSON.stringify(samples,null,2));
 });
+
+test('allocation distinguishes a missing schema from an empty migrated workspace',async t=>{
+ const old=await harness({migrateThrough:'0011'});t.after(()=>old.close());
+ const empty=await harness();t.after(()=>empty.close());
+ const request=async h=>h.api('courseWorkspace',{role:'admin',path:'/workspace',method:'GET',data:{}},(await h.login()).cookie);
+ const missing=await request(old),unavailable=await request(empty);
+ assert.equal(missing.status,503);
+ assert.equal(missing.code,'allocation_schema_required');
+ assert.match(missing.error,/마이그레이션/);
+ assert.equal(unavailable.status,503);
+ assert.equal(unavailable.code,'allocation_unavailable');
+ assert.equal((await empty.api('courseAllocationMigration',{op:'status'},(await empty.login()).cookie)).status,404);
+});
+test('allocation D1 write guard rejects an expired or revoked platform session',async t=>{
+ const h=await harness({course:true});t.after(()=>h.close());
+ const {cookie}=await h.login();
+ const tokenHash=(await h.sql("SELECT token_hash FROM sessions WHERE role='admin'")).results[0].token_hash;
+ const guard=()=>h.sql('INSERT INTO ca_write_guards(id,token_hash,checked_at) VALUES (?,?,?)','test-session-guard',tokenHash,Date.now());
+ await guard();
+ await h.sql("DELETE FROM ca_write_guards WHERE id='test-session-guard'");
+ await h.sql('UPDATE sessions SET expires_at=1 WHERE token_hash=?',tokenHash);
+ await assert.rejects(guard,/auth_required/);
+ await h.sql('UPDATE sessions SET expires_at=? WHERE token_hash=?',Date.now()+60000,tokenHash);
+ assert((await h.api('logout',{},cookie)).ok);
+ await assert.rejects(guard,/auth_required/);
+ assert.equal((await h.sql('SELECT count(*) n FROM ca_write_guards')).results[0].n,0);
+});
