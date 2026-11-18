@@ -11,6 +11,8 @@
 - 일부 트리거 누락 뒤 늦은 저장을 주입하고 복구하면 27개가 새 세대가 된다. 이전 검증을 사용한 Worker 해제와 늦은 원복의 동결 제거를 거부한다. 원복이 예약된 상태에서 해제가 거부되며, 진행 중·완료된 해제 상태의 원복은 종료 코드 1이다.
 - 실제 `eb75f3c` 핸들러에 이전 주소 검사용 GET 요청을 보내고 SQL 실행이 없는지 확인한다. 잘못된 교사 참조와 손상된 엔터티 ID 인덱스는 무결성 검사에서 중단된다. 운영 DB는 시험에서 사용하지 않는다.
 - 원복 리허설은 이전 배포로 되돌렸다고 가정하고 동결 트리거를 제거해 원본 D1에 새 저장을 한 뒤, 다시 동결하고 미해제 대상만 백업·정리하여 새 원본을 재이관한다. 실제 이전 Worker/Pages의 재배포, 원격 Time Travel 발급·복구, 원격 D1 성능은 별도 운영 검증 범위다. [이관과 원복](COURSE_ALLOCATION_MIGRATION.md)
+- 스키마·Worker 버전 검증에 실패하면 동결 명령이 원본 자료와 스키마를 그대로 둔다. 임시 Worker를 종료한 상태에서 로컬 Wrangler가 공통 DB의 이관 상태만 조회해 비상 원복한다. 해제 검증 중(`release-check`, `release-ready`)과 `released`에서는 종료 코드 1로 원본 동결을 보존한다. 상태·비상 원복의 출력과 Wrangler 로그 파일에 가상 자료 표식이 남지 않는지도 확인한다.
+- 이전 주소가 HTTP 404여도 관리자와 현 진행 토큰으로 해제 검증을 취소하고 일반 원복할 수 있다. 취소는 진행 위치·해시를 지우고 토큰을 교체한다. 이전 토큰으로 검증을 진행하거나 재검증 후 해제할 수 없고, `released`에서는 취소가 거부된다.
 - API 시험은 0015의 source_freeze 누락을 포함한 미적용 스키마 503과 빈 저장소 503을 구분한다. 원본 동결 오류는 세대 값을 제외한 간단한 503 안내를 반환한다. 추가로 검증 뒤 세션 만료·폐기를 D1 쓰기 가드가 차단하는지 확인한다. 분반배정 가져오기는 명시된 같은 학년에서 유효한 기존 시수 4를 파일 시수 3보다 우선한다. 학년 없는 시트는 파일 시수 3을 사용한다.
 - Python은 저장소 루트에서 `timetable-solver/runtime/python.exe -m unittest discover -s timetable-solver/tests`를 실행한다. `PYTHONPATH`는 `timetable-solver`로 지정한다. 원본의 Windows runtime을 재사용할 때 임베디드 Python은 원본 모듈을 우선할 수 있다. 이 경우 `-c "import sys,runpy; sys.path.insert(0, 'timetable-solver'); runpy.run_module('unittest', run_name='__main__')" discover -s timetable-solver/tests`로 현재 체크아웃을 먼저 지정한다.
 
