@@ -2,7 +2,7 @@
 
 접속 화면은 [cosmicjh.github.io/curriculum](https://cosmicjh.github.io/curriculum/)에서 제공하고 API는 기존 school-timetable Worker에 있습니다. [GitHub Pages 주소 구성](GITHUB_PAGES_2026-11-02.md)을 확인하세요. 현재 계정의 D1 생성·스키마·Secret 등록은 완료했으므로 재생성하지 않습니다. 아래 최초 준비 절차는 새 계정/새 설치용입니다. [실제 배포 결과](DEPLOYED_2026-10-30.md)를 먼저 확인하세요.
 
-이 안내의 명령은 개인시간표 GitHub 저장소 루트에서 실행합니다. 이 작업의 로컬 복제본은 `course-allocation/timetable-cloudflare`입니다. 기존 시수배당 저장소 루트의 Wrangler 파일과 DB는 다른 서비스입니다.
+명령은 `cosmicjh/curriculum` 저장소 루트에서 실행한다. 기존 운영 시수배당을 옮기는 경우 공통 Worker와 GitHub Pages 게시 전에 [시수배당 DB 이관과 원복](COURSE_ALLOCATION_MIGRATION.md)을 따른다. 원본 DB는 읽기 전용 이관과 원복에 사용한다.
 
 ## 최초 준비와 배포
 

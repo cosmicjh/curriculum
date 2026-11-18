@@ -24,7 +24,7 @@
 
 `cosmicjh/curriculum`의 Pretendard·엑셀 등록·PNG·인쇄 기능을 유지하고, Apps Script 브리지를 Workers API와 D1으로 교체했습니다. 글꼴은 공통 파일로 재사용하고 관리자·교사 메뉴는 공통 화면 틀을 사용합니다. GitHub Pages 화면은 허용된 출처의 API를 호출하며 주소창은 github.io에 유지됩니다. GitHub는 소스 관리와 화면 자동 게시에 계속 사용합니다.
 
-이 프로젝트 루트는 **개인시간표·결보강 통합 저장소의 루트**입니다. 다른 `course-allocation` 프로젝트의 Pages 설정이나 DB를 사용하지 않습니다. 이 작업의 복제본은 `course-allocation/timetable-cloudflare/`, 운영 브랜치는 `main`, 최초 원본 커밋은 `bd6e7db`입니다. GitHub Pages 주소에서 실제 화면을 제공하고 Apps Script·스프레드시트 자료는 삭제하지 않습니다.
+이 저장소는 개인시간표·결보강·스터디룸·분반배정·시수배당과 솔버의 원본을 함께 관리합니다. 교사는 시수배당을 입력·제출하고, 관리자는 구조를 편집하고 확정·재개합니다. 시수배당도 공통 DB의 `ca_` 테이블을 사용합니다. [승인 설계](docs/design/platform-consolidation.md) · [시수배당 이관과 원복](docs/COURSE_ALLOCATION_MIGRATION.md)
 
 GitHub 화면의 로그인은 탭 메모리에서만 유지하므로 새로고침하면 재로그인합니다. 토큰을 localStorage·sessionStorage·쿠키에 저장하지 않습니다. 기존 Workers 직접 접속의 HttpOnly 쿠키 인증도 유지합니다. [주소 전환과 인증 안내](docs/GITHUB_PAGES_2026-11-02.md)
 
@@ -43,6 +43,8 @@ pnpm dev
 
 로컬 명령은 자동 생성되는 Git 제외 파일 `wrangler.local.json`과 로컬 D1 에뮬레이터를 사용합니다. `local-timetable-emulator`는 로컬 저장소 식별자이며 Cloudflare DB ID가 아닙니다. 운영용 `wrangler.jsonc`에는 실제 배포한 계정과 개인시간표 전용 D1 ID를 설정했습니다.
 
+새 로컬 DB의 시수배당 모듈에 가상 자료를 넣으려면 격리된 상태에서 `node tests/course-migration.mjs`를 실행합니다. 운영 시수배당 자료는 이전 DB에서 대조 후 이관합니다. [절차](docs/COURSE_ALLOCATION_MIGRATION.md)
+
 실제 자료는 관리자 → 설정 → 학기·운영 설정 → 백업 불러오기에서 기존 JSON을 복원하거나, 자료 등록에서 기존 엑셀 5개를 미리보기 후 등록합니다. 학교의 전체교사시간표 행·열을 변경할 필요가 없습니다. 운영 자료·비밀값은 `private/` 등 Git 제외 위치에 보관합니다.
 
 ## 검증
@@ -53,6 +55,7 @@ pnpm test:browser     # Edge(Windows) / Chromium, 모바일·PNG·인쇄·엑셀
 pnpm test:section-assignment # 역할 선택, 학생 로그인, 분반배정 및 결과 연동
 pnpm test:pages-browser # 격리된 두 출처에서 쿠키 없는 로그인·저장 검증
 pnpm test:worker      # Wrangler D1 마이그레이션·dry-run·실제 dev 라우팅
+pnpm test:course-migration # 가상 시수배당 DB 이관과 원복
 pnpm test:all
 pnpm benchmark        # 학생 900명·분반 288개·배정 7,200개·교사 120명
 pnpm benchmark:browser # FHD·통신 속도 제한·화면 표시/메뉴/저장 측정
@@ -77,6 +80,7 @@ Linux/macOS에서 브라우저가 없으면 `pnpm exec playwright install --with
 | API | `https://school-timetable.cosmicjh.workers.dev/api/*` |
 | 허용된 화면 출처 | `https://cosmicjh.github.io` |
 | D1 | `DB`, 새 `school-timetable-db`, `migrations/` |
+| 시수배당 저장 | 같은 `DB`, `ca_` 업무 테이블, `0012_course_allocation.sql` · `0013_course_allocation_import.sql` |
 | 결보강 저장 | 같은 `DB`, `swap_plans`·`swap_reservations`, `migrations/0002_shared_class_swap.sql` |
 
 새 Worker와 Pages를 게시하기 전에 D1 마이그레이션을 적용합니다. `0009_student_login.sql`은 학생 로그인을, `0010_tool_transfers.sql`은 학기별 도구 전달 자료를 추가합니다. 기존 교사·관리자 비밀번호와 세션을 보존합니다. 다른 계정의 최초 구성과 재배포·이관·복구 순서는 [배포 안내](docs/DEPLOYMENT.md)를 따릅니다. 화면은 GitHub Pages로 게시하며 Cloudflare Pages 프로젝트는 사용하지 않습니다.

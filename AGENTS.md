@@ -2,26 +2,20 @@
 
 ## 목적과 구조
 
-교과 시수배당을 편집·검증·제출·확정하고 JSON 가져오기·백업·복원, CSV와 인쇄를 제공한다.
-JavaScript ES modules, Cloudflare Pages Functions + D1을 사용하며 GitHub Pages에서도 화면을 제공한다.
+개인시간표·결보강·스터디룸·분반배정·시수배당과 시간표 솔버를 관리한다.
+JavaScript ES modules, Cloudflare Worker + D1, GitHub Pages를 사용한다.
 Node.js는 `package.json` 기준 22 이상, 개발·CI 기준 24이며 pnpm은 11.25.0이다.
 
-- `index.html`, `config.js`: 화면과 공개 클라이언트 설정.
-- `app/`: 배당표 화면 CSS·런타임 소스. esbuild로 `dist/assets/`에 해시 번들을 생성한다.
-- `shared/`: 브라우저·서버가 공유하는 업무 규칙, 상태, 가져오기, 인쇄, 통신과 암호 계산.
-- `shared/ui.css`: 공통 UI 원본. 로컬 솔버와 통합시간표 vendor가 사용한다.
-- `server/`: API, D1 저장, 인증·권한과 서버 검증.
-- `functions/api/`: Pages Functions API 진입점과 health 경로.
-- `migrations/`: D1 스키마 변경 이력.
-- `timetable-solver/`: Windows 로컬 Python OR-Tools 시간표 솔버, 독립 검사기와 엑셀 출력.
-- `scripts/`: 빌드, 로컬 설정, 암호 해시와 벤치마크 도구.
-- `tests/`: 단위·통합·브라우저·Pages 시험과 가상 픽스처.
-- `docs/`: 구조, 운영·복구 기록, 검증 계약과 승인된 설계(`docs/design/`).
-- `.github/workflows/`: 시험과 GitHub Pages 게시 워크플로.
-- `dist/`, `dist-github/`, `test-results/`: Git에서 제외하는 생성 산출물.
+- `src/`, `migrations/`: 공통 Worker API, 인증·권한, D1과 스키마 변경.
+- `assets/`: 플랫폼 화면 소스와 공통 `ui.css`.
+- `modules/allocation/`: 시수배당 원본 UI·공유 규칙·서버·테스트 및 이전 DB 이관용 스키마.
+- `timetable-solver/`: Windows 로컬 Python OR-Tools 솔버, 독립 검사기와 엑셀 출력.
+- `scripts/`, `tests/`, `docs/`: 빌드·이관·시험 도구, 가상 자료, 검증 계약과 승인 설계.
+- `dist/`, `.cache/`, `test-results/`: Git에서 제외하는 생성 산출물.
 
-`timetable-cloudflare/`, `class-swap-cloudflare/`, `studyroom_codex_handoff/`는 별도 저장소/프로젝트다.
+상위의 이전 `course-allocation` 저장소와 `class-swap-cloudflare/`, `studyroom_codex_handoff/`는 별도 프로젝트다.
 명시적인 작업 지시가 없으면 내용을 열람·복사·수정하지 않는다.
+[일원화 승인 설계](docs/design/platform-consolidation.md)를 따른다.
 
 ## 구현과 데이터 보호
 
@@ -44,11 +38,12 @@ Node.js는 `package.json` 기준 22 이상, 개발·CI 기준 24이며 pnpm은 1
 ```sh
 pnpm dev
 pnpm build
-pnpm build:github
+pnpm build:pages
 pnpm test
 pnpm test:browser
-node tests/browser.mjs --github
-pnpm test:pages
+pnpm test:pages-browser
+pnpm test:worker
+pnpm test:course-migration
 pnpm test:all
 pnpm benchmark
 timetable-solver\setup.cmd
@@ -56,9 +51,9 @@ timetable-solver\runtime\python.exe -m unittest discover -s timetable-solver\tes
 timetable-solver\runtime\python.exe -m tt_solver run --model model.json --out timetable-solver\runs\manual --limits 1800,600,120
 ```
 
-로컬 초기화는 README를 따른다. `pnpm setup:local`은 비밀값 파일과 가상 픽스처를 생성할 수 있고,
-`pnpm db:migrate:local`, `pnpm db:seed:local`은 로컬 DB를 변경한다. 기존 자료와 작업 범위를 먼저 확인한다.
-암호 해시는 `pnpm password:hash`로 생성하며 출력·전달 과정에서도 비밀값을 보호한다.
+로컬 초기화는 README를 따른다. `pnpm setup:local`은 비밀값 파일을 생성하고
+`pnpm db:migrate:local`은 로컬 DB를 변경하므로 기존 자료와 작업 범위를 먼저 확인한다.
+[이관 리허설](docs/COURSE_ALLOCATION_MIGRATION.md)에는 격리된 테스트 DB와 가상 자료를 쓴다.
 
 - `docs/VALIDATION.md`가 검증 계약이다. 관련 불변조건·단위·통합·브라우저 검증의 실제 결과로 완료를 판단한다.
 - 실행한 명령, 종료 코드와 결과를 보고하고 실행하지 못한 항목은 미검증으로 표시한다.

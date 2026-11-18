@@ -1,5 +1,7 @@
 # 시수배당 vendor 동기화
 
+이 기록은 `923e9b6` 시점의 동기화 방식이다. 현재 빌드는 `modules/allocation/`의 소스를 사용한다. [시수배당 이관과 원복](COURSE_ALLOCATION_MIGRATION.md)
+
 원본: `course-allocation@eb75f3c071cdd19b4d0ba7243d6f58da73890e14`.
 기존 vendor는 통합 커밋 `db790ea`에서 들어왔으며 당시 원본 `0743946`의 `index.html`과 비교해 아래 적응 사항을 확인했다.
 

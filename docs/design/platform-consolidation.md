@@ -48,7 +48,8 @@ Status: Approved by user (2026-11-18)
 - `COURSE_DB` 바인딩은 이관 검증 후 제거한다.
 
 ### 인증·배포(목표)
-- 시수배당 수정은 플랫폼 교사(입력)·관리자(구조·상태 전환) 권한으로만 가능하다. 공용 접속 비밀번호 로그인과 독립 관리자 비밀번호는 폐지한다.
+- 시수배당 수정은 플랫폼 교사·관리자 권한으로만 가능하다. 기존 권한 의미를 유지한다: 교사는 입력과 제출(draft→submitted),
+  관리자는 과목·분반 구조 변경, 확정(submitted→locked), 재개(→draft)까지. 공용 접속 비밀번호 로그인과 독립 관리자 비밀번호는 폐지한다.
 - 정책 확인은 Worker 내부 함수 호출로 바꾼다(HTTP 자기 호출 제거).
 - 배포: Worker `school-timetable` + GitHub Pages `/curriculum`.
 - 이전 주소: GitHub Pages `/course-allocation`, Cloudflare Pages `course-allocation.pages.dev`, GitHub Pages `/cheomdancs`는 통합 화면의 해당 메뉴로 안내하는 정적 연결 페이지만 남긴다.

@@ -2,6 +2,16 @@
 
 현재 접속 주소는 GitHub Pages입니다. [GitHub 화면과 Workers API의 인증·출처 분리](GITHUB_PAGES_2026-11-02.md)를 함께 확인하세요. 아래 쿠키 설명은 Workers 직접 접속에 해당하고 GitHub 화면에는 탭 메모리 세션이 적용됩니다.
 
+## 시수배당과 솔버
+
+`modules/allocation/app/`와 `shared/`의 원본에서 해시 JS/CSS를 빌드한다. 플랫폼 공통 스타일은 `assets/ui.css`에 한 번만 둔다. 시수배당 iframe은 부모의 작업 요청 함수로 플랫폼 세션을 사용하고, 자체 로그인이나 토큰을 저장하지 않는다. 통합 화면의 메뉴 이동과 요청 실패 뒤 미저장 입력을 보존한다.
+
+플랫폼 `POST /api/courseWorkspace`는 세션과 교사 사용 정책을 확인한 뒤 모듈 서버 함수를 호출한다. `/workspace`, `/state`, `/global`, `/sheets/:id`, `/term`, `/assignment-hours`, `/timetable-transfer`는 이 요청 안의 모듈 경로다. 교사는 입력·제출이 가능하고, 관리자는 구조 변경·확정·재개·학기 전환을 처리한다. 학생과 비로그인은 접근할 수 없다. 분반배정 자료 전달은 같은 DB에서 학기별로 보관한다.
+
+공통 `DB`에 `ca_workspace`, `ca_sheets`, `ca_entity_ids`, `ca_operations`, `ca_write_guards`, `ca_term_archives`와 이관 상태 `ca_import`를 둔다. 시수배당 자체 인증 테이블은 이전 원본에 남는다. 교과군 저장은 교과군·전역 버전과 활성 세션을 확인하고, 같은 operationId의 재시도에는 같은 결과를 반환한다. 전역·학기 저장은 검증에 사용한 교과군 버전까지 검사하는 트랜잭션이다. 교과군 JSON의 ID 집합 SHA-256이 바뀔 때 엔터티 인덱스를 갱신하고, ID 중복은 SQL 제약으로 거부한다. 백업은 schemaVersion 1을 유지하며 클라이언트 변경 이력 최근 200개를 담을 수 있다.
+
+루트 `timetable-solver/`에는 Windows Python 풀이, 독립 검사, 엑셀 출력이 있다. 브라우저 솔버 모델·CP-SAT·검사기 JS는 `modules/allocation/shared/`에 한 벌만 둔다. [승인 설계](design/platform-consolidation.md) · [이관과 원복](COURSE_ALLOCATION_MIGRATION.md)
+
 ## 확인한 원본
 
 - 실제 작업 원본: `https://github.com/cosmicjh/curriculum`, 커밋 `bd6e7db`.
