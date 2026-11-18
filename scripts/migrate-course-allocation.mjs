@@ -15,6 +15,9 @@ const sourceId='2f1b7cde-5ea8-453b-b810-f372cf138c60';
 const targetId='c4c3186c-bcfa-4bb9-959f-5086151abce8';
 const workerOrigin='https://school-timetable.cosmicjh.workers.dev';
 const tables=['workspace','sheets','entity_ids','operations','write_guards','term_archives'];
+const targetStatusSql=`SELECT (SELECT state FROM ca_import WHERE id=1) AS state,
+ (SELECT phase FROM ca_import_progress WHERE id=1) AS phase,
+ EXISTS (SELECT 1 FROM ca_import_thaw WHERE id=1) AS thawReserved`;
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 class SafeError extends Error {}
 function check(ok,message){if(!ok)throw new SafeError(message);}
@@ -70,7 +73,34 @@ async function sourceExport(directory,options){
   await writeFile(path,lines.join('\n'));
  });
 }
-async function freezeSource(options,action,ticket){
+function statusSummary({state,phase,thawReserved}){
+ return {state,phase,thawReserved};
+}
+async function targetStatus(options){
+ const config=JSON.parse(await readFile(targetConfig,'utf8'));
+ check(config.d1_databases.length===1&&config.d1_databases[0].binding==='DB'&&config.d1_databases[0].database_id===targetId,'공통 DB 바인딩을 확인하세요.');
+ check(options.remote||options['persist-to'],'격리된 공통 DB 상태 경로를 지정하세요.');
+ const location=options.remote?['--remote']:['--local','--persist-to',resolve(options['persist-to'])];
+ const [result]=JSON.parse(await wrangler(['d1','execute','DB',...location,'--json','--command',targetStatusSql],targetConfig,true));
+ const row=result?.results?.[0];
+ check(result?.success&&result.results.length===1&&[0,1].includes(row.thawReserved)&&(
+  row.state===null&&row.phase===null||row.state==='paused'&&['copy','copied','verify','verified','release-check','release-ready'].includes(row.phase)||
+  row.state==='released'&&row.phase==='release-ready'),'공통 DB 이관 상태를 확인할 수 없습니다.');
+ return statusSummary({state:row.state??'empty',phase:row.phase,thawReserved:Boolean(row.thawReserved)});
+}
+
+async function emergencyThaw(options){
+ // The runbook keeps the Worker unavailable and drains its requests while both databases are checked.
+ const confirm=async()=>{
+  const status=await targetStatus(options);
+  check(status.state!=='released'&&!['release-check','release-ready'].includes(status.phase),'해제 검증 중이거나 해제된 이관은 원복할 수 없습니다.');
+ };
+ await confirm();
+ await freezeSource(options,'thaw-source',{confirm});
+ return {mode:'source-thawed'};
+}
+
+async function freezeSource(options,action,{freezeHash,confirm}={}){
  const config=JSON.parse(await readFile(sourceConfig,'utf8'));
  check(config.d1_databases.length===1&&config.d1_databases[0].binding==='DB'&&config.d1_databases[0].database_id===sourceId,'원본 DB 바인딩을 확인하세요.');
  const change=async(execute,probe)=>{
@@ -81,7 +111,8 @@ async function freezeSource(options,action,ticket){
   const before=await catalog();
   if(action==='thaw-source'){
    if(before.generation){
-    check(hash(before.generation)===ticket.freezeHash,'원복 대상의 원본 동결을 다시 확인하세요.');
+    if(!confirm)check(hash(before.generation)===freezeHash,'원복 대상의 원본 동결을 다시 확인하세요.');
+    await confirm?.();
     try{await execute([thawGenerationSql(before.generation),...removeFreeze()]);}
     catch(error){if((await catalog()).generation)throw error;}
    }
@@ -163,12 +194,14 @@ async function backupDirectory(){
 }
 async function migrate(options){
  const {apply,release,remote}=options,reset=options['reset-paused'];
- const sourceActions=['freeze-source','check-source-freeze'].filter(action=>options[action]);
- check([apply,release,reset,options['prepare-config'],options['thaw-source'],...sourceActions].filter(Boolean).length<=1&&!(remote&&options.local),
+ const actions=['prepare-config','freeze-source','check-source-freeze','thaw-source','emergency-thaw','status','db-status','cancel-release'];
+ check([apply,release,reset,...actions.map(action=>options[action])].filter(Boolean).length<=1&&!(remote&&options.local),
   '이관 동작과 실행 위치를 하나씩 선택하세요.');
  check(!remote||!options.url&&!options['persist-to'],'원격 실행에서는 로컬 옵션을 사용하지 않습니다.');
  if(options['prepare-config'])return prepareConfig();
- if(sourceActions.length)return freezeSource(options,sourceActions[0]);
+ if(options['check-source-freeze'])return freezeSource(options,'check-source-freeze');
+ if(options['db-status'])return targetStatus(options);
+ if(options['emergency-thaw'])return emergencyThaw(options);
  const origin=remote?workerOrigin:new URL(options.url||'http://127.0.0.1:8787').origin;
  check(remote||/^http:\/\/(?:127\.0\.0\.1|localhost)(?::[0-9]+)?$/.test(origin),'격리된 로컬 Worker 주소를 사용하세요.');
  const version=options['expected-version'];
@@ -208,6 +241,16 @@ async function migrate(options){
   return {mode:'source-thawed'};
  }
  let state=await call('status');
+ if(options.status)return statusSummary(state);
+ if(options['freeze-source']){
+  check(state.state!=='released'&&!state.thawReserved,'이관 상태와 원복 예약을 확인하세요.');
+  return freezeSource(options,'freeze-source');
+ }
+ if(options['cancel-release']){
+  check(state.state!=='released','이미 해제된 이관입니다.');
+  check(['release-check','release-ready'].includes(state.phase),'진행 중인 해제 검증이 없습니다.');
+  return call('cancelRelease',{token:state.token});
+ }
  if(state.state==='released'){
   check(!reset,'이미 해제한 이관은 정리할 수 없습니다.');
   await call('checkFreeze');
@@ -261,10 +304,10 @@ async function migrate(options){
  check(after.snapshotSha256===before.snapshotSha256,'원본과 대상의 대조 결과가 다릅니다.');
  await writeFile(resolve(resultDir,'comparison.json'),JSON.stringify({before,after},null,2));
  if(release){
-  state=await call('verifyRelease');
-  while(state.phase==='release-check')state=await call('step');
+  state=await call('verifyRelease',{token:state.token});
+  while(state.phase==='release-check')state=await call('step',{token:state.token});
   await frozen();
-  await call('release',{hash:before.snapshotSha256});
+  await call('release',{hash:before.snapshotSha256,token:state.token});
   await call('checkFreeze');
  }
  return {mode:release?'released':directory?'applied':'already-imported',before,after,backupDirectory:resultDir};
@@ -273,6 +316,7 @@ if(process.argv[1]&&resolve(process.argv[1])===resolve(import.meta.filename)){
  try{
   const {values}=parseArgs({options:{apply:{type:'boolean'},release:{type:'boolean'},'reset-paused':{type:'boolean'},
    'freeze-source':{type:'boolean'},'check-source-freeze':{type:'boolean'},'thaw-source':{type:'boolean'},
+   'emergency-thaw':{type:'boolean'},'status':{type:'boolean'},'db-status':{type:'boolean'},'cancel-release':{type:'boolean'},
    'prepare-config':{type:'boolean'},local:{type:'boolean'},remote:{type:'boolean'},url:{type:'string'},
    'expected-version':{type:'string'},'persist-to':{type:'string'}}});
   console.log(JSON.stringify(await migrate(values),null,2));

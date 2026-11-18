@@ -38,11 +38,12 @@ const operationId='virtual-private-operation-id';
 const secretUrl='https://example.invalid/export?signature=virtual-test';
 const noLeak=output=>{for(const value of [tag,operationId,secretUrl])assert(!output.includes(value),'Sensitive rehearsal marker reached an output stream');};
 const digest=value=>createHash('sha256').update(value).digest('hex');
-let legacyOpen=false,releasePause;
+let legacyOpen=false,legacyMissing=false,releasePause;
 const probes=[];
 const h=await harness({persistTo:persist,migration:true,legacyProbe:async request=>{
  const path=new URL(request.url).pathname;
  probes.push([request.method,path]);
+ if(legacyMissing)return new Response(null,{status:404});
  if(legacyOpen){
   const response=await legacyHandler(request,{PASSWORD_PEPPER:'a'.repeat(64),DB:{prepare(sql){
    legacySql.push(sql);throw Error('Unexpected DB access by the legacy probe');
@@ -70,6 +71,7 @@ try{
   return exit?result.stderr:JSON.parse(result.stdout);
  }
  const operation=async(op,data={})=>h.api('courseAllocationMigration',{version:'rehearsal-cutover',op,...data},cookie);
+ const verifyRelease=async()=>operation('verifyRelease',{token:(await operation('status')).data.token});
  const freeze=()=>migrate(['--freeze-source']);
  const thaw=()=>migrate(['--thaw-source']);
  const checkFrozen=()=>migrate(['--check-source-freeze']);
@@ -155,20 +157,37 @@ try{
  assert.deepEqual((await migrate(['--apply'])).after,applied.after);
  assert.equal((await operation('release',{hash:first.before.snapshotSha256})).code,'allocation_not_verified');
  await h.sql("UPDATE ca_import_progress SET phase='copied' WHERE id=1");
- assert.equal((await operation('verifyRelease')).code,'allocation_copy_incomplete');
+ assert.equal((await verifyRelease()).code,'allocation_copy_incomplete');
  await h.sql("UPDATE ca_import_progress SET phase='verified' WHERE id=1");
 
  await h.sql("UPDATE ca_sheets SET revision=8,last_operation=NULL WHERE id='d1'");
  assert.match(await migrate(['--release'],1),/대조|HTTP 409/);
  assert.equal((await operation('status')).data.state,'paused');
 
+ // A 404 prevents release, but status and authenticated cancellation never probe the old URL.
+ const interrupted=(await verifyRelease()).data;
+ assert.equal(interrupted.phase,'release-check');
+ legacyMissing=true;
+ assert.match(await migrate(['--release'],1),/checkLegacy, HTTP 409/);
+ assert.match(await migrate(['--thaw-source'],1),/해제 검증 중/);
+ const probesBeforeCancel=probes.length;
+ assert.deepEqual(await migrate(['--status']),{state:'paused',phase:'release-check',thawReserved:false});
+ assert.equal((await h.api('courseAllocationMigration',{version:'rehearsal-cutover',op:'cancelRelease',token:interrupted.token},teacher)).status,401);
+ assert.equal((await operation('cancelRelease')).code,'allocation_import_conflict');
+ assert.deepEqual(await migrate(['--cancel-release']),{state:'paused',phase:'verified'});
+ assert.equal((await operation('step',{token:interrupted.token})).code,'allocation_import_conflict');
+ const canceled=(await h.sql('SELECT token,table_index,cursor,hash,verified_at FROM ca_import_progress')).results[0];
+ assert.notEqual(canceled.token,interrupted.token);
+ assert.deepEqual({...canceled,token:null},{token:null,table_index:0,cursor:null,hash:'',verified_at:null});
  // A pending thaw acquired through the actual Worker fences a release transition.
  const reserved=await operation('beginThaw');
  assert(reserved.ok&&reserved.data.token);
- assert.equal((await operation('verifyRelease')).code,'allocation_thaw_active');
+ assert.equal((await verifyRelease()).code,'allocation_thaw_active');
  await assert.rejects(h.sourceSql("UPDATE sheets SET revision=8,last_operation=NULL WHERE id='d1'"),/ca_source_frozen/);
  // Resume the reserved thaw, then simulate a new save in the old deployment.
  assert.equal((await thaw()).mode,'source-thawed');
+ assert.equal(probes.length,probesBeforeCancel);
+ legacyMissing=false;
  assert.match(await migrate(['--check-source-freeze'],1),/동결 트리거/);
  await h.sourceSql("UPDATE sheets SET revision=8,last_operation=NULL WHERE id='d1'");
  await freeze();
@@ -190,12 +209,12 @@ try{
  assert.match(await migrate(['--release'],1),/checkLegacy, HTTP 409/);
  legacyOpen=false;
 
- let state=(await operation('verifyRelease')).data;
+ let state=(await verifyRelease()).data;
  assert.equal(state.phase,'release-check');
  assert.match(await migrate(['--thaw-source'],1),/해제 검증 중/);
  let injected=false;
  while(state.phase==='release-check'){
-  const result=await operation('step');
+  const result=await operation('step',{token:state.token});
   assert(result.ok,result.error);
   state=result.data;
   const {table_index:index}=(await h.sql('SELECT table_index FROM ca_import_progress WHERE id=1')).results[0];
@@ -210,7 +229,7 @@ try{
  const originalFreeze=inspectFreeze((await h.sourceSql(freezeCatalogSql)).results);
  await h.sourceSql('DROP TRIGGER ca_source_freeze_sheets_update');
  await h.sourceSql('DROP TRIGGER ca_source_freeze_operations_insert');
- const absent=await operation('release',{hash:second.after.snapshotSha256});
+ const absent=await operation('release',{hash:second.after.snapshotSha256,token:state.token});
  assert.equal(absent.status,503);
  assert.equal(absent.code,'allocation_source_unfrozen');
  assert.equal(absent.error,'시수배당 원본 동결을 확인하세요.');
@@ -224,7 +243,7 @@ try{
  assert.equal(repaired.complete,true);
  assert.notEqual(repaired.generation,originalFreeze.generation);
  await assert.rejects(h.sourceSql(thawGenerationSql(originalFreeze.generation)),/malformed JSON/);
- const stale=await operation('release',{hash:second.after.snapshotSha256});
+ const stale=await operation('release',{hash:second.after.snapshotSha256,token:state.token});
  assert.equal(stale.status,503);
  assert.equal(stale.code,'allocation_source_unfrozen');
  assert(!JSON.stringify(stale).includes(repaired.generation));
@@ -236,20 +255,37 @@ try{
  const repairedCopy=await migrate(['--apply']);
  assert.deepEqual(repairedCopy.after.revisions,[8,2]);
 
+ state=(await verifyRelease()).data;
+ while(state.phase==='release-check'){
+  const progress=await operation('step',{token:state.token});
+  assert(progress.ok,progress.error);
+  state=progress.data;
+ }
+ assert.equal(state.phase,'release-ready');
+ const canceledToken=state.token;
+ assert.equal((await migrate(['--cancel-release'])).phase,'verified');
+
  // Hold the final legacy probe of the release request while a separate CLI tries to thaw.
  let reached,resume;
  const paused=new Promise(resolve=>{reached=resolve;});
  releasePause={probes:0,reached,resume:new Promise(resolve=>{resume=resolve;})};
- const releasing=migrate(['--release']);
+ const releasing=migrate(['--release'],1);
  try{
   await Promise.race([paused,releasing.then(()=>assert.fail('Expected the final release probe'))]);
   assert.equal((await operation('status')).data.phase,'release-ready');
+  assert.equal((await operation('release',{hash:repairedCopy.after.snapshotSha256,token:canceledToken})).code,'allocation_import_conflict');
   assert.match(await migrate(['--thaw-source'],1),/해제 검증 중/);
   assert.deepEqual(inspectFreeze((await h.sourceSql(freezeCatalogSql)).results),repaired);
+  assert.equal((await migrate(['--cancel-release'])).phase,'verified');
  }finally{resume();releasePause=null;}
- const release=await releasing;
+ assert.match(await releasing,/release, HTTP 409/);
+ assert.deepEqual(await migrate(['--status']),{state:'paused',phase:'verified',thawReserved:false});
+ const release=await migrate(['--release']);
  assert.equal(release.mode,'released');
  assert.deepEqual(release.after,repairedCopy.after);
+ assert.deepEqual(await migrate(['--status']),{state:'released',phase:'release-ready',thawReserved:false});
+ assert.match(await migrate(['--cancel-release'],1),/이미 해제/);
+ assert.equal((await operation('cancelRelease',{token:(await operation('status')).data.token})).code,'allocation_released');
  assert.match(await migrate(['--thaw-source'],1),/해제된 이관은 원복할 수 없습니다/);
  assert.match(await migrate(['--reset-paused'],1),/이미 해제/);
  assert.equal((await operation('reset',{hash:second.after.snapshotSha256})).code,'allocation_released');
@@ -285,7 +321,7 @@ try{
   if(priorLogs===undefined)delete process.env.WRANGLER_WRITE_LOGS;else process.env.WRANGLER_WRITE_LOGS=priorLogs;
  }
  const result={initial:applied.before,verified:applied.after,reimported:repairedCopy.after,maxSheetBytes:1500000,
-  maxArchiveBytes:1500000,lateWriteBlocked:true,freezeRemovalBlockedRelease:true,partialRepairBlockedStaleRelease:true,activeThawBlockedRelease:true,releaseBlockedConcurrentThaw:true,releasedThawRejected:true,legacyProbeWrites:0,integrityRejected:true,otherModuleAvailable:true,releaseRevision:9,sourceRevision:8,logLeak:false,
+  maxArchiveBytes:1500000,lateWriteBlocked:true,freezeRemovalBlockedRelease:true,partialRepairBlockedStaleRelease:true,activeThawBlockedRelease:true,releaseBlockedConcurrentThaw:true,releasedThawRejected:true,releaseCanceledWhenLegacy404:true,staleReleaseRejectedAfterCancel:true,releasedCancelRejected:true,legacyProbeWrites:0,integrityRejected:true,otherModuleAvailable:true,releaseRevision:9,sourceRevision:8,logLeak:false,
   cases:'wrong deployment, source freeze, legacy GET, invalid references and IDs, late write denied, missing freeze, duplicate copy, target mismatch, paused reset, original re-save, repopulate, release'};
  await writeFile(resolve(run,'comparison.json'),JSON.stringify(result,null,2)+'\n');
  console.log(JSON.stringify({report:resolve(run,'comparison.json'),...result},null,2));

@@ -21,6 +21,7 @@ const unfrozen=()=>fail(503,'allocation_source_unfrozen','시수배당 원본 �
 const thawActive=()=>refuse('allocation_thaw_active','원본 동결 해제를 먼저 마치세요.');
 const thawBlocked=()=>refuse('allocation_thaw_blocked','해제 검증 중이거나 해제된 이관은 원복할 수 없습니다.');
 const paused=()=>fail(503,'allocation_import_paused','시수배당 자료 이관 중입니다.');
+const releaseInProgress=phase=>['release-check','release-ready'].includes(phase);
 
 export function allocationSchemaMissing(error){
  const message=String(error?.message);
@@ -68,7 +69,7 @@ async function frozenSource(source,expected,prove=false){
 }
 
 async function beginThaw(source,db,current,session){
- if(current?.state==='released'||['release-check','release-ready'].includes(current?.phase))thawBlocked();
+ if(current?.state==='released'||releaseInProgress(current?.phase))thawBlocked();
  const freeze=await sourceFreeze(source);
  let ticket=await db.first('SELECT token,generation FROM ca_import_thaw WHERE id=1');
  if(!ticket||freeze.generation&&freeze.generation!==ticket.generation){
@@ -109,6 +110,10 @@ function lock(db,token,session){
 }
 const unlock=db=>db.prepare('DELETE FROM ca_import_lock WHERE id=1');
 
+function requireToken(request,current){
+ if(request.token!==current.token)refuse('allocation_import_conflict','이관 진행 상태를 다시 확인하세요.');
+}
+
 async function begin(db,session,sourceHash,generation){
  if(!hashPattern.test(sourceHash||''))fail(400,'allocation_bad_hash','원본 대조 해시를 확인하세요.');
  const token=crypto.randomUUID();
@@ -122,9 +127,18 @@ async function startVerify(db,current,session,phase){
  if(current.phase===phase&&phase!=='release-check')return;
  const allowed=phase==='release-check'?['verified','release-check','release-ready']:['copied','verified','release-check','release-ready'];
  if(!allowed.includes(current.phase))refuse('allocation_copy_incomplete','이관 복사와 대조를 먼저 완료하세요.');
+ const token=crypto.randomUUID();
  await db.batch([lock(db,current.token,session),
-  db.prepare("UPDATE ca_import_progress SET phase=?,token=?,table_index=0,cursor=NULL,hash='',verified_at=NULL WHERE id=1",phase,crypto.randomUUID()),unlock(db)]);
+  db.prepare("UPDATE ca_import_progress SET phase=?,token=?,table_index=0,cursor=NULL,hash='',verified_at=NULL WHERE id=1",phase,token),unlock(db)]);
+ return {phase,token};
 }
+async function cancelRelease(db,current,session){
+ if(!releaseInProgress(current.phase))refuse('allocation_release_inactive','진행 중인 해제 검증이 없습니다.');
+ await db.batch([lock(db,current.token,session),
+  db.prepare("UPDATE ca_import_progress SET phase='verified',token=?,table_index=0,cursor=NULL,hash='',verified_at=NULL WHERE id=1",crypto.randomUUID()),unlock(db)]);
+ return {state:'paused',phase:'verified'};
+}
+
 async function step(source,db,current,session){
  if(!['copy','verify','release-check'].includes(current.phase))return;
  await frozenSource(source,current.source_freeze);
@@ -148,9 +162,11 @@ async function step(source,db,current,session){
   statements.push(...page.values.map(row=>db.prepare(sql,...row)));
  }
  const nextPhase=complete?(current.phase==='copy'?'copied':current.phase==='verify'?'verified':'release-ready'):current.phase;
+ const token=crypto.randomUUID();
  statements.push(db.prepare('UPDATE ca_import_progress SET phase=?,token=?,table_index=?,cursor=?,hash=?,verified_at=? WHERE id=1',
-  nextPhase,crypto.randomUUID(),index,page.next===null?null:JSON.stringify(page.next),running,nextPhase==='release-ready'?Date.now():null),unlock(db));
+  nextPhase,token,index,page.next===null?null:JSON.stringify(page.next),running,nextPhase==='release-ready'?Date.now():null),unlock(db));
  await db.batch(statements);
+ return {phase:nextPhase,token};
 }
 async function reset(db,current,session){
  await db.batch([lock(db,current.token,session),
@@ -163,7 +179,8 @@ export async function courseMigration(db,env,session,request){
   const version=migrationVersion(env);
   if(!version||request.version!==version)refuse('allocation_version_mismatch','예상한 이관 Worker 버전을 확인하세요.');
   const source=database(env.COURSE_DB),current=await status(db);
-  if(request.op==='status')return {state:current?.state??'empty',phase:current?.phase??null,hash:current?.source_hash??null,token:current?.token??null};
+  if(request.op==='status')return {state:current?.state??'empty',phase:current?.phase??null,hash:current?.source_hash??null,
+   token:current?.token??null,thawReserved:Boolean(current?.thaw_token)};
   if(request.op==='page'){
    if(!['source','target'].includes(request.side))fail(400,'allocation_bad_page','이관 대상을 확인하세요.');
    if(current?.state==='released'&&request.dump)refuse('allocation_released','이미 해제한 이관입니다.');
@@ -189,11 +206,19 @@ export async function courseMigration(db,env,session,request){
    await begin(db,session,request.hash,generation);
   }else{
    if(!current?.token)refuse('allocation_import_missing','이관을 먼저 시작하세요.');
-   if(!current.source_freeze&&request.op!=='reset')unfrozen();
-   if(request.op==='step')await step(source,db,current,session);
-   else if(request.op==='verify'||request.op==='verifyRelease'){
+   if(request.op==='cancelRelease'){
+    requireToken(request,current);
+    return await cancelRelease(db,current,session);
+   }else if(request.op!=='reset'&&!current.source_freeze)unfrozen();
+   else if(request.op==='step'){
+    if(request.token!==undefined||current.phase==='release-check')requireToken(request,current);
+    const progress=await step(source,db,current,session);
+    if(current.phase==='release-check')return {state:current.state,hash:current.source_hash,...progress};
+   }else if(request.op==='verify'||request.op==='verifyRelease'){
+    if(request.op==='verifyRelease')requireToken(request,current);
     await frozenSource(source,current.source_freeze,true);
-    await startVerify(db,current,session,request.op==='verify'?'verify':'release-check');
+    const progress=await startVerify(db,current,session,request.op==='verify'?'verify':'release-check');
+    if(request.op==='verifyRelease')return {state:current.state,hash:current.source_hash,...progress};
    }
    else if(request.op==='reset'){
     if(request.hash!==current.source_hash||request.token!==current.token)refuse('allocation_reset_mismatch','백업한 이관과 현재 이관이 다릅니다.');
@@ -201,6 +226,7 @@ export async function courseMigration(db,env,session,request){
     await reset(db,current,session);
    }else if(request.op==='release'){
     if(current.phase!=='release-ready'||request.hash!==current.hash||Date.now()-current.verified_at>120000)refuse('allocation_not_verified','원본·대상 재대조를 완료하세요.');
+    requireToken(request,current);
     await probeLegacy();
     await frozenSource(source,current.source_freeze,true);
     await db.batch([lock(db,current.token,session),db.prepare("UPDATE ca_import SET state='released' WHERE id=1"),unlock(db)]);
