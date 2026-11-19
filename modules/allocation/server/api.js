@@ -4,6 +4,7 @@ import {digest,randomToken} from '../../../src/crypto.js';
 import {fail,boundedJson,revision,operationId,assemble,validatePart,validateGlobal,authorizePart} from './validation.js';
 const DAY=86400000;
 const termOf=global=>global.school.year+'-'+global.school.semester;
+const activeTermSql='SELECT active_term FROM app_state WHERE id=1';
 function store(db) {
   const stats={ms:0,read:0,written:0};
   const count=results=>{for(const r of results){stats.read+=r.meta?.rows_read??0;stats.written+=r.meta?.rows_written??0;}};
@@ -22,7 +23,7 @@ async function workspace(s,options={},admin=false) {
   const all=options.all===true||options.all==='true';
   // Both results come from the same D1 batch transaction/snapshot.
   const [globals,rows]=await s.batch([
-    ['SELECT payload,revision FROM ca_workspace WHERE id=1'],
+    [`SELECT payload,revision,(${activeTermSql}) AS active_term FROM ca_workspace WHERE id=1`],
     ['SELECT id,revision,json_extract(payload,\'$.department\') AS department, CASE WHEN ? OR id=COALESCE(?,(SELECT json_extract(payload,\'$.departmentIds[0]\') FROM ca_workspace WHERE id=1)) THEN payload ELSE NULL END AS payload FROM ca_sheets',all?1:0,options.departmentId??null]
   ]);
   const global=JSON.parse(globals[0].payload),byId=new Map(rows.map(r=>[r.id,r]));
@@ -32,7 +33,7 @@ async function workspace(s,options={},admin=false) {
   if(!byId.has(selected))fail(404,'not_found','교과군을 찾을 수 없습니다.');
   const parts=ordered.filter(r=>r.payload).map(r=>JSON.parse(r.payload));
   return {partial:true,global,departments:ordered.map(r=>JSON.parse(r.department)),parts,
-    selectedDepartmentId:selected,globalRevision:globals[0].revision,revisions:Object.fromEntries(ordered.map(r=>[r.id,r.revision])),admin};
+    selectedDepartmentId:selected,globalRevision:globals[0].revision,revisions:Object.fromEntries(ordered.map(r=>[r.id,r.revision])),activeTerm:globals[0].active_term,admin};
 }
 async function priorOperation(s,id,kind,sheetId,hash) {
   const prior=await s.first('SELECT * FROM ca_operations WHERE id=?',id);if(!prior)return null;
@@ -133,7 +134,14 @@ export async function courseRequest(db,session,path,method,data,sendTransfer,rec
     const w=await workspace(s,{all:true},admin);
     return {state:assemble(w.global,w.parts),globalRevision:w.globalRevision,revisions:w.revisions,admin};
   }
-  if(method==='POST'&&path==='/term')return switchTerm(s,data.term,session,now);
+  if(path==='/term'){
+    if(method==='POST')return switchTerm(s,data.term,session,now);
+    if(method==='GET'){
+      requireAdmin(session);
+      const [platform,archives]=await s.batch([[activeTermSql],["SELECT term FROM ca_term_archives WHERE sheet_id='' ORDER BY term DESC"]]);
+      return {activeTerm:platform[0]?.active_term??null,archivedTerms:archives.map(row=>row.term)};
+    }
+  }
   if(method==='GET'&&path==='/assignment-hours'){
     requireAdmin(session);
     const row=await s.first('SELECT payload FROM ca_workspace WHERE id=1');

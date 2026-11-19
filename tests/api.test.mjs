@@ -18,11 +18,14 @@ test('integrated allocation uses the existing workspace, role, and independent t
  assert.equal((await request(teacher,'teacher')).code,'COURSE_CLOSED');
  const start=await request(admin,'admin');
  assert(start.ok);assert.equal(start.data.admin,true);assert.equal(start.data.global.school.semester,1);
+ assert.equal(start.data.activeTerm,'2026-2');
+ assert.deepEqual((await request(admin,'admin','/term')).data,{activeTerm:'2026-2',archivedTerms:[]});
  assert.equal(start.data.departments.length,2);assert.equal(start.data.parts[0].teachers[0].name,'가상교사1');
  assert.equal((await request(admin,'admin','/auth/password','POST')).status,404);
  assert((await h.mutation('saveSettings',{settings:{...Core.defaultSettings(),courseAllocationTeachers:true}},admin)).ok);
  assert.equal((await request(teacher,'teacher')).data.admin,false);
  assert.equal((await request(admin,'teacher')).data.admin,false);
+ assert.equal((await request(teacher,'teacher','/term')).status,403);
  assert.equal((await request(teacher,'teacher','/term','POST',{term:'2027-1'})).status,403);
  assert.equal((await request(teacher,'teacher','/timetable-transfer','POST',{term:'2026-1'})).status,403);
  const part=structuredClone(start.data.parts[0]);part.teachers[0].name='가상교사수정';
@@ -31,6 +34,7 @@ test('integrated allocation uses the existing workspace, role, and independent t
  assert.deepEqual((await request(teacher,'teacher','/sheets/d1','PUT',save)).data,saved.data);
  assert((await request(admin,'admin','/term','POST',{term:'2027-1'})).ok);
  assert.equal((await request(admin,'admin')).data.global.school.year,2027);
+ assert.deepEqual((await request(admin,'admin','/term')).data,{activeTerm:'2026-2',archivedTerms:['2026-1']});
  assert((await request(admin,'admin','/term','POST',{term:'2026-1'})).ok);
  assert.equal((await request(admin,'admin')).data.parts[0].teachers[0].name,'가상교사수정');
  await h.sql("UPDATE ca_sheets SET payload=json_set(payload,'$.department.status','locked') WHERE id='d1'");

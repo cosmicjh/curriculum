@@ -21,7 +21,7 @@ const request=createTransport();
 
 const app=document.querySelector('#app'),dialog=document.querySelector('#dialog');
 let state,toastTimer;
-const cloud={ready:false,admin:false,saving:false,globalRevision:0,revisions:{},base:{},globalBase:null,dirty:new Set(),globalDirty:false,context:null,loaded:new Set(),scoped:true,loading:false,fullLoading:false,loadTicket:0};
+const cloud={ready:false,admin:false,saving:false,globalRevision:0,revisions:{},base:{},globalBase:null,dirty:new Set(),globalDirty:false,context:null,loaded:new Set(),scoped:true,loading:false,fullLoading:false,loadTicket:0,activeTerm:null};
 const FRAME_KEY='course-allocation-frame-ratio';
 let frameRatio=null,frameDrag=null;
 try{const saved=localStorage.getItem(FRAME_KEY);if(saved!==null&&Number.isFinite(Number(saved))&&Number(saved)>0&&Number(saved)<100)frameRatio=Number(saved);}catch{}
@@ -32,6 +32,14 @@ const icon=n=>`<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d=
 const btn=(a,l,i='',cl='',attrs='')=>`<button type="button" data-action="${a}" class="${cl}" ${attrs}>${l||(i==='close'?'닫기':'')}</button>`;
 const badge=(t,cl='')=>`<span class="pill ${cl}">${e(t)}</span>`;
 const dept=()=>state.departments.find(d=>d.id===ui.deptId)??state.departments[0];
+const allocationTerm=()=>state.school.year+'-'+state.school.semester;
+function setPlatformTerm(term){
+  cloud.activeTerm=term;
+  const label=app.querySelector('.platform-term');
+  if(!label)return;
+  label.hidden=!term||term===allocationTerm();
+  label.textContent=label.hidden?'':'통합시간표 '+term;
+}
 const draft=()=>dept().status==='draft';
 const statusText={draft:'입력 중',submitted:'제출 완료',locked:'관리자 확정'};
 const groupOptions=(sel,all=false)=>`${all?'<option value="all">전체 교과(군)</option>':''}${R.groups.map(g=>`<option value="${g.id}" ${g.id===sel?'selected':''}>${e(g.name)}</option>`).join('')}`;
@@ -100,7 +108,7 @@ function render(){
   const nav=[['sheet','배당표'],...(admin?[['settings','학교 설정']]:[]),['validation','검증']];
   app.innerHTML=`<div class="workbook">
     <header class="workbook-header">
-      <div class="workbook-brand"><strong>시수배당표</strong><span title="시수배당 학기">${state.school.year}학년도 ${state.school.semester}학기</span></div>
+      <div class="workbook-brand"><strong>시수배당표</strong><div class="workbook-term"><span title="시수배당 학기">${state.school.year}학년도 ${state.school.semester}학기</span>${admin?btn('switch-term','학기 전환','','small',`aria-haspopup="dialog" ${cloud.saving||cloud.loading?'disabled':''}`):''}</div><span class="platform-term" hidden></span></div>
       <div class="header-actions"><span class="header-save">${cloud.loading?'자료 조회 중':cloud.dirty.has(dept().id)||cloud.globalDirty?'저장 전':'저장됨'}</span>${btn('save-sheet',e(dept().name)+' 저장','','primary',`data-id="${dept().id}" ${cloud.saving||cloud.loading?'disabled':''}`)}</div>
     </header>
     <div class="workbook-nav"><nav aria-label="작업 메뉴">${nav.map(([v,n])=>`<button data-view="${v}" class="${ui.view===v?'active':''}" ${ui.view===v?'aria-current="page"':''}>${n}</button>`).join('')}</nav><div class="file-actions">${admin?`${btn('server-hours','서버 분반배정','','small',cloud.saving||cloud.loading?'disabled':'')+btn('hours-import','분반배정 파일','upload','small',cloud.saving||cloud.loading?'disabled':'')}${btn('refresh','불러오기','','small')}${btn('backup','백업','download','small')}${btn('restore','복원','upload','small')}${btn('csv','CSV','download','small')}${btn('timetable-transfer','시간표용 JSON','download','small')}${btn('timetable-sync','교육과정 편성·운영 지원 도구로 전달','','small')}${btn('reset-data','초기화','','small',cloud.saving||cloud.loading||ui.printing?'disabled':'')}`:''}${btn('print-form','양식 인쇄','','small',ui.printing||cloud.saving||cloud.loading?'disabled':'')}${btn('print-current','입력 내용 인쇄','','small',ui.printing||cloud.saving||cloud.loading?'disabled':'')}</div></div>
@@ -110,6 +118,7 @@ function render(){
     <main id="main" class="${ui.view==='sheet'?'sheet-main':'page-main'}">${({sheet:sheetView,settings:settingsView,validation:validationView}[ui.view]??sheetView)()}</main>
     <footer class="sheet-dock"><div class="sheet-tabs" role="tablist" aria-label="교과군">${state.departments.map(d=>`<button type="button" role="tab" aria-selected="${d.id===dept().id}" data-sheet="${d.id}" class="sheet-tab ${d.id===dept().id?'active':''}">${e(d.name)}<i class="unsaved-dot" ${cloud.dirty.has(d.id)?'':'hidden'}></i></button>`).join('')}${admin?btn('new-dept','+','','sheet-add','aria-label="교과군 추가"'):''}</div></footer>
   </div>`;
+  setPlatformTerm(cloud.activeTerm);
   applyFrameSize();alignHorizontalScroll(scroll?.left);observeHorizontalFrames();const next=document.querySelector('.sheet-scroll');if(scroll&&next){next.scrollLeft=scroll.left;next.scrollTop=scroll.top;const plan=document.querySelector('.plan-scroll');if(plan){plan.scrollLeft=scroll.left;plan.scrollTop=scroll.planTop;}}const tabs=document.querySelector('.sheet-tabs');if(tabs)tabs.scrollLeft=dockLeft;applyHighlight();
 }
 let catalogCache=null;
@@ -319,11 +328,78 @@ function sheetView(){
   </div>`;
 }
 
-function settingsView(){return `${heading('학교 설정','학급·이동 분반 수를 설정합니다. 교과군은 하단 시트에서 추가·전환합니다.')}<section class="panel"><div class="panel-head" style="flex-wrap:wrap"><h2>학교 설정</h2>${cloud.admin?`<div class="bottom-actions" style="margin-top:0;flex-wrap:wrap">${btn('performance','성능 측정','','small')}</div>`:''}</div><div class="panel-body"><form id="school-form"><div class="form-grid"><label class="field">학교명<input name="name" value="${e(state.school.name)}" placeholder="학교명 입력" maxlength="80"></label><label class="field">학년도<input name="year" type="number" min="2000" max="2100" value="${state.school.year}" required></label><label class="field">학기<select name="semester"><option value="1" ${state.school.semester===1?'selected':''}>1학기</option><option value="2" ${state.school.semester===2?'selected':''}>2학기</option></select></label></div><div class="table-scroll spaced"><table class="grade-table"><thead><tr><th>학년</th><th>원반 수</th><th>이동수업 분반 수</th><th>이동수업 코드</th></tr></thead><tbody>${state.school.grades.map(g=>`<tr><td>${g.grade}학년</td><td><input name="class${g.grade}" aria-label="${g.grade}학년 원반 수" type="number" min="0" max="40" value="${g.classCount}" required></td><td><input name="moving${g.grade}" aria-label="${g.grade}학년 이동 분반 수" type="number" min="0" max="52" value="${g.movingCount}" required></td><td class="muted">${g.movingCount?`${g.grade}A부터 ${g.grade}${C.letter(g.movingCount)}까지`:'없음'}</td></tr>`).join('')}</tbody></table></div><p class="setting-note spaced">대형 분반의 하위 분반은 과목별로 지정합니다. 3C1·3C2를 개설해도 학년 전체 이동수업 코드 수는 증가하지 않습니다.</p><div class="bottom-actions"><button type="submit" class="primary">학교 설정 저장</button></div></form></div></section>`;}
+function settingsView(){return `${heading('학교 설정','학급·이동 분반 수를 설정합니다. 교과군은 하단 시트에서 추가·전환합니다.')}<section class="panel"><div class="panel-head" style="flex-wrap:wrap"><h2>학교 설정</h2>${cloud.admin?`<div class="bottom-actions" style="margin-top:0;flex-wrap:wrap">${btn('performance','성능 측정','','small')}</div>`:''}</div><div class="panel-body"><form id="school-form"><div class="form-grid"><label class="field">학교명<input name="name" value="${e(state.school.name)}" placeholder="학교명 입력" maxlength="80"></label><label class="field">학년도<input name="year" value="${state.school.year}" readonly></label><label class="field">학기<input name="semester" value="${state.school.semester}학기" readonly></label></div><div class="table-scroll spaced"><table class="grade-table"><thead><tr><th>학년</th><th>원반 수</th><th>이동수업 분반 수</th><th>이동수업 코드</th></tr></thead><tbody>${state.school.grades.map(g=>`<tr><td>${g.grade}학년</td><td><input name="class${g.grade}" aria-label="${g.grade}학년 원반 수" type="number" min="0" max="40" value="${g.classCount}" required></td><td><input name="moving${g.grade}" aria-label="${g.grade}학년 이동 분반 수" type="number" min="0" max="52" value="${g.movingCount}" required></td><td class="muted">${g.movingCount?`${g.grade}A부터 ${g.grade}${C.letter(g.movingCount)}까지`:'없음'}</td></tr>`).join('')}</tbody></table></div><p class="setting-note spaced">대형 분반의 하위 분반은 과목별로 지정합니다. 3C1·3C2를 개설해도 학년 전체 이동수업 코드 수는 증가하지 않습니다.</p><div class="bottom-actions"><button type="submit" class="primary">학교 설정 저장</button></div></form></div></section>`;}
 function validationView(){const issues=C.validate(state,dept().id),labels={teacher:'이름 입력',pool:'배정 나누기',alias:'과목 연결',structure:'분반 설정',missing:'시수 배분',over:'배정 확인',empty:'분반 추가'};return `${heading(`${e(dept().name)} 배당 검증`,'미입력 항목과 분반별 시수 합계를 확인합니다.','')}<section class="panel"><div class="panel-head"><h2>확인 항목</h2>${badge(`${issues.length}개`,issues.length?'amber':'teal')}</div><div class="issue-list">${issues.map((x,i)=>`<div class="issue-row"><div class="issue-icon">${icon('alert')}</div><div class="issue-content"><strong>${e(x.title)}</strong><p>${e(x.detail)}</p></div>${btn('fix-issue',labels[x.type]??'확인','','small',`data-index="${i}"`)}</div>`).join('')||'<div class="empty">모든 확인 항목이 해결되었습니다.</div>'}</div></section><section class="panel"><div class="panel-body actions">${draft()?btn('submit','검증 후 제출','check','primary'):''}${ui.mode==='admin'&&dept().status==='submitted'?btn('approve','관리자 확정','check','primary'):''}${ui.mode==='admin'&&!draft()?btn('reopen','입력 다시 열기'):''}<span class="muted tiny">제출 후에는 입력을 다시 열기 전까지 수정을 잠급니다.</span></div></section>`;}
 
 function showDialog(title,body,submit,save='적용',wide=false){dialog.className=wide?'wide':'';dialog.innerHTML=`<form id="dialog-form"><div class="dialog-head"><h2 id="dialog-title">${title}</h2>${btn('close-dialog','','close','ghost','aria-label="닫기"')}</div><div class="dialog-body">${body}</div><div id="dialog-error" class="dialog-error" role="alert"></div><div class="dialog-footer">${submit?`<button type="submit" class="primary">${save}</button>`:''}</div></form>`;document.querySelector('#dialog-form').onsubmit=async event=>{event.preventDefault();try{await submit?.(new FormData(event.currentTarget),event.currentTarget);}catch(err){document.querySelector('#dialog-error').textContent=err.message;}};if(!dialog.open)dialog.showModal();dialog.scrollTop=0;}
 function confirmDialog(title,body,fn,save='확인'){showDialog(title,`<p>${body}</p>`,()=>{if(fn()!==false)dialog.close();},save);}
+function assertCanSwitchTerm(){
+  if(!cloud.admin)throw Error('관리자 모드에서 실행하세요.');
+  if(!cloud.ready||cloud.saving||cloud.loading||ui.printing)throw Error('자료 조회 또는 저장이 끝난 뒤 다시 실행하세요.');
+  const edited=[...app.querySelectorAll('#school-form input:not([readonly])')].some(input=>input.value!==input.defaultValue);
+  if(cloud.dirty.size||cloud.globalDirty||edited)throw Error('현재 학기의 변경 내용을 먼저 저장하세요.');
+}
+
+async function openTermDialog(){
+  assertCanSwitchTerm();
+  const {activeTerm,archivedTerms}=await api('/term');
+  if(dialog.open)return;
+  assertCanSwitchTerm();
+  setPlatformTerm(activeTerm);
+  const current=allocationTerm(),{year,semester}=state.school;
+  const next=semester===1?year+'-2':year<2100?(year+1)+'-1':current;
+  const suggested=activeTerm!==current&&/^(?:20\d{2}|2100)-[12]$/.test(activeTerm)?activeTerm:next;
+  const [targetYear,targetSemester]=suggested.split('-');
+  const archives=archivedTerms.filter(term=>term!==current);
+  showDialog('학기 전환',`<div class="form-grid">
+    <label class="field">학년도<input name="year" type="number" min="2000" max="2100" value="${targetYear}" required autofocus></label>
+    <div class="field"><label for="term-semester">학기</label><select id="term-semester" name="semester">${[1,2].map(n=>`<option value="${n}" ${Number(targetSemester)===n?'selected':''}>${n}학기</option>`).join('')}</select></div>
+    <div class="field full"><label for="term-archive">보관 학기</label><select id="term-archive" name="archive" ${archives.length?'':'disabled'}>
+      <option value="">${archives.length?'선택':'보관 학기 없음'}</option>${archives.map(term=>`<option value="${e(term)}">${e(term)}</option>`).join('')}
+    </select></div>
+    </div><p data-term-outcome role="status"></p><p>현재 ${current} 학기 작업본을 보관합니다.</p>`,async(values,form)=>{
+    assertCanSwitchTerm();
+    const term=Number(values.get('year'))+'-'+values.get('semester');
+    if(!form.checkValidity()||term===current)return;
+    const enabled=[...form.elements].filter(control=>!control.disabled);
+    const keepOpen=event=>event.preventDefault();
+    dialog.addEventListener('cancel',keepOpen);
+    for(const control of enabled)control.disabled=true;
+    cloud.loading=true;
+    try{
+      await api('/term','POST',{term});
+      cloud.context=null;ui.importedDeptIds=[];ui.resetDeptIds=[];
+      await initialize();
+      dialog.close();
+      if(cloud.ready)toast(term+' 학기로 전환했습니다.');
+    }finally{
+      cloud.loading=false;
+      dialog.removeEventListener('cancel',keepOpen);
+      for(const control of enabled)control.disabled=false;
+      if(cloud.ready)render();
+      const focus=dialog.open?form.querySelector('[type=submit]'):app.querySelector('[data-action=switch-term]');
+      focus?.focus({preventScroll:true});
+    }
+  },'전환 확인');
+  const form=dialog.querySelector('form'),outcome=form.querySelector('[data-term-outcome]'),submit=form.querySelector('[type=submit]');
+  const {year:yearInput,semester:semesterInput,archive}=form.elements;
+  function paintTarget(){
+    const term=Number(yearInput.value)+'-'+semesterInput.value;
+    const valid=yearInput.validity.valid,same=term===current;
+    archive.value=archives.includes(term)?term:'';
+    submit.disabled=!valid||same;
+    outcome.textContent=!valid?'학년도를 확인하세요.':same?'현재 작업 중인 학기입니다.':
+      archives.includes(term)?term+' 보관본을 복원합니다.':term+' 새 학기를 생성합니다.';
+  }
+  form.addEventListener('input',event=>{
+    if(event.target===archive){
+      if(!archive.value)return;
+      [yearInput.value,semesterInput.value]=archive.value.split('-');
+    }
+    paintTarget();
+  });
+  paintTarget();
+}
 function deptDialog(rename=false){showDialog(rename?'교과군 시트 이름 변경':'교과군 시트 추가',`<label class="field">교과군명<input name="name" value="${rename?e(dept().name):''}" placeholder="예: 기술·가정, 교양" maxlength="30" required></label><p>학교의 교과 업무 분장에 맞게 시트 이름을 지정합니다.</p>`,f=>{const name=String(f.get('name')).trim();if(!name)throw new Error('교과군명을 입력하세요.');let created;if(mutate(rename?'교과군 이름 변경':`${name} 시트 추가`,s=>{if(s.departments.some(d=>d.name===name&&(!rename||d.id!==dept().id)))throw new Error('같은 이름의 교과군이 있습니다.');if(rename){C.assertDraft(s,dept().id);s.departments.find(d=>d.id===dept().id).name=name;}else{created=C.uid('d');s.departments.push({id:created,name,status:'draft',sourceTotal:null,note:''});C.addTeacher(s,created);}})){dialog.close();if(created){ui.deptId=created;ui.catalogGroup=R.suggestedGroup(name);cloud.context=null;}ui.view='sheet';render();}},rename?'이름 변경':'시트 추가');}
 function openCatalogItem(s,item,grade){if(C.coursesOf(s,dept().id).some(c=>c.grade===grade&&R.normalize(c.name)===R.normalize(item.name)))throw new Error(`${grade}학년에 이미 개설된 과목입니다: ${item.name}`);const c=C.addCourse(s,{deptId:dept().id,name:item.name,grade,baseHours:3});Object.assign(c,{catalogId:item.id,officialGroupId:item.groupId,category:item.category,curriculum:item.curriculum});}
 function customDialog(){showDialog('학교 과목 직접 추가',`<div class="form-grid"><label class="field full">과목명<input name="name" maxlength="80" required placeholder="과목명 입력"></label><label class="field">분류 교과(군)<select name="groupId">${groupOptions(ui.catalogGroup)}<option value="school" ${ui.catalogGroup==='all'?'selected':''}>학교 추가·기타</option></select></label><label class="field">과목 유형<select name="category"><option>학교추가</option>${R.categories.map(c=>`<option>${c}</option>`).join('')}</select></label><label class="field">바로 개설할 학년<select name="grade">${[1,2,3].map(g=>`<option value="${g}" ${g===ui.grade?'selected':''}>${g}학년</option>`).join('')}</select></label></div><p>직접 추가 과목은 ‘학교 추가’로 구분합니다. 현재 ${e(dept().name)} 시트에 개설합니다.</p>`,f=>{const name=String(f.get('name')).trim(),groupId=String(f.get('groupId')),category=String(f.get('category')),grade=f.get('grade');if(!name)throw new Error('과목명을 입력하세요.');if(items().some(c=>R.normalize(c.name)===R.normalize(name)))throw new Error('이미 과목 목록에 있습니다. 목록에서 선택하세요.');if(mutate(`${name} 학교 과목 추가`,s=>{s.customCatalog??=[];const item={id:C.uid('custom'),name,groupId,category,official:false,curriculum:'학교 추가'};s.customCatalog.push(item);if(grade)openCatalogItem(s,item,Number(grade));})){dialog.close();ui.catalogGroup=groupId;ui.view='sheet';render();toast('학교 과목을 추가했습니다.');}},'과목 추가');}
@@ -390,7 +466,7 @@ document.addEventListener('click',async event=>{
     },
     'timetable-transfer':async()=>{requireImportAdmin();await ensureAllDepartments({stableGlobal:true});const data=C.timetableTransfer(state);download('시수배당_'+data.term+'.json',JSON.stringify(data,null,2),'application/json');},
     'restore':()=>{document.querySelector('#backup-file').value='';document.querySelector('#backup-file').click();},'csv':()=>download(`교과시수배당_${state.school.year}_${dept().name}.csv`,C.csv(state,dept().id),'text/csv;charset=utf-8'),
-    'save-sheet':()=>saveSheet(b.dataset.id),'refresh':refreshServer,'print-form':printBlankForm,'close-dialog':()=>dialog.close(),
+    'save-sheet':()=>saveSheet(b.dataset.id),'refresh':refreshServer,'switch-term':openTermDialog,'print-form':printBlankForm,'close-dialog':()=>dialog.close(),
     'submit':()=>{const issues=C.validate(state,dept().id);if(issues.length){toast(`${issues.length}개 확인 항목을 해결하세요.`,true);return;}confirmDialog('배당표 제출','제출하면 수정을 잠급니다. 관리자가 입력을 다시 열 수 있습니다.',()=>mutate(`${dept().name} 제출`,s=>C.changeStatus(s,dept().id,'submitted')),'제출');},
     'approve':()=>mutate(`${dept().name} 관리자 확정`,s=>C.changeStatus(s,dept().id,'locked')),'reopen':()=>mutate(`${dept().name} 입력 다시 열기`,s=>C.changeStatus(s,dept().id,'draft')),
     'fix-issue':()=>{const x=C.validate(state,dept().id)[Number(b.dataset.index)];if(!x)return;if(!draft()){toast('입력을 다시 열어 주세요.',true);return;}if(x.type==='pool')poolDialog(x.groupId);else if(x.type==='structure')groupDialog(x.courseId,state.groups.find(g=>g.id===x.groupId).label);else if(x.type==='alias')aliasDialog();else{ui.view='sheet';render();if(x.type==='teacher')focusCell(`[data-edit=teacher-name][data-id="${x.teacherId}"]`);else toast('배당표에서 해당 과목의 분반 시수를 확인하세요.');}}
@@ -571,11 +647,7 @@ document.addEventListener('click',flushInputPaint);
 document.addEventListener('pointercancel',flushInputPaint);
 
 window.addEventListener('blur',()=>{const active=document.activeElement;if(active?.closest?.('.allocation-table')&&active.dataset.edit){commitField(active);active.blur();}if(paintPending)flushInputPaint();clearHighlight();});
-document.addEventListener('submit',async event=>{if(event.target.id!=='school-form')return;event.preventDefault();const f=new FormData(event.target),value={name:String(f.get('name')).trim(),year:Number(f.get('year')),semester:Number(f.get('semester')),grades:[1,2,3].map(grade=>({grade,classCount:Number(f.get('class'+grade)),movingCount:Number(f.get('moving'+grade))}))};const term=value.year+'-'+value.semester;
- if(term!==state.school.year+'-'+state.school.semester){
-   if(cloud.dirty.size||cloud.globalDirty){toast('현재 학기의 변경 내용을 먼저 저장하세요.',true);return;}
-   confirmDialog('학기 전환',term+' 학기로 전환할까요? 현재 작업본은 학기별로 보관됩니다.',async()=>{try{await api('/term','POST',{term});await initialize();}catch(error){toast(error.message,true);}});return;
- }
+document.addEventListener('submit',async event=>{if(event.target.id!=='school-form')return;event.preventDefault();const f=new FormData(event.target),value={name:String(f.get('name')).trim(),year:state.school.year,semester:state.school.semester,grades:[1,2,3].map(grade=>({grade,classCount:Number(f.get('class'+grade)),movingCount:Number(f.get('moving'+grade))}))};
  try{await ensureAllDepartments({stableGlobal:true});if(mutate('학교·학급 구성 변경',s=>{if(s.departments.some(d=>d.status!=='draft'))throw new Error('제출·확정된 시트의 입력을 다시 연 후 수정하세요.');C.validateSchool(s,value);s.school=value;}))await saveGlobalOnly();}catch(err){toast(err.message,true);}});
 document.querySelector('#backup-file').addEventListener('change',async event=>{if(!cloud.admin){toast('관리자 모드에서 실행하세요.',true);return;}const file=event.target.files[0];if(!file)return;try{if(file.size>5000000)throw new Error('파일이 너무 큽니다.');const next=C.assertState(C.upgradeState(JSON.parse(await file.text()),defaultNameHashes));await ensureAllDepartments();confirmDialog('백업 복원','현재 작업본을 교체합니다. 교과군별 저장 버튼으로 반영합니다.',()=>{if(cloud.saving||cloud.loading)throw new Error('자료 조회 또는 저장이 끝난 뒤 다시 실행하세요.');state=next;cloud.loaded=new Set(next.departments.map(d=>d.id));markDirty();render();});}catch(err){toast(err.message,true);}});
 function assertResetAdmin(){if(!cloud.admin||ui.mode!=='admin')throw new Error('관리자 모드에서 초기화하세요.');if(!cloud.ready||cloud.saving||cloud.loading||ui.printing)throw new Error('연결·저장·인쇄 상태를 확인하세요.');}
@@ -634,6 +706,7 @@ document.querySelector('#hours-import-file').addEventListener('change',async eve
 });
 
 
+window.setCoursePlatformTerm=setPlatformTerm;
 window.hasUnsavedCourseChanges=()=>cloud.dirty.size>0||cloud.globalDirty||cloud.saving;
 window.addEventListener('beforeunload',event=>{if(cloud.dirty.size||cloud.globalDirty){event.preventDefault();event.returnValue='';}});
 function emptyPart(department){return {department:{...department,sourceTotal:null,note:''},teachers:[],courses:[],groups:[],assignments:[],unmapped:[]};}
@@ -643,7 +716,7 @@ function stateFromParts(global,departments,parts,history=[]){
   return S.rememberParts({schemaVersion:1,uiVersion:3,school:global.school,source:global.source??{},customCatalog:global.customCatalog??[],departments:ordered.map(p=>p.department),teachers:ordered.flatMap(p=>p.teachers),courses:ordered.flatMap(p=>p.courses),groups:ordered.flatMap(p=>p.groups),assignments:ordered.flatMap(p=>p.assignments),unmapped:ordered.flatMap(p=>p.unmapped),history},ordered);
 }
 function adopt(result){
-  cloud.admin=result.admin===true;ui.mode=cloud.admin?'admin':'input';
+  cloud.admin=result.admin===true;cloud.activeTerm=result.activeTerm??null;ui.mode=cloud.admin?'admin':'input';
   if(!result.partial){
     const next=C.assertState(result.state);state=next;cloud.loaded=new Set(next.departments.map(d=>d.id));cloud.scoped=false;
     cloud.base=Object.fromEntries(next.departments.map(d=>[d.id,C.clone(S.departmentPart(next,d.id))]));
@@ -656,8 +729,9 @@ function adopt(result){
 }
 function mergeWorkspace(result){
   if(result.admin===false&&cloud.admin){cloud.admin=false;ui.mode='input';}
+  if(result.activeTerm!==undefined)cloud.activeTerm=result.activeTerm;
   if(!result.partial){
-    result={partial:true,global:S.globalPart(result.state),departments:result.state.departments,parts:result.state.departments.map(d=>S.departmentPart(result.state,d.id)),globalRevision:result.globalRevision,revisions:result.revisions};
+    result={...result,partial:true,global:S.globalPart(result.state),departments:result.state.departments,parts:result.state.departments.map(d=>S.departmentPart(result.state,d.id))};
   }
   if(result.globalRevision!==cloud.globalRevision){
     if(cloud.dirty.size||cloud.globalDirty)throw Object.assign(new Error('학교 설정이 변경되었습니다. 저장 전 내용을 보존했습니다. 변경 내용을 확인한 뒤 불러오기를 사용하세요.'),{code:'global_conflict',status:409});

@@ -274,6 +274,7 @@
       state.timetable=null;state.roster=null;state.importPayload=null;state.importRef=null;state.importPreview=null;state.page=0;
       state.filters={grade:'',classNum:'',status:'',search:''};if(modal.open)modal.close();modal.innerHTML='';
     }
+    if(state.meta?.term!==meta.term)for(const frame of courseFrames.values())frame.contentWindow?.setCoursePlatformTerm?.(meta.term);
     state.meta=meta;if(state.admin&&state.route==='admin'){state.admin.meta=meta;state.admin.store.settings=meta.settings;state.admin.store.term=meta.term;}header();}
   function mergeLinks(data){Object.assign(state.admin,{warnings:data.warnings,blocks:data.blocks,teachers:data.teachers});state.admin.store.overrides=data.overrides;state.admin.store.blocks=data.manualBlocks;if(data.sections){state.admin.store.sections=data.sections;state.admin.sectionsRevision=data.meta.sectionsRevision;state.admin.loaded.sections=true;}state.admin.lessonCache={};if(data.teacher)state.admin.lessonCache[data.teacher]=data.lessons;state.admin.loaded.links=true;}
   async function ensureAdminTab(tab){

@@ -17,9 +17,11 @@ input:focus,select:focus{border-color:#777;box-shadow:none}
 .icon{width:15px;height:15px}
 .workbook{height:100dvh;min-width:0;display:flex;flex-direction:column;background:#fff;overflow:hidden}
 .workbook-header{min-height:54px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:9px 24px}
-.workbook-brand{display:flex;align-items:center;gap:14px;white-space:nowrap}
+.workbook-brand{display:flex;align-items:center;flex-wrap:wrap;gap:0 14px;white-space:nowrap}
 .workbook-brand strong{font-size:17px;font-weight:600;letter-spacing:-.5px}
-.workbook-brand>span{font-size:12px;color:#595959}
+.workbook-brand>span,.workbook-term>span{font-size:12px;color:#595959}
+.workbook-brand>.platform-term[hidden]{display:none}
+.workbook-term{display:flex;align-items:center;gap:6px}
 .workbook-header .header-actions{display:flex;align-items:center;justify-content:flex-end;gap:14px;width:auto}
 .workbook-header .header-actions>.primary{font-size:12px;padding:8px 13px;white-space:nowrap}
 .header-save{font-size:12px;color:#595959;white-space:nowrap}
