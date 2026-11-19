@@ -22,7 +22,7 @@ for(const file of ['cp_sat_runtime.js','cp_sat_runtime.wasm','cp_sat_runtime_asy
 await copyFile(resolve(ortools,'LICENSE'),resolve(lib,'LICENSE-Apache-2.0.txt'));
 await writeFile(resolve(lib,'NOTICE.txt'),'or-tools-wasm 1.0.0 and OR-Tools CP-SAT\nLicensed under the Apache License, Version 2.0. See LICENSE-Apache-2.0.txt.\nSource: https://github.com/Axelwickm/or-tools-wasm\n');
 const course=resolve(root,'modules/allocation'),courseDist=resolve(dist,'course-allocation');
-const workbook=await build({absWorkingDir:course,entryPoints:['app/workbook.js','app/workbook.css'],outdir:resolve(courseDist,'assets'),entryNames:'[name]-[hash]',bundle:true,minify:true,format:'esm',target:'es2022',metafile:true});
+const workbook=await build({absWorkingDir:course,entryPoints:['app/workbook.js','app/workbook.css','app/term-switch.css'],outdir:resolve(courseDist,'assets'),entryNames:'[name]-[hash]',bundle:true,minify:true,format:'esm',target:'es2022',metafile:true});
 let courseHtml=await readFile(resolve(course,'index.html'),'utf8');
 for(const [file,output] of Object.entries(workbook.metafile.outputs)){
  if(output.entryPoint)courseHtml=courseHtml.replace('./'+output.entryPoint,'./assets/'+basename(file));

@@ -1,0 +1,19 @@
+.workbook-brand {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
+.workbook-brand > .platform-term[hidden] {
+  display: none;
+}
+
+.workbook-term {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workbook-term > span {
+  font-size: 12px;
+  color: #595959;
+}
