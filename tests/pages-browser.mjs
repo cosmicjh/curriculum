@@ -154,7 +154,8 @@ try{
   const workbook=page.frameLocator('#course-pane iframe');
   await workbook.locator('.workbook').waitFor();
   assert(await workbook.getByRole('button',{name:'학교 설정',exact:true}).isVisible());
-  assert(await workbook.locator('.workbook-brand span').isVisible());
+  assert(await workbook.locator('.workbook-brand [title="시수배당 학기"]').isVisible());
+  assert(await workbook.getByText('통합시간표 2026-2',{exact:true}).isVisible());
   assert.equal(await workbook.locator('input[type=password]').count(),0);
   assert.equal(new URL(page.url()).origin,pages);
   assert(requests.some(r=>r.action==='courseWorkspace'&&r.authorized));
