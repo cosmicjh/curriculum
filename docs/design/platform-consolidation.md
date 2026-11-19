@@ -23,7 +23,7 @@ Status: Approved by user (2026-11-18)
 | D1 `school-timetable-db` | 주 DB |
 | D1 `course-allocation-db` | 시수배당. Pages(`DB`)와 Worker(`COURSE_DB`) 공동 사용 |
 | D1 `class-swap-db` | 이관 완료된 읽기 전용 복구 원본(연결 해제) |
-| D1 `school-timetable-studyroom-test-20261106` | 시험 잔여 DB |
+| D1 `school-timetable-studyroom-test-20261106` | 당시 시험 잔여 DB. 시험 Worker와 함께 2026-11-19 삭제. 재사용 시 새 시험 자원 필요 |
 
 문제:
 - 시수배당 서버 코드가 두 벌이다: `course-allocation/server/api.js`(공용 접속·관리자 비밀번호, 자체 세션)와

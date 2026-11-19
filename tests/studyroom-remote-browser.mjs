@@ -1,3 +1,4 @@
+// 대상 자원 삭제됨(2026-11-19), 재사용 시 새 시험 자원 필요.
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';

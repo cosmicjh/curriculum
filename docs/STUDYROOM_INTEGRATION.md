@@ -80,7 +80,9 @@ pnpm dev:studyroom
 
 미리보기는 loopback 전용 가상 저장소다. 공통 교사/관리자 `1234`, 가상 학번 `30101`, `30102`를 사용하며 종료하면 초기화된다. 원격 테스트의 강한 임의 비밀번호는 `private/studyroom-test-credentials.local.json`에 별도로 보관하며 로컬 예시 비밀번호와 다르다.
 
-원격 테스트 명령은 `scripts/studyroom-staging.mjs`가 이름·계정·단일 DB·운영 DB와 다른 ID를 검사한 후 실행한다. 현재 테스트 설정은 `.cache/studyroom-test.wrangler.json`이다. `deploy`, `secrets`, `migrate`, `cron-on`, `cron-off`, `export`는 이 격리된 대상에만 적용된다. 실제 운영 배포용 우회 명령으로 사용하지 않는다.
+기존 시험 Worker와 D1 `school-timetable-studyroom-test-20261106`은 2026-11-19에 삭제했다. 원격 시험을 다시 실행하려면 새 격리 시험 자원과 그에 맞는 설정 및 호스트 이름 검사가 필요하다.
+
+원격 시험 명령은 `scripts/studyroom-staging.mjs`가 이름·계정·단일 DB·운영 DB와 다른 ID를 검사한 후 실행한다. 이전 시험 설정은 `.cache/studyroom-test.wrangler.json`이었다. `deploy`, `secrets`, `migrate`, `cron-on`, `cron-off`, `export`는 격리된 시험 대상에만 적용한다.
 
 기존 시간표 JSON 백업/복원은 시간표 범위다. **스터디룸까지 전체 복구하려면 D1 전체 SQL export와 Worker의 기존 서버 비밀값을 함께 보존**해야 한다. 출석 자료 내보내기는 개인정보가 포함된 조회용 자료다. 전환 후 출석이 발생했다면 공유 D1 전체를 과거 시점으로 돌리기 전에 새 출석과 시간표 변경의 복구 범위를 확인한다.
 

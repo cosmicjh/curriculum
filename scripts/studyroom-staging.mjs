@@ -1,3 +1,4 @@
+// 대상 자원 삭제됨(2026-11-19), 재사용 시 새 시험 자원 필요.
 // Every remote mutation is restricted to this disposable test Worker and test DB.
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';

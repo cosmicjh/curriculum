@@ -1,3 +1,4 @@
+// 대상 자원 삭제됨(2026-11-19), 재사용 시 새 시험 자원 필요.
 // Synthetic-only. The hostname guard prevents all writes to the operating app.
 import {readFile,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
