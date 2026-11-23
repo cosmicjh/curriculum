@@ -17,7 +17,19 @@ const base=await h.listen();let browser;const errors=[],steps=[],actions=[];awai
 const step=async(name,fn)=>{await fn();steps.push(name);console.log('PASS '+name);};
 try{
  browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'msedge'}:{})});const context=await browser.newContext({viewport:{width:1920,height:1080}}),page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(new URL(r.url()).pathname.startsWith('/api/'))actions.push(new URL(r.url()).pathname.slice(5));});
- const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false'),login=async(role)=>{await page.goto(base+'/'+role+'.html');await idle();await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await page.locator('[data-tab=allocation]').waitFor({state:'attached'});await idle();await clickMenu(page,page.locator('[data-tab=allocation]'));await page.locator('.allocation-table').waitFor();await idle();};
+ const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
+ async function openAllocation(){
+  await clickMenu(page,page.locator('[data-tab=allocation]'));
+  await page.locator('.allocation-table').waitFor();await idle();
+  const stylesheet=page.locator('link[rel=stylesheet][href^="assets/allocation-roster.css"]');
+  assert(await stylesheet.evaluate(link=>link.sheet?.cssRules.length>0));
+ }
+ async function login(role,path=role+'.html'){
+  await page.goto(base+'/'+path);await idle();
+  await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();
+  await page.locator('[data-tab=allocation]').waitFor({state:'attached'});await idle();
+  await openAllocation();
+ }
  await step('administrator menus keep the same navigation and content frame',async()=>{
   await login('admin');let frame;
   assert.equal(await page.locator('.admin-nav [data-tab=links]').count(),0);
@@ -213,6 +225,41 @@ try{
    await idle();
    assert.equal(await page.locator('#modal[open],#modal .roster-table tbody tr').count(),0);
   }finally{gate.resolve();}
+ });
+ await step('the index admin route loads allocation styles and keeps editing at the cell level',async()=>{
+  await login('admin','index.html#/admin');
+  const cell=page.locator('[data-alloc=cell][data-room=r1][data-code=A][data-grade="3"]');
+  assert.equal(await cell.locator('.allocation-count').evaluate(el=>getComputedStyle(el).display),'block');
+  await cell.click();await page.locator('.allocation-dialog[open]').waitFor();
+  await page.keyboard.press('Escape');await page.locator('.allocation-dialog').waitFor({state:'detached'});
+  await page.locator('[data-action=logout]').click();await idle();
+ });
+ await step('the index teacher route wraps a long subject like the original plain title at FHD',async()=>{
+  await page.setViewportSize({width:1920,height:1080});
+  await login('teacher','index.html#/teacher');
+  await page.evaluate(()=>document.fonts.ready);
+  const subject=page.locator('.allocation-subject').filter({hasText:'기후변화와 지속가능한 세계'}).first();
+  const layout=await subject.evaluate(button=>{
+   const title=button.parentElement;
+   const lines=node=>{
+    const range=document.createRange();range.selectNodeContents(node);
+    return range.getClientRects().length;
+   };
+   const display=getComputedStyle(button).display;
+   const codeWrap=getComputedStyle(button.querySelector('span')).whiteSpace;
+   const buttonLines=lines(button.firstChild);
+   title.replaceChildren(...[...button.childNodes].map(node=>node.cloneNode(true)));
+   const plainLines=lines(title.firstChild);
+   title.replaceChildren(button);
+   return {display,codeWrap,buttonLines,plainLines};
+  });
+  assert.equal(layout.display,'block');
+  assert.equal(layout.codeWrap,'nowrap');
+  assert(layout.plainLines>1,'the long subject exercises wrapping');
+  assert.equal(layout.buttonLines,layout.plainLines);
+  await page.screenshot({path:'test-results/allocation-index-teacher-fhd.png'});
+  await page.goto(base+'/student.html#/teacher');await idle();
+  await openAllocation();
  });
  assert.deepEqual(errors,[]);await writeFile('test-results/allocation-browser.json',JSON.stringify({steps,errors},null,2));
 }finally{await browser?.close();await h.close();}
