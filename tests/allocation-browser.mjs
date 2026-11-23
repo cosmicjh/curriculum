@@ -30,6 +30,16 @@ try{
   await page.locator('[data-tab=allocation]').waitFor({state:'attached'});await idle();
   await openAllocation();
  }
+ async function assertAllocationPaper(paper){
+  const rule=await page.evaluate(()=>{
+   const name=getComputedStyle(document.documentElement).page;
+   const style=document.querySelector('link[href^="assets/allocation-roster.css"]');
+   const rules=[...style.sheet.cssRules].filter(r=>r instanceof CSSMediaRule&&matchMedia(r.conditionText).matches)
+    .flatMap(r=>[...r.cssRules]).filter(r=>r instanceof CSSPageRule&&r.selectorText===name);
+   return {name,sizes:rules.map(r=>r.style.getPropertyValue('size').toLowerCase()),margins:rules.map(r=>r.style.margin)};
+  });
+  assert.deepEqual(rule,{name:'allocation-'+paper.toLowerCase(),sizes:[paper.toLowerCase()+' landscape'],margins:['6mm']});
+ }
  await step('administrator menus keep the same navigation and content frame',async()=>{
   await login('admin');let frame;
   assert.equal(await page.locator('.admin-nav [data-tab=links]').count(),0);
@@ -149,12 +159,13 @@ try{
  await step('mobile search preserves all rooms and all grades print counts',async()=>{
   await page.setViewportSize({width:390,height:844});await clickMenu(page,page.locator('[data-tab=allocation]'));await page.locator('.allocation-table').waitFor();await idle();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.locator('#allocation-query').fill('협력교사');assert.equal(await page.locator('.allocation-table thead th').count(),23);
   assert.equal(await page.locator('.allocation-subject').first().evaluate(el=>getComputedStyle(el).minHeight),'44px');
+  assert((await page.locator('.allocation-consigned').boundingBox()).height>=44);
   assert(await page.locator('.school-heading').evaluate(el=>{
    const title=el.firstElementChild.getBoundingClientRect(),term=el.lastElementChild.getBoundingClientRect(),header=el.closest('header').getBoundingClientRect();
    return title.top>=header.top&&title.bottom<=term.top+1&&term.bottom<=header.bottom;
   }),'the program title and term fit the mobile header without overlap');
   await page.screenshot({path:'test-results/allocation-mobile.png',fullPage:true});
-  await page.evaluate(()=>window.print=()=>{window.allocationPrint=document.querySelector('#print-root').textContent;window.allocationPageStyle=Array.from(document.head.querySelectorAll('style')).at(-1).textContent;});
+  await page.evaluate(()=>window.print=()=>{window.allocationPrint=document.querySelector('#print-root').textContent;});
   for(const paper of ['A3','A4']){
    await page.locator('#allocation-paper').selectOption(paper);await page.locator('[data-alloc=print]').click();await page.waitForFunction(()=>window.allocationPrint);
    assert.match(await page.evaluate(()=>window.allocationPrint),/새 실험실/);assert.match(await page.evaluate(()=>window.allocationPrint),/2학년/);assert.match(await page.evaluate(()=>window.allocationPrint),/3학년/);
@@ -164,9 +175,12 @@ try{
    assert.equal(await printedCount.textContent(),'1명');
    assert.equal(await printedCount.evaluate(el=>getComputedStyle(el).display),'block');
    assert((await page.locator('#print-root .allocation-print-count').allTextContents()).includes('0명'));
-   const style=await page.addStyleTag({content:await page.evaluate(()=>window.allocationPageStyle)});
+   await page.emulateMedia({media:'print'});
+   await assertAllocationPaper(paper);
    const pdf=await page.pdf({path:'test-results/allocation-'+paper+'.pdf',preferCSSPageSize:true,printBackground:true}),raw=pdf.toString('latin1'),box=/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(raw);assert.equal((raw.match(/\/Type\s*\/Page\b/g)||[]).length,1,paper+' must be one page');assert(box);const [width,height]=paper==='A3'?[1191,842]:[842,595];assert(Math.abs(Number(box[1])-width)<1&&Math.abs(Number(box[2])-height)<1,paper+' landscape size');
-   await style.evaluate(el=>el.remove());await page.evaluate(()=>{window.allocationPrint='';});
+   assert.equal(await page.locator('html').evaluate(el=>getComputedStyle(el).page),'auto');
+   await page.emulateMedia({media:null});
+   await page.evaluate(()=>{window.allocationPrint='';});
   }
 
  });
@@ -261,6 +275,90 @@ try{
   await page.goto(base+'/student.html#/teacher');await idle();
   await openAllocation();
  });
+ const student=(await h.api('adminStudent',{id:'student-one'},admin.cookie)).data.student;
+ const changeNote=async note=>assert((await h.mutation('saveStudent',{student:{...student,note}},admin.cookie)).ok);
+ await changeNote('위탁');
+ for(const role of ['admin','teacher'])await step(role+' filters allocation counts and remembers the checkbox after reload',async()=>{
+  await page.locator('[data-action=logout]').click();await idle();
+  await login(role,'index.html#/'+role);
+  const checkbox=page.getByRole('checkbox',{name:'위탁학생 제외'});
+  const count=page.locator('tbody[data-allocation-grade="3"] tr[data-allocation-block="A"] td')
+   .filter({hasText:'가상과학 A1'}).locator('.allocation-count');
+  const printCount=async(expected,selector='[data-alloc=print]')=>{
+   await page.evaluate(()=>{window.consignedPrinted=false;window.print=()=>{window.consignedPrinted=true;};});
+   await page.locator(selector).click();
+   await page.waitForFunction(()=>window.consignedPrinted);
+   const printRoot=page.locator('#print-root');
+   if(selector==='[data-alloc=print]'){
+    const printed=printRoot.locator('td').filter({has:page.getByText('가상과학 A1',{exact:true})});
+    assert.equal(await printed.locator('.allocation-print-count').textContent(),expected);
+   }else{
+    const students=printRoot.locator('.roster-table tbody tr');
+    assert.equal(await students.count(),1);
+    assert.match(await students.textContent(),/위탁/);
+   }
+   await page.evaluate(()=>dispatchEvent(new Event('afterprint')));
+  };
+  assert.equal(await checkbox.isChecked(),false);
+  assert.equal(await count.textContent(),'1명');
+  assert((await page.locator('.allocation-consigned').boundingBox()).height>=32);
+  await checkbox.press('Space');
+  assert(await checkbox.isChecked());
+  assert.equal(await page.locator('#allocation-exclude-consigned:focus').count(),1);
+  assert.equal(await count.textContent(),'0명');
+  await printCount('0명');
+  await page.reload();
+  await idle();await openAllocation();
+  assert(await checkbox.isChecked());
+  assert.equal(await count.textContent(),'0명');
+  if(role==='teacher'){
+   const button=page.getByRole('button',{name:'3학년 가상과학 A1 명렬표 열기'});
+   const dialog=page.locator('#modal[open]');
+   await button.click();
+   await dialog.getByText('A1 · 1명',{exact:true}).waitFor();
+   assert.match(await dialog.locator('.roster-table tbody tr').textContent(),/위탁/);
+   await printCount('1명','[data-action=print-roster]');
+   await dialog.getByRole('button',{name:'닫기'}).click();
+   await changeNote('위탁교육');
+   await button.click();
+   await dialog.getByText('A1 · 1명',{exact:true}).waitFor();
+   assert.equal(await count.textContent(),'1명');
+   await dialog.getByRole('button',{name:'닫기'}).click();
+   assert.equal(await button.evaluate(el=>el===document.activeElement),true);
+   await changeNote('위탁');
+   await button.press('Enter');
+   await dialog.getByText('A1 · 1명',{exact:true}).waitFor();
+   assert.equal(await count.textContent(),'0명');
+   await dialog.getByRole('button',{name:'닫기'}).click();
+  }
+  await page.getByText('위탁학생 제외',{exact:true}).click();
+  assert.equal(await checkbox.isChecked(),false);
+  assert.equal(await count.textContent(),'1명');
+  await printCount('1명');
+ });
+ await step('allocation filtering still works when local storage rejects reads and writes',async()=>{
+  await page.addInitScript(()=>{
+   for(const method of ['getItem','setItem']){
+    const original=Storage.prototype[method];
+    Storage.prototype[method]=function(key,...args){
+     if(key==='timetable.allocation.excludeConsigned')throw new DOMException('Storage unavailable','SecurityError');
+     return original.call(this,key,...args);
+    };
+   }
+  });
+  await page.reload();
+  await idle();await openAllocation();
+  const checkbox=page.getByRole('checkbox',{name:'위탁학생 제외'});
+  const count=page.getByRole('button',{name:'3학년 가상과학 A1 명렬표 열기'})
+   .locator('xpath=ancestor::td').locator('.allocation-count');
+  assert.equal(await checkbox.isChecked(),false);
+  await checkbox.press('Space');
+  assert(await checkbox.isChecked());
+  assert.equal(await count.textContent(),'0명');
+  await checkbox.press('Space');
+  assert.equal(await count.textContent(),'1명');
+ });
+ await changeNote(student.note);
  for(const scenario of [
   {name:'at-length-limit',blocks:20,teachers:Array.from({length:3},(_,i)=>'합성교사'.repeat(20).slice(0,78)+'0'+i)},
   {name:'dense',blocks:12,teachers:['합성교사가','합성교사나','합성교사다']}
@@ -294,17 +392,15 @@ try{
   await page.waitForFunction(rows=>document.querySelectorAll('.allocation-table tr[data-allocation-block]').length===rows,scenario.blocks*2);
   const pageCounts=[],sheetWidths=[];
   for(const paper of ['A3','A4']){
-   await page.evaluate(()=>window.print=()=>{
-    window.denseAllocationPageStyle=document.head.querySelector('style:last-of-type').textContent;
-   });
+   await page.evaluate(()=>{window.denseAllocationPrinted=false;window.print=()=>{window.denseAllocationPrinted=true;};});
    await page.locator('#allocation-paper').selectOption(paper);
    await page.locator('[data-alloc=print]').click();
-   await page.waitForFunction(()=>window.denseAllocationPageStyle);
+   await page.waitForFunction(()=>window.denseAllocationPrinted);
    const table=page.locator('#print-root .allocation-print-table');
    assert.equal(await table.locator('tbody tr:not(.allocation-print-grade)').count(),scenario.blocks*2);
    assert.deepEqual(await table.locator('.allocation-print-count').allTextContents(),Object.values(counts).map(count=>count+'명'));
-   const style=await page.addStyleTag({content:await page.evaluate(()=>window.denseAllocationPageStyle)});
    await page.emulateMedia({media:'print'});
+   await assertAllocationPaper(paper);
    sheetWidths.push(await table.evaluate(el=>el.getBoundingClientRect().width));
    const pdf=await page.pdf({path:'test-results/allocation-'+scenario.name+'-'+paper+'.pdf',preferCSSPageSize:true,printBackground:true});
    const raw=pdf.toString('latin1');
@@ -313,8 +409,6 @@ try{
    const [width,height]=paper==='A3'?[1191,842]:[842,595];
    assert(box&&Math.abs(Number(box[1])-width)<1&&Math.abs(Number(box[2])-height)<1,paper+' landscape size');
    await page.emulateMedia({media:null});
-   await style.evaluate(el=>el.remove());
-   await page.evaluate(()=>{window.denseAllocationPageStyle='';});
   }
   assert.deepEqual(pageCounts,[1,1],scenario.name+' allocation PDF page counts for A3 and A4 landscape');
   assert(sheetWidths.every((width,i)=>width>=[408,285][i]*96/25.4*.95),scenario.name+' allocation uses the available landscape width');

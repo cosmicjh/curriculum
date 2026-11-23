@@ -435,11 +435,9 @@
   async function print(html,kind,paper='A3'){
     const target=$('#print-root');target.className='print-root print-'+kind;target.innerHTML=html;
     await document.fonts.load('600 12px "Pretendard Variable"',target.textContent).catch(()=>{});await document.fonts.ready;
-    let pageStyle;
     try{
       if(kind==='allocation'){
         const size=paper==='A4'?{paper:'A4',width:285,height:198}:{paper:'A3',width:408,height:285},sheet=target.querySelector('.allocation-print');
-        pageStyle=document.createElement('style');pageStyle.textContent='@page{size:'+size.paper+' landscape;margin:6mm}';document.head.append(pageStyle);
         target.classList.add('allocation-measure');
         const pxPerMm=96/25.4,maxWidth=(size.width-0.5)*pxPerMm,maxHeight=(size.height-2)*pxPerMm;
         target.style.setProperty('--allocation-print-height',maxHeight+'px');
@@ -462,10 +460,11 @@
             throw Error('배치표를 선택한 용지 한 장에 맞출 수 없어 인쇄를 중단했습니다.');
           }
         }
+        sheet.dataset.allocationPaper=size.paper;
         target.classList.remove('allocation-measure');
       }
       await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));window.print();
-    }finally{target.classList.remove('allocation-measure');pageStyle?.remove();}
+    }finally{target.classList.remove('allocation-measure');}
   }
   async function mutation(action,args){
     const teacher=$('#link-teacher')&&$('#link-teacher').value,grade=$('#block-grade')&&$('#block-grade').value,blocksOpen=$('#block-grade')&&$('#block-grade').closest('details').open;

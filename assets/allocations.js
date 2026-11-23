@@ -1,12 +1,15 @@
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const blank=()=>({rooms:Array.from({length:12},(_,i)=>({id:'room-'+i,label:(i+1)+'반',classNum:String(i+1)})),grades:['3','2'].map(grade=>({grade,homerooms:{},blocks:[]}))});
+const consignedPreference='timetable.allocation.excludeConsigned';
 export function mountAllocation(root,initial,{admin,request,onRoster,onSaved,print,loadXlsx,onError}){
  let data=initial,board=structuredClone(data.board||blank()),sections=data.sections,dirty=false,grade=board.grades[0]?.grade||'3',query='',paper='A3',dialog,returnFocus;
+ let excludeConsigned=false;
+ try{excludeConsigned=localStorage.getItem(consignedPreference)==='true';}catch{}
  const section=c=>sections.find(s=>s.id===c?.sectionId)||c||{},current=()=>board.grades.find(g=>g.grade===grade),names=c=>(c?.teachers||[]).join(', ');
  const field=(label,id,value,extra='')=>'<div class="field"><label for="'+id+'">'+label+'</label><input id="'+id+'" value="'+esc(value)+'" '+extra+'></div>';
  function countLabel(c){
   const count=c?.sectionId&&data.counts?.[c.sectionId];
-  return Number.isInteger(count)?count+'명':'';
+  return Number.isInteger(count)?(count-(excludeConsigned?(data.consignedCounts?.[c.sectionId]??0):0))+'명':'';
  }
  function screenCell(g,b,r){
   const c=b.cells[r.id],course=section(c),count=countLabel(c);
@@ -40,7 +43,8 @@ export function mountAllocation(root,initial,{admin,request,onRoster,onSaved,pri
  function render(){
   const oldScroll=root.querySelector('.allocation-scroll'),position=oldScroll?{left:oldScroll.scrollLeft,top:oldScroll.scrollTop}:null,focused=document.activeElement,focusKey=focused&&root.contains(focused)?{id:focused.id,action:focused.dataset.alloc,code:focused.dataset.code,room:focused.dataset.room,grade:focused.dataset.grade}:null;
   root.className='allocation-view';
-  root.innerHTML='<div class="allocation-heading"><div><h2>이동수업 배치표</h2></div><div class="toolbar">'+(admin?'<span class="allocation-status" role="status">'+(dirty?'저장하지 않은 변경':'저장됨')+'</span><button data-alloc="save" class="primary" '+(!dirty?'disabled':'')+'>배치표 저장</button>':'')+'<button data-alloc="refresh">새로고침</button><label class="sr-only" for="allocation-paper">인쇄 용지</label><select id="allocation-paper"><option value="A3" '+(paper==='A3'?'selected':'')+'>A3 가로</option><option value="A4" '+(paper==='A4'?'selected':'')+'>A4 가로</option></select><button data-alloc="print">전체 한 장 인쇄</button></div></div><div class="allocation-filters"><div class="field allocation-search">'+field('과목·교사 검색','allocation-query',query,'type="search" autocomplete="off"').replace(/^<div class="field">|<\/div>$/g,'')+'</div></div>'+(admin?'<div class="toolbar"><button data-alloc="block">시간블록 추가</button><button data-alloc="rooms">교실·담임 편집</button><button data-alloc="import">엑셀 불러오기</button><input id="allocation-file" type="file" accept=".xlsx,.xls" hidden></div>':'')+'<div id="allocation-grid">'+table()+'</div>';
+  const consignedFilter='<label class="check-label allocation-consigned"><input id="allocation-exclude-consigned" type="checkbox" '+(excludeConsigned?'checked':'')+'>위탁학생 제외</label>';
+  root.innerHTML='<div class="allocation-heading"><div><h2>이동수업 배치표</h2></div><div class="toolbar">'+(admin?'<span class="allocation-status" role="status">'+(dirty?'저장하지 않은 변경':'저장됨')+'</span><button data-alloc="save" class="primary" '+(!dirty?'disabled':'')+'>배치표 저장</button>':'')+'<button data-alloc="refresh">새로고침</button><label class="sr-only" for="allocation-paper">인쇄 용지</label><select id="allocation-paper"><option value="A3" '+(paper==='A3'?'selected':'')+'>A3 가로</option><option value="A4" '+(paper==='A4'?'selected':'')+'>A4 가로</option></select><button data-alloc="print">전체 한 장 인쇄</button></div></div><div class="allocation-filters"><div class="field allocation-search">'+field('과목·교사 검색','allocation-query',query,'type="search" autocomplete="off"').replace(/^<div class="field">|<\/div>$/g,'')+'</div>'+consignedFilter+'</div>'+(admin?'<div class="toolbar"><button data-alloc="block">시간블록 추가</button><button data-alloc="rooms">교실·담임 편집</button><button data-alloc="import">엑셀 불러오기</button><input id="allocation-file" type="file" accept=".xlsx,.xls" hidden></div>':'')+'<div id="allocation-grid">'+table()+'</div>';
   highlightMatches();
   const scroll=root.querySelector('.allocation-scroll');if(scroll&&position){scroll.scrollLeft=position.left;scroll.scrollTop=position.top;}
   if(focusKey){const target=focusKey.id?root.querySelector('#'+CSS.escape(focusKey.id)):Array.from(root.querySelectorAll('[data-alloc]')).find(el=>el.dataset.alloc===focusKey.action&&el.dataset.code===focusKey.code&&el.dataset.room===focusKey.room&&el.dataset.grade===focusKey.grade);target?.focus({preventScroll:true});}
@@ -111,7 +115,13 @@ export function mountAllocation(root,initial,{admin,request,onRoster,onSaved,pri
    if(action==='save'&&admin){el.disabled=true;root.inert=true;root.setAttribute('aria-busy','true');try{const reply=await request('saveAllocation',{board:structuredClone(board),expectedTerm:data.meta.term,expectedRevision:data.meta.revision,patch:true,compact:true});dirty=false;onSaved(reply);data={...reply.allocation,meta:reply.meta};board=structuredClone(data.board);sections=data.sections;render();if(reply.result.warnings.length)onError(Error(reply.result.warnings.join('\n')));}finally{root.inert=false;root.setAttribute('aria-busy','false');if(el.isConnected)el.disabled=false;}}
   })().catch(onError);
  });
- root.addEventListener('change',e=>{const el=e.target;if(el.id==='allocation-paper')paper=el.value;if(el.id==='allocation-file'&&el.files[0]){(async()=>{await loadXlsx();await import('./allocation-import.js?v='+(window.TIMETABLE_CONFIG?.assetVersion||'1'));const next=await TTAllocationImport.file(el.files[0]);if((dirty||data.board)&&!confirm('불러온 파일로 현재 배치표 초안을 바꿀까요? 저장 전까지 기존 자료는 유지됩니다.'))return;board=next;grade=next.grades[0].grade;query='';changed();})().catch(onError);}});
+ root.addEventListener('change',e=>{const el=e.target;if(el.id==='allocation-paper')paper=el.value;if(el.id==='allocation-file'&&el.files[0]){(async()=>{await loadXlsx();await import('./allocation-import.js?v='+(window.TIMETABLE_CONFIG?.assetVersion||'1'));const next=await TTAllocationImport.file(el.files[0]);if((dirty||data.board)&&!confirm('불러온 파일로 현재 배치표 초안을 바꿀까요? 저장 전까지 기존 자료는 유지됩니다.'))return;board=next;grade=next.grades[0].grade;query='';changed();})().catch(onError);}
+  if(el.id==='allocation-exclude-consigned'){
+   excludeConsigned=el.checked;
+   try{localStorage.setItem(consignedPreference,String(excludeConsigned));}catch{}
+   render();
+  }
+ });
  root.addEventListener('input',e=>{if(e.target.id==='allocation-query'){query=e.target.value;highlightMatches();}});
  render();return {get dirty(){return dirty;},get revision(){return data.meta.revision;},term:data.meta.term,refresh,focusRoster,destroy(){close();root.remove();}};
 }

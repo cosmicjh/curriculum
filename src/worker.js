@@ -14,22 +14,45 @@ const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBoot
 const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);
 const teacherActions=new Set(['allocation','classSwap','teacherBootstrap','teacher','roster','classBatch']);
 async function allocationCounts(db,term,sections){
- const rows=await db.all("SELECT section_id,COUNT(*) AS count FROM assignments WHERE term_id=? AND section_id IS NOT NULL AND student_id IN (SELECT id FROM students WHERE term_id=? AND status='재학') GROUP BY section_id",term,term);
- const counts=new Map(rows.map(r=>[r.section_id,r.count]));
- return Object.fromEntries(sections.map(s=>[s.id,counts.get(s.id)??0]));
+ // Read each student and linked assignment once. Keep note text inside D1.
+ const whitespace='\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
+ const [students,assignments]=await db.batch([
+  db.prepare("SELECT id,trim(note,?)='위탁' AS consigned FROM students WHERE term_id=? AND status='재학'",whitespace,term),
+  db.prepare('SELECT section_id,json_group_array(student_id) AS students FROM assignments WHERE term_id=? AND section_id IS NOT NULL GROUP BY section_id',term)
+ ]);
+ const active=new Map(students.results.map(s=>[s.id,s.consigned]));
+ const counts=new Map(sections.map(s=>[s.id,0]));
+ const consignedCounts=new Map(counts);
+ for(const {section_id,students:ids} of assignments.results){
+  if(!counts.has(section_id))continue;
+  let count=0,consigned=0;
+  for(const id of JSON.parse(ids)){
+   const flag=active.get(id);
+   if(flag===undefined)continue;
+   count++;
+   consigned+=flag;
+  }
+  counts.set(section_id,count);
+  consignedCounts.set(section_id,consigned);
+ }
+ return {counts:Object.fromEntries(counts),consignedCounts:Object.fromEntries(consignedCounts)};
 }
 function savedAllocationCounts(sections,created,students,assignments){
  const counts=new Map(sections.map(s=>[s.id,0]));
- const activeGrades=new Map(students.filter(s=>s.status==='재학').map(s=>[s.id,s.grade]));
+ const consignedCounts=new Map(counts);
+ const activeStudents=new Map(students.filter(s=>s.status==='재학').map(s=>[s.id,{grade:s.grade,consigned:s.note.trim()==='위탁'}]));
  // Match the relink UPDATE's exact grade, subject and code comparisons.
  const relinks=new Map(created.map(s=>[JSON.stringify([s.grade,s.subject,s.code]),s.id]));
  for(const a of assignments){
-  const grade=activeGrades.get(a.student_id);
-  if(grade===undefined)continue;
+  const student=activeStudents.get(a.student_id);
+  if(!student)continue;
+  const {grade,consigned}=student;
   const id=(relinks.size?relinks.get(JSON.stringify([grade,a.subject,a.code])):undefined)??a.section_id;
-  if(counts.has(id))counts.set(id,counts.get(id)+1);
+  if(!counts.has(id))continue;
+  counts.set(id,counts.get(id)+1);
+  if(consigned)consignedCounts.set(id,consignedCounts.get(id)+1);
  }
- return Object.fromEntries(counts);
+ return {counts:Object.fromEntries(counts),consignedCounts:Object.fromEntries(consignedCounts)};
 }
 async function teacherBoot(db,ctx,req={}){
  const m=await S.metadata(db,ctx,true);if(req.knownRevision===m.revision)return {unchanged:true,revision:m.revision,historyRevision:m.historyRevision,meta:m};
@@ -57,7 +80,7 @@ async function read(db,ctx,req){
  if(a==='toolTransfer')return readToolTransfer(db,ctx.term,req.kind);
  if(a==='allocation'){
   const st=await S.load(db,ctx,['sections','allocation']);
-  return {board:st.allocation||null,sections:st.sections,counts:await allocationCounts(db,ctx.term,st.sections),meta:S.meta(ctx)};
+  return {board:st.allocation||null,sections:st.sections,...await allocationCounts(db,ctx.term,st.sections),meta:S.meta(ctx)};
  }
  if(a==='adminBootstrap')return adminBoot(db,ctx,req);
  if(a==='teacherBootstrap')return teacherBoot(db,ctx,req);
@@ -138,7 +161,7 @@ async function mutate(db,env,ctx,session,req,headers){
   for(const s of created)statements.push(db.prepare('UPDATE assignments SET section_id=? WHERE term_id=? AND subject=? AND code=? AND student_id IN (SELECT id FROM students WHERE term_id=? AND grade=?)',s.id,ctx.term,s.subject,s.code,ctx.term,s.grade));
   nextSwapStore=prepared.store;result={warnings:prepared.warnings};
   const sections=prepared.store.sections;
-  allocationReply={board:prepared.board,sections,counts:savedAllocationCounts(sections,created,st.students,assignmentRows)};bootstrap=req.compact!==true;
+  allocationReply={board:prepared.board,sections,...savedAllocationCounts(sections,created,st.students,assignmentRows)};bootstrap=req.compact!==true;
  }else if(action==='saveStudent'){
   const st=await S.load(db,ctx,['students','sections'],'AND id=?',[req.student?.id||'']);if(req.student?.id&&!st.students.length)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');
   before=st.students[0]||null;result=D.student(req.student||{},before);after=result;target=Core.sid(result)+' '+result.name;parts=['students'];changedStudents=[result];
