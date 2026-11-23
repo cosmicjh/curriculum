@@ -367,6 +367,42 @@ try{
   await checkbox.press('Space');
   assert.equal(await count.textContent(),'1명');
  });
+ await step('a delayed roster tab keeps the active A3 print preview',async()=>{
+  const requested=Promise.withResolvers(),release=Promise.withResolvers();
+  await page.route('**/api/roster',async route=>{
+   requested.resolve(route.request().postDataJSON().query.kind);
+   const response=await route.fetch();
+   await release.promise;
+   await route.fulfill({response});
+  },{times:1});
+  try{
+   await clickMenu(page,page.locator('[data-tab=roster]'));
+   assert.equal(await requested.promise,'classSubjects');
+   await page.evaluate(()=>{window.previewStarted=false;window.print=()=>{
+    dispatchEvent(new Event('beforeprint'));
+    window.previewStarted=true;
+   };});
+   await page.locator('#allocation-paper').selectOption('A3');
+   await page.locator('[data-alloc=print]').click();
+   await page.waitForFunction(()=>window.previewStarted);
+   release.resolve();
+   await page.locator('form[data-form=roster]').waitFor();
+   const sheet=page.locator('#print-root > .allocation-print');
+   assert.equal(await sheet.count(),1,'the tab update must keep the active print sheet');
+   assert.equal(await sheet.getAttribute('data-allocation-paper'),'A3');
+   assert.equal(await sheet.locator('.allocation-print-table').count(),1);
+   await page.emulateMedia({media:'print'});
+   try{
+    await assertAllocationPaper('A3');
+    const raw=(await allocationPdf()).toString('latin1');
+    const box=/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(raw);
+    assert(box&&Math.abs(Number(box[1])-1191)<1&&Math.abs(Number(box[2])-842)<1,'A3 landscape size');
+    assert.equal((raw.match(/\/Type\s*\/Page\b/g)||[]).length,1);
+    assert.equal(await sheet.count(),0,'afterprint must clear the completed preview');
+   }finally{await page.emulateMedia({media:null});}
+  }finally{release.resolve();}
+  await openAllocation();
+ });
  await step('a skipped or unfinished A3 print cannot leak into the next portrait print',async()=>{
   const printRoot=page.locator('#print-root'),sheet=printRoot.locator('.allocation-print');
   const startA3=async(mode)=>{
@@ -414,12 +450,13 @@ try{
   await page.locator('#modal').getByRole('button',{name:'닫기'}).click();
   await startA3('preview');
   await clickMenu(page,page.locator('[data-tab=batch]'));await idle();
-  await assertCleared();
+  assert.equal(await sheet.getAttribute('data-allocation-paper'),'A3');
   await page.locator('#batch-grade').selectOption('3');await idle();
   await page.locator('#batch-class').selectOption('1');
   await page.evaluate(()=>window.print=()=>{});
   await page.locator('form[data-form=batch] button[type=submit]').click();await idle();
   assert.equal(await printRoot.locator('.batch-page').count(),1);
+  assert.equal(await sheet.count(),0);
   await assertPortrait();
   await openAllocation();
  });

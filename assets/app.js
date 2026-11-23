@@ -218,7 +218,7 @@
     $('#header').innerHTML=TTNavigation.opener()+'<div class="school-heading"><span class="brand"><span class="school-name">'+esc(school)+'</span><span class="compact-program-title">'+TTNavigation.title+'</span></span>'+term+'</div><div class="top-actions">'+(state.route!=='home'&&!token(state.route)?'<a class="quiet" href="'+href('home')+'">처음</a>':'')+(roles[state.route]&&token(state.route)?'<button class="quiet" data-action="logout">로그아웃</button>':'')+'</div>';TTNavigation.sync();
   }
   function head(title,actions=''){return '<div class="view-head"><div>'+(title?'<h1>'+esc(title)+'</h1>':'')+'</div>'+actions+'</div>';}
-  function showScreen(html,workspace=false){clearAllocationPrint();hideCourse();sectionPane.hidden=true;document.body.classList.remove('section-assignment-workspace');app.innerHTML=html;document.body.classList.toggle('workspace',workspace);}
+  function showScreen(html,workspace=false){if(!allocationPrint?.started)clearAllocationPrint();hideCourse();sectionPane.hidden=true;document.body.classList.remove('section-assignment-workspace');app.innerHTML=html;document.body.classList.toggle('workspace',workspace);}
   function syncLoginPassword(role){
     const password=$('#password'),student=role==='student';
     password.closest('.field').hidden=student;
@@ -610,7 +610,7 @@
     if(el.id==='restore-file'&&el.files[0]){const file=el.files[0];if(file.size>10*1024*1024)throw Error('백업 파일 크기를 확인하세요.');const backup=JSON.parse(await file.text());if(backup.format!=='school-timetable-backup')throw Error('백업 파일 형식이 다릅니다.');if(confirm('선택한 백업으로 현재 학기의 자료를 복원하시겠습니까?')){await mutation('restore',{backup});toast('복원했습니다.');}}
   },null,['restore-file','link-teacher'].includes(el.id));});
   document.addEventListener('input',e=>{if(e.target.id==='filter-search'){state.filters.search=e.target.value;state.page=0;renderStudentTable();}if(e.target.id==='section-search')renderSectionTable();});
-  window.addEventListener('hashchange',()=>{if(state.route!==route()){clearAllocationPrint();if(!busyCount)run(renderRoute);}});
+  window.addEventListener('hashchange',()=>{if(state.route!==route()){if(!allocationPrint?.started)clearAllocationPrint();if(!busyCount)run(renderRoute);}});
   window.addEventListener('pagehide',clearAllocationPrint);
   window.addEventListener('beforeprint',()=>{
     if(allocationPrint?.calling)allocationPrint.started=true;
