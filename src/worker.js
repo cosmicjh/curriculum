@@ -13,6 +13,24 @@ import {courseRequest} from '../modules/allocation/server/api.js';
 const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup','courseTransfer','toolTransfer']);
 const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);
 const teacherActions=new Set(['allocation','classSwap','teacherBootstrap','teacher','roster','classBatch']);
+async function allocationCounts(db,term,sections){
+ const rows=await db.all("SELECT section_id,COUNT(*) AS count FROM assignments WHERE term_id=? AND section_id IS NOT NULL AND student_id IN (SELECT id FROM students WHERE term_id=? AND status='재학') GROUP BY section_id",term,term);
+ const counts=new Map(rows.map(r=>[r.section_id,r.count]));
+ return Object.fromEntries(sections.map(s=>[s.id,counts.get(s.id)??0]));
+}
+function savedAllocationCounts(sections,created,students,assignments){
+ const counts=new Map(sections.map(s=>[s.id,0]));
+ const activeGrades=new Map(students.filter(s=>s.status==='재학').map(s=>[s.id,s.grade]));
+ // Match the relink UPDATE's exact grade, subject and code comparisons.
+ const relinks=new Map(created.map(s=>[JSON.stringify([s.grade,s.subject,s.code]),s.id]));
+ for(const a of assignments){
+  const grade=activeGrades.get(a.student_id);
+  if(grade===undefined)continue;
+  const id=(relinks.size?relinks.get(JSON.stringify([grade,a.subject,a.code])):undefined)??a.section_id;
+  if(counts.has(id))counts.set(id,counts.get(id)+1);
+ }
+ return Object.fromEntries(counts);
+}
 async function teacherBoot(db,ctx,req={}){
  const m=await S.metadata(db,ctx,true);if(req.knownRevision===m.revision)return {unchanged:true,revision:m.revision,historyRevision:m.historyRevision,meta:m};
  const jobs=[db.prepare('SELECT name FROM teachers WHERE term_id=? ORDER BY name',ctx.term)];
@@ -37,7 +55,10 @@ async function read(db,ctx,req){
  if(a==='bootstrap')return S.meta(ctx);
  if(a==='courseTransfer')return readCourseTransfer(db,ctx.term,req.summary==='counts'?'counts':req.summary===true);
  if(a==='toolTransfer')return readToolTransfer(db,ctx.term,req.kind);
- if(a==='allocation'){const st=await S.load(db,ctx,['sections','allocation']);return {board:st.allocation||null,sections:st.sections,meta:S.meta(ctx)};}
+ if(a==='allocation'){
+  const st=await S.load(db,ctx,['sections','allocation']);
+  return {board:st.allocation||null,sections:st.sections,counts:await allocationCounts(db,ctx.term,st.sections),meta:S.meta(ctx)};
+ }
  if(a==='adminBootstrap')return adminBoot(db,ctx,req);
  if(a==='teacherBootstrap')return teacherBoot(db,ctx,req);
  if(a==='adminSettings'){
@@ -96,7 +117,7 @@ async function read(db,ctx,req){
   if(q.kind==='elective'){
    const c=await db.first('SELECT * FROM sections WHERE term_id=? AND id=?',ctx.term,q.sectionId||'');if(!c)Auth.fail(404,'NOT_FOUND','분반 정보를 찾을 수 없습니다.');
    const rows=await db.all("SELECT s.grade,s.class_num AS classNum,s.number,s.name,s.note FROM assignments a JOIN students s ON s.term_id=a.term_id AND s.id=a.student_id WHERE a.term_id=? AND a.section_id=? AND s.status='재학' ORDER BY CAST(s.grade AS INTEGER),CAST(s.class_num AS INTEGER),CAST(s.number AS INTEGER)",ctx.term,c.id);
-   return {title:c.subject,detail:c.code,students:rows};
+   return {title:c.subject,detail:c.code,students:rows,...(req.includeRevision===true?{revision:String(ctx.revision)}:{})};
   }
   const cs=Array.isArray(q.classes)?q.classes:[];if(cs.length>30||cs.some(s=>!String(s).match(/^[1-3]-[1-9][0-9]?$/)))Auth.fail(400,'INVALID_REQUEST','학급을 확인하세요.');
   const rows=await db.all("SELECT grade,class_num AS classNum,number,name,note FROM students WHERE term_id=? AND status='재학' AND grade||'-'||class_num IN (SELECT value FROM json_each(?)) ORDER BY CAST(grade AS INTEGER),CAST(class_num AS INTEGER),CAST(number AS INTEGER)",ctx.term,JSON.stringify(cs));return {title:D.clean(q.subject),detail:D.clean(q.detail)||cs.join(', '),students:rows};
@@ -109,11 +130,15 @@ async function mutate(db,env,ctx,session,req,headers){
  let result=true,statements=[],parts=[],before=null,after=null,target='',backupId=null,changedStudents=[],changedSection=null,bootstrap=false,activeTerm=ctx.term,historyOnly=false,nextSwapStore=null,allocationReply=null;
  const action=req.action;
  if(action==='saveAllocation'){
-  const st=await S.load(db,ctx),prepared=prepareAllocation(st,req.board);before=st.allocation||null;after=prepared.board;target=ctx.term;parts=['sections','allocation'];
+  const {assignmentRows,...st}=await S.load(db,ctx,['students','sections','teacherRows','overrides','blocks','assignmentRows']);
+  const prepared=prepareAllocation(st,req.board);before=st.allocation||null;after=prepared.board;target=ctx.term;parts=['sections','allocation'];
   const previous=new Map(st.sections.map(s=>[s.id,s])),changed=prepared.store.sections.filter(s=>{const old=previous.get(s.id);return !old||old.room!==s.room||JSON.stringify(old.manualFields||[])!==JSON.stringify(s.manualFields||[]);});
+  const created=changed.filter(s=>!previous.has(s.id));
   const snap=S.snapshot(db,st,'이동수업 배치표 수정 전');backupId=snap.id;statements.push(...snap.statements,...S.writeSections(db,ctx.term,changed),...S.replaceParts(db,prepared.store,['allocation']));
-  for(const s of changed)if(!previous.has(s.id))statements.push(db.prepare('UPDATE assignments SET section_id=? WHERE term_id=? AND subject=? AND code=? AND student_id IN (SELECT id FROM students WHERE term_id=? AND grade=?)',s.id,ctx.term,s.subject,s.code,ctx.term,s.grade));
-  nextSwapStore=prepared.store;result={warnings:prepared.warnings};allocationReply={board:prepared.board,sections:prepared.store.sections};bootstrap=req.compact!==true;
+  for(const s of created)statements.push(db.prepare('UPDATE assignments SET section_id=? WHERE term_id=? AND subject=? AND code=? AND student_id IN (SELECT id FROM students WHERE term_id=? AND grade=?)',s.id,ctx.term,s.subject,s.code,ctx.term,s.grade));
+  nextSwapStore=prepared.store;result={warnings:prepared.warnings};
+  const sections=prepared.store.sections;
+  allocationReply={board:prepared.board,sections,counts:savedAllocationCounts(sections,created,st.students,assignmentRows)};bootstrap=req.compact!==true;
  }else if(action==='saveStudent'){
   const st=await S.load(db,ctx,['students','sections'],'AND id=?',[req.student?.id||'']);if(req.student?.id&&!st.students.length)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');
   before=st.students[0]||null;result=D.student(req.student||{},before);after=result;target=Core.sid(result)+' '+result.name;parts=['students'];changedStudents=[result];

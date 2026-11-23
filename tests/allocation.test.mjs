@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
 import {harness} from './harness.mjs';
 import {backup,fixture,allocationFixture as boardFixture} from './fixture.mjs';
+import {performanceFixture} from './performance-fixture.mjs';
 import {prepareAllocation} from '../src/allocations.js';
 
 test('allocation validates its source and keeps section identities and choices',()=>{
@@ -18,6 +19,62 @@ test('printed Excel parser preserves split sections, teams, homerooms and reject
  const board=JSON.parse(JSON.stringify(ctx.TTAllocationImport.fromMatrix([['.','교시','','','1반','음악실'],['3학년','','','','담임',''],['A','화2','수2','금3','과학 A_1\n(가교사, 나교사)','음악 A2\n(다교사)']])));
  assert.equal(board.rooms.length,2);assert.equal(board.grades[0].homerooms['room-0'],'담임');assert.deepEqual(board.grades[0].blocks[0].cells['room-0'],{subject:'과학',code:'A_1',teachers:['가교사','나교사']});assert.equal(board.grades[0].blocks[0].slots.length,3);
  assert.throws(()=>ctx.TTAllocationImport.fromMatrix([['.','교시','1반'],['3학년'],['A','화2','형식 오류']]),/형식/);
+});
+test('allocation counts match elective rosters and include assignments linked by a save',async t=>{
+ const h=await harness();t.after(()=>h.close());
+ const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
+ const source=backup(),[active,inactive]=source.store.students;
+ active.choices.가상미술='A3';
+ inactive.status='전출';
+ inactive.choices.가상과학='A1';
+ inactive.choices.가상미술='A3';
+ source.store.students.push({...active,id:'student-other-grade',sourceKey:'2-1-1',grade:'2',choices:{가상미술:'A3'}});
+ const restored=await h.mutation('restore',{backup:source},admin);
+ assert(restored.ok,JSON.stringify(restored));
+ const unlinked=await h.sql('SELECT section_id FROM assignments WHERE term_id=? AND student_id=? AND subject=?',source.store.term,active.id,'가상미술');
+ assert.equal(unlinked.results[0].section_id,null);
+
+ assert.equal((await h.api('allocation')).status,401);
+ for(const cookie of [teacher,admin]){
+  const reply=await h.api('allocation',{},cookie);
+  assert(reply.ok,JSON.stringify(reply));
+  for(const [sectionId,count] of [['section-one',1],['section-two',0]]){
+   const roster=await h.api('roster',{query:{kind:'elective',sectionId}},cookie);
+   assert(roster.ok,JSON.stringify(roster));
+   assert.equal(reply.data.counts[sectionId],count);
+   assert.equal(roster.data.students.length,count);
+  }
+ }
+
+ const board=boardFixture();
+ board.rooms.push({id:'r3',label:'가상 미술실',classNum:''});
+ board.grades[0].blocks[0].cells.r3={subject:'가상미술',code:'A3',teachers:[]};
+ const saved=await h.mutation('saveAllocation',{board,compact:true},admin);
+ assert(saved.ok,JSON.stringify(saved));
+ const {sectionId}=saved.data.allocation.board.grades[0].blocks[0].cells.r3;
+ const roster=await h.api('roster',{query:{kind:'elective',sectionId}},teacher);
+ assert(roster.ok,JSON.stringify(roster));
+ assert.equal(roster.data.students.length,1);
+ assert.deepEqual(saved.data.allocation.counts,{'section-one':1,'section-two':0,'section-three':1,[sectionId]:1});
+ assert.deepEqual((await h.api('allocation',{},teacher)).data.counts,saved.data.allocation.counts);
+});
+test('allocation reads stay below 9,000 D1 rows for a school-sized roster',async t=>{
+ const h=await harness();t.after(()=>h.close());
+ const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
+ const {store,board}=performanceFixture();
+ store.students[0].status='전출';
+ assert((await h.mutation('restore',{backup:{format:'school-timetable-backup',schemaVersion:1,store}},admin)).ok);
+ assert((await h.mutation('saveAllocation',{board,compact:true},admin)).ok);
+ const response=await h.api('allocation',{},teacher);
+ assert(response.ok,JSON.stringify(response.error));
+ const rows=Number(response.headers.get('x-d1-rows-read'));
+ assert(rows>0&&rows<9000,'allocation read '+rows+' D1 rows');
+ const sectionId='section-1-0-2',query={kind:'elective',sectionId};
+ const roster=await h.api('roster',{query,includeRevision:true},teacher);
+ assert(roster.ok,JSON.stringify(roster.error));
+ assert.equal(roster.data.revision,response.data.meta.revision);
+ assert.equal(roster.data.students.length,29);
+ assert.equal(response.data.counts[sectionId],roster.data.students.length);
 });
 test('one allocation save updates teacher, student and class-swap, protects writes and survives backup/term changes',async t=>{
  const h=await harness();t.after(()=>h.close());const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');assert((await h.mutation('restore',{backup:backup()},admin)).ok);
