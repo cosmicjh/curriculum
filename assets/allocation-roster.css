@@ -19,6 +19,15 @@
 .allocation-cell .allocation-count{margin:3px 0 0}
 .allocation-print-count{display:block;font-size:7.5pt;word-break:keep-all}
 
+/* The page contains the scaled canvas without paginating its unscaled rows. */
+.print-allocation .allocation-print{position:absolute;top:0;left:0;transform-origin:top left}
+.allocation-print-table th,.allocation-print-table td{padding:.5mm .6mm}
+.allocation-print-table tbody tr:not(.allocation-print-grade){height:8mm}
+.allocation-print-teachers{margin-top:.4mm}
+@media print{
+ .print-root.print-allocation{position:relative;height:var(--allocation-print-height);overflow:clip}
+}
+
 @media(max-width:700px){
  .allocation-table .allocation-subject{min-height:44px}
  .allocation-count{margin:0 5px 2px;font-size:11px}

@@ -261,5 +261,63 @@ try{
   await page.goto(base+'/student.html#/teacher');await idle();
   await openAllocation();
  });
+ for(const scenario of [
+  {name:'at-length-limit',blocks:20,teachers:Array.from({length:3},(_,i)=>'합성교사'.repeat(20).slice(0,78)+'0'+i)},
+  {name:'dense',blocks:12,teachers:['합성교사가','합성교사나','합성교사다']}
+ ])await step(scenario.name+' allocation fits one landscape page on either paper size',async()=>{
+  const roomLabels=[...Array.from({length:12},(_,i)=>(i+1)+'반'),'컴퓨터실(2층)','온라인학습실(5층)','매체수업실(3층)','음악실(5층)','시청각실(1층)','미술실1(4층)','미술실2(4층)','강당1','강당2','스터디룸(4층)'];
+  const subjects=['기후변화와 지속가능한 세계','세계 문화와 영어','음악 감상과 비평'];
+  const rooms=roomLabels.map((label,i)=>({id:'print-room-'+i,label,classNum:i<12?String(i+1):''}));
+  const occupiedRooms=scenario.name==='dense'?rooms:rooms.slice(0,1);
+  const sections=[],counts={};
+  const grades=['3','2'].map(grade=>({
+   grade,
+   homerooms:Object.fromEntries(rooms.slice(0,12).map((room,i)=>[room.id,'가상담임'+grade+'-'+(i+1)])),
+   blocks:Array.from({length:scenario.blocks},(_,i)=>{
+    const code=String.fromCharCode(65+i);
+    const cells=Object.fromEntries(occupiedRooms.map((room,j)=>{
+     const sectionId=grade+'-'+code+'-'+j;
+     sections.push({id:sectionId,grade,subject:subjects[j%subjects.length],code:code+(j+1)});
+     counts[sectionId]=j===0?0:20+j;
+     return [room.id,{sectionId,teachers:scenario.teachers.slice(0,j%2===0?3:2)}];
+    }));
+    const slot=i+Math.min(i,10);
+    return {code,slots:available.slice(slot,slot+(i<10?2:1)),cells};
+   })
+  }));
+  await page.route('**/api/allocation',async route=>{
+   const response=await route.fetch();
+   const result=await response.json();
+   await route.fulfill({response,json:{...result,data:{...result.data,board:{rooms,grades},sections,counts}}});
+  },{times:1});
+  await page.locator('[data-alloc=refresh]').click();
+  await page.waitForFunction(rows=>document.querySelectorAll('.allocation-table tr[data-allocation-block]').length===rows,scenario.blocks*2);
+  const pageCounts=[],sheetWidths=[];
+  for(const paper of ['A3','A4']){
+   await page.evaluate(()=>window.print=()=>{
+    window.denseAllocationPageStyle=document.head.querySelector('style:last-of-type').textContent;
+   });
+   await page.locator('#allocation-paper').selectOption(paper);
+   await page.locator('[data-alloc=print]').click();
+   await page.waitForFunction(()=>window.denseAllocationPageStyle);
+   const table=page.locator('#print-root .allocation-print-table');
+   assert.equal(await table.locator('tbody tr:not(.allocation-print-grade)').count(),scenario.blocks*2);
+   assert.deepEqual(await table.locator('.allocation-print-count').allTextContents(),Object.values(counts).map(count=>count+'명'));
+   const style=await page.addStyleTag({content:await page.evaluate(()=>window.denseAllocationPageStyle)});
+   await page.emulateMedia({media:'print'});
+   sheetWidths.push(await table.evaluate(el=>el.getBoundingClientRect().width));
+   const pdf=await page.pdf({path:'test-results/allocation-'+scenario.name+'-'+paper+'.pdf',preferCSSPageSize:true,printBackground:true});
+   const raw=pdf.toString('latin1');
+   pageCounts.push((raw.match(/\/Type\s*\/Page\b/g)||[]).length);
+   const box=/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(raw);
+   const [width,height]=paper==='A3'?[1191,842]:[842,595];
+   assert(box&&Math.abs(Number(box[1])-width)<1&&Math.abs(Number(box[2])-height)<1,paper+' landscape size');
+   await page.emulateMedia({media:null});
+   await style.evaluate(el=>el.remove());
+   await page.evaluate(()=>{window.denseAllocationPageStyle='';});
+  }
+  assert.deepEqual(pageCounts,[1,1],scenario.name+' allocation PDF page counts for A3 and A4 landscape');
+  assert(sheetWidths.every((width,i)=>width>=[408,285][i]*96/25.4*.95),scenario.name+' allocation uses the available landscape width');
+ });
  assert.deepEqual(errors,[]);await writeFile('test-results/allocation-browser.json',JSON.stringify({steps,errors},null,2));
 }finally{await browser?.close();await h.close();}
