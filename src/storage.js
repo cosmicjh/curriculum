@@ -25,11 +25,12 @@ export function studentRow(r){return {id:r.id,sourceKey:r.source_key,grade:r.gra
 export function sectionRow(r){return {id:r.id,grade:r.grade,subject:r.subject,code:r.code,room:r.room,shortName:r.short_name,sourceKey:r.source_key,manualFields:JSON.parse(r.manual_fields)};}
 export async function load(db,ctx,parts=['students','sections','teacherRows','overrides','blocks'],where='',args=[]){
  const store={term:ctx.term,settings:ctx.settings,students:[],sections:[],teacherRows:[],overrides:[],blocks:[]},jobs=[];
+ const includeAssignmentRows=parts.includes('assignmentRows');
  function add(kind,sql,...params){jobs.push({kind,stmt:db.prepare(sql,...params)});}
  if(parts.includes('students')){
   add('students','SELECT * FROM students WHERE term_id=? '+where,ctx.term,...args);
   // Full snapshots already read every student; only filtered lookups need the join.
-  if(!where)add('assignments','SELECT student_id,subject,code FROM assignments WHERE term_id=?',ctx.term);
+  if(!where)add('assignments','SELECT student_id,subject,code'+(includeAssignmentRows?',section_id':'')+' FROM assignments WHERE term_id=?',ctx.term);
   else add('assignments','SELECT a.* FROM students s CROSS JOIN assignments a ON a.term_id=s.term_id AND a.student_id=s.id WHERE s.term_id=? '+where.replaceAll(/(?<![\w.])(id|status|grade|class_num|number)(?=\s*[=?])/g,'s.$1'),ctx.term,...args);
  }
  if(parts.includes('sections'))add('sections','SELECT * FROM sections WHERE term_id=? ORDER BY grade,subject,code',ctx.term);
@@ -40,7 +41,9 @@ export async function load(db,ctx,parts=['students','sections','teacherRows','ov
  if(!jobs.length)return store;
  const out=await db.batch(jobs.map(j=>j.stmt)),choices=[];
  for(let i=0;i<jobs.length;i++){const k=jobs[i].kind,rows=out[i].results;if(k==='students')store.students=rows.map(studentRow);else if(k==='assignments')choices.push(...rows);else if(k==='sections')store.sections=rows.map(sectionRow);else if(k==='teacherRows')store.teacherRows=rows.map(r=>JSON.parse(r.cells));else if(k==='allocation'){if(rows[0])store.allocation=JSON.parse(rows[0].content);}else store[k]=rows;}
- const byId=new Map(store.students.map(s=>[s.id,s]));for(const a of choices)if(byId.has(a.student_id))byId.get(a.student_id).choices[a.subject]=a.code;return store;
+ const byId=new Map(store.students.map(s=>[s.id,s]));for(const a of choices)if(byId.has(a.student_id))byId.get(a.student_id).choices[a.subject]=a.code;
+ if(includeAssignmentRows)store.assignmentRows=choices;
+ return store;
 }
 export function meta(ctx,classes={}){
  const term=ctx.term;return {term,settings:ctx.settings,revision:String(ctx.revision),updatedAt:ctx.updated_at,classes,

@@ -1,21 +1,40 @@
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const blank=()=>({rooms:Array.from({length:12},(_,i)=>({id:'room-'+i,label:(i+1)+'반',classNum:String(i+1)})),grades:['3','2'].map(grade=>({grade,homerooms:{},blocks:[]}))});
-export function mountAllocation(root,initial,{admin,request,onSaved,print,loadXlsx,onError}){
+export function mountAllocation(root,initial,{admin,request,onRoster,onSaved,print,loadXlsx,onError}){
  let data=initial,board=structuredClone(data.board||blank()),sections=data.sections,dirty=false,grade=board.grades[0]?.grade||'3',query='',paper='A3',dialog,returnFocus;
  const section=c=>sections.find(s=>s.id===c?.sectionId)||c||{},current=()=>board.grades.find(g=>g.grade===grade),names=c=>(c?.teachers||[]).join(', ');
  const field=(label,id,value,extra='')=>'<div class="field"><label for="'+id+'">'+label+'</label><input id="'+id+'" value="'+esc(value)+'" '+extra+'></div>';
+ function countLabel(c){
+  const count=c?.sectionId&&data.counts?.[c.sectionId];
+  return Number.isInteger(count)?count+'명':'';
+ }
+ function screenCell(g,b,r){
+  const c=b.cells[r.id],course=section(c),count=countLabel(c);
+  let content='<span class="allocation-vacant" aria-hidden="true">—</span>';
+  if(c){
+   const title=esc(course.subject)+' <span>'+esc(course.code)+'</span>';
+   const subject=!admin&&c.sectionId?'<button type="button" class="allocation-subject" data-alloc="roster" data-section="'+esc(c.sectionId)+'" aria-haspopup="dialog" aria-label="'+esc(g.grade+'학년 '+course.subject+' '+course.code+' 명렬표 열기')+'">'+title+'</button>':title;
+   content='<strong>'+subject+'</strong><span class="allocation-teachers">'+esc(c.teachers.join(','))+'</span>';
+   if(count)content+='<span class="allocation-count">'+count+'</span>';
+  }
+  const label=g.grade+'학년 '+b.code+' '+r.label+' '+(c?[course.subject,course.code,names(c),count].filter(Boolean).join(' '):'빈 교실')+' 배치 수정';
+  return '<td'+(c?' data-allocation-lesson':'')+'>'+(admin?'<button class="allocation-cell" data-alloc="cell" data-grade="'+g.grade+'" data-code="'+esc(b.code)+'" data-room="'+esc(r.id)+'" aria-label="'+esc(label)+'">'+content+'</button>':content)+'</td>';
+ }
  function table(){
   const grades=[...board.grades].sort((a,b)=>Number(b.grade)-Number(a.grade)),rooms=board.rooms;
   const bodies=grades.map(g=>{
    const heading='<tr class="allocation-grade-row"><th scope="rowgroup">'+g.grade+'학년</th>'+rooms.map(r=>'<td>'+esc(g.homerooms[r.id]||'')+'</td>').join('')+'</tr>';
-   const rows=g.blocks.map(b=>'<tr data-allocation-block="'+esc(b.code)+'"><th scope="row">'+(admin?'<button data-alloc="block" data-grade="'+g.grade+'" data-code="'+esc(b.code)+'" aria-label="'+esc(g.grade+'학년 '+b.code+' '+b.slots.map(t=>t.day+t.period).join(', ')+' 시간블록 수정')+'">':'<span>')+esc(b.code)+'<span class="allocation-times">'+b.slots.map(t=>'<span class="allocation-time">'+t.day+t.period+'</span>').join(' ')+'</span>'+(admin?'</button>':'</span>')+'</th>'+rooms.map(r=>{const c=b.cells[r.id],course=section(c),content=c?'<strong>'+esc(course.subject)+' <span>'+esc(course.code)+'</span></strong><span class="allocation-teachers">'+esc(c.teachers.join(','))+'</span>':'<span class="allocation-vacant" aria-hidden="true">—</span>';return '<td'+(c?' data-allocation-lesson':'')+'>'+(admin?'<button class="allocation-cell" data-alloc="cell" data-grade="'+g.grade+'" data-code="'+esc(b.code)+'" data-room="'+esc(r.id)+'" aria-label="'+esc(g.grade+'학년 '+b.code+' '+r.label+' '+(c?[course.subject,course.code,names(c)].join(' '):'빈 교실')+' 배치 수정')+'">'+content+'</button>':content)+'</td>';}).join('')+'</tr>').join('');
+   const rows=g.blocks.map(b=>'<tr data-allocation-block="'+esc(b.code)+'"><th scope="row">'+(admin?'<button data-alloc="block" data-grade="'+g.grade+'" data-code="'+esc(b.code)+'" aria-label="'+esc(g.grade+'학년 '+b.code+' '+b.slots.map(t=>t.day+t.period).join(', ')+' 시간블록 수정')+'">':'<span>')+esc(b.code)+'<span class="allocation-times">'+b.slots.map(t=>'<span class="allocation-time">'+t.day+t.period+'</span>').join(' ')+'</span>'+(admin?'</button>':'</span>')+'</th>'+rooms.map(r=>screenCell(g,b,r)).join('')+'</tr>').join('');
    return '<tbody data-allocation-grade="'+g.grade+'">'+heading+(rows||'<tr><td class="allocation-empty" colspan="'+(rooms.length+1)+'">시간블록을 추가해 주세요.</td></tr>')+'</tbody>';
   }).join('');
   return '<div class="allocation-scroll" tabindex="0" role="region" aria-label="전체 학년·교실 배치표"><table class="allocation-table"><caption class="sr-only">이동수업 교실 배치표</caption><thead><tr><th scope="col">블록 / 교시</th>'+rooms.map(r=>'<th scope="col">'+esc(r.label)+'</th>').join('')+'</tr></thead>'+bodies+'</table></div>';
  }
  function printTable(){
   const times=Math.max(3,...board.grades.flatMap(g=>g.blocks.map(b=>b.slots.length)));
-  const body=board.grades.map(g=>'<tr class="allocation-print-grade"><th colspan="'+(times+1)+'" scope="row">'+g.grade+'학년</th>'+board.rooms.map(r=>'<td>'+esc(g.homerooms[r.id]||'')+'</td>').join('')+'</tr>'+g.blocks.map(b=>'<tr><th scope="row">'+esc(b.code)+'</th>'+Array.from({length:times},(_,i)=>'<td class="allocation-print-time">'+(b.slots[i]?b.slots[i].day+b.slots[i].period:'')+'</td>').join('')+board.rooms.map(r=>{const c=b.cells[r.id],s=section(c);return '<td>'+(c?'<strong>'+esc(s.subject)+' '+esc(s.code)+'</strong><span class="allocation-print-teachers">'+esc(names(c))+'</span>':'')+'</td>';}).join('')+'</tr>').join('')).join('');
+  const body=board.grades.map(g=>'<tr class="allocation-print-grade"><th colspan="'+(times+1)+'" scope="row">'+g.grade+'학년</th>'+board.rooms.map(r=>'<td>'+esc(g.homerooms[r.id]||'')+'</td>').join('')+'</tr>'+g.blocks.map(b=>'<tr><th scope="row">'+esc(b.code)+'</th>'+Array.from({length:times},(_,i)=>'<td class="allocation-print-time">'+(b.slots[i]?b.slots[i].day+b.slots[i].period:'')+'</td>').join('')+board.rooms.map(r=>{
+   const c=b.cells[r.id],s=section(c),count=countLabel(c);
+   return '<td>'+(c?'<strong>'+esc(s.subject)+' '+esc(s.code)+'</strong><span class="allocation-print-teachers">'+esc(names(c))+'</span>':'')+(count?'<span class="allocation-print-count">'+count+'</span>':'')+'</td>';
+  }).join('')+'</tr>').join('')).join('');
   return '<div class="allocation-print"><h2>'+esc(data.meta.settings.academicYear+'학년도 '+data.meta.settings.semester+'학기 이동수업 교실 배치표')+'</h2><table class="allocation-print-table"><colgroup><col class="allocation-print-block">'+Array.from({length:times},()=>'<col class="allocation-print-period">').join('')+board.rooms.map(()=>'<col>').join('')+'</colgroup><thead><tr><th colspan="'+(times+1)+'">시간블록 / 교시</th>'+board.rooms.map(r=>'<th scope="col">'+esc(r.label)+'</th>').join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
  }
  function render(){
@@ -79,6 +98,7 @@ export function mountAllocation(root,initial,{admin,request,onSaved,print,loadXl
   (async()=>{
    if(el.dataset.grade)grade=el.dataset.grade;
    if(action==='cell'&&admin)editCell(el.dataset.code,el.dataset.room);
+   if(action==='roster'&&!admin)await onRoster(el.dataset.section);
    if(action==='block'&&admin)editBlock(el.dataset.code);
    if(action==='rooms'&&admin)editRooms();
    if(action==='refresh')await refresh();
