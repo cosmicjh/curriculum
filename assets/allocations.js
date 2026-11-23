@@ -94,6 +94,10 @@ export function mountAllocation(root,initial,{admin,request,onRoster,onSaved,pri
   });
  }
  async function refresh(){if(dirty&&!confirm('저장하지 않은 배치표 변경을 버리고 새로고침할까요?'))return;const next=await request('allocation');data=next;board=structuredClone(next.board||blank());sections=next.sections;dirty=false;render();}
+ function focusRoster(sectionId){
+  const button=root.querySelector('[data-alloc="roster"][data-section="'+CSS.escape(sectionId)+'"]');
+  (button||root.querySelector('.allocation-scroll'))?.focus();
+ }
  root.addEventListener('click',e=>{const el=e.target.closest('[data-alloc]');if(!el||el.disabled)return;const action=el.dataset.alloc;
   (async()=>{
    if(el.dataset.grade)grade=el.dataset.grade;
@@ -109,5 +113,5 @@ export function mountAllocation(root,initial,{admin,request,onRoster,onSaved,pri
  });
  root.addEventListener('change',e=>{const el=e.target;if(el.id==='allocation-paper')paper=el.value;if(el.id==='allocation-file'&&el.files[0]){(async()=>{await loadXlsx();await import('./allocation-import.js?v='+(window.TIMETABLE_CONFIG?.assetVersion||'1'));const next=await TTAllocationImport.file(el.files[0]);if((dirty||data.board)&&!confirm('불러온 파일로 현재 배치표 초안을 바꿀까요? 저장 전까지 기존 자료는 유지됩니다.'))return;board=next;grade=next.grades[0].grade;query='';changed();})().catch(onError);}});
  root.addEventListener('input',e=>{if(e.target.id==='allocation-query'){query=e.target.value;highlightMatches();}});
- render();return {get dirty(){return dirty;},get revision(){return data.meta.revision;},term:data.meta.term,refresh,destroy(){close();root.remove();}};
+ render();return {get dirty(){return dirty;},get revision(){return data.meta.revision;},term:data.meta.term,refresh,focusRoster,destroy(){close();root.remove();}};
 }

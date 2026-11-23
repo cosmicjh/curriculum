@@ -138,6 +138,9 @@
       if(!currentSession())return;
       if(view.revision!==roster.revision)throw Error('자료가 변경되었습니다. 명렬표를 다시 열어 주세요.');
       showRoster(roster);
+      modal.addEventListener('close',()=>{
+        if(!modal.open&&currentSession())view.focusRoster(sectionId);
+      },{once:true});
     });
   }
   async function showAllocation(root,role){

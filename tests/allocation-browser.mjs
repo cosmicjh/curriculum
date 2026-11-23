@@ -117,6 +117,23 @@ try{
    await roster.getByRole('button',{name:'닫기'}).click();
   }
  });
+ await step('closing a roster restores keyboard focus to its replacement section button',async()=>{
+  const sectionId='section-two';
+  const selector='[data-alloc=roster][data-section="'+sectionId+'"]';
+  const button=page.locator(selector),original=await button.elementHandle();
+  const student=(await h.api('adminStudent',{id:'student-two'},admin.cookie)).data.student;
+  assert((await h.mutation('saveStudent',{student:{...student,status:'전출'}},admin.cookie)).ok);
+  await button.press('Enter');
+  await page.locator('#modal[open] .roster-header').getByText('A2 · 0명',{exact:true}).waitFor();
+  await idle();
+  assert.equal(await original.evaluate(el=>el.isConnected),false);
+  await page.keyboard.press('Escape');
+  await page.locator(selector+':focus').waitFor();
+  assert.equal(await page.locator('#modal[open]').count(),0);
+  assert((await h.mutation('saveStudent',{student},admin.cookie)).ok);
+  await page.locator('[data-alloc=refresh]').click();
+  await button.locator('xpath=ancestor::td').getByText('1명',{exact:true}).waitFor();
+ });
  await step('mobile search preserves all rooms and all grades print counts',async()=>{
   await page.setViewportSize({width:390,height:844});await clickMenu(page,page.locator('[data-tab=allocation]'));await page.locator('.allocation-table').waitFor();await idle();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.locator('#allocation-query').fill('협력교사');assert.equal(await page.locator('.allocation-table thead th').count(),23);
   assert.equal(await page.locator('.allocation-subject').first().evaluate(el=>getComputedStyle(el).minHeight),'44px');
@@ -141,7 +158,7 @@ try{
   }
 
  });
- await step('a delayed roster response is discarded when the teacher logs out',async()=>{
+ await step('a delayed successful roster is discarded after a hash navigation',async()=>{
   await page.setViewportSize({width:1920,height:1080});
   await page.evaluate(()=>{
    const modal=document.querySelector('#modal'),open=modal.showModal;
@@ -162,10 +179,7 @@ try{
    await page.getByRole('button',{name:'3학년 가상과학 A1 명렬표 열기'}).click();
    const response=await captured.promise;
    assert.equal((await response.json()).data.students.length,1);
-   const loading=await page.locator('[data-action=logout]').isDisabled();
-   // A second tab can log out even while this tab's controls are locked.
-   const logout=await context.request.post(base+'/api/logout',{headers:{Origin:base},data:{}});
-   assert((await logout.json()).ok);
+   assert(await page.locator('[data-action=logout]').isDisabled());
    await page.evaluate(()=>{location.hash='#/home';});
    const delivered=page.waitForResponse(endpoint);
    gate.resolve();
@@ -174,7 +188,30 @@ try{
    await idle();
    assert.equal(await page.locator('#modal[open],#modal .roster-table tbody tr').count(),0);
    assert.equal(await page.evaluate(()=>window.openedLateRoster),false);
-   assert(loading);
+  }finally{gate.resolve();}
+ });
+ await step('a roster request sent after logout returns to login without student rows',async()=>{
+  await page.goto(base+'/teacher.html');
+  await clickMenu(page,page.locator('[data-tab=allocation]'));
+  await idle();
+  const gate=Promise.withResolvers(),captured=Promise.withResolvers(),endpoint='**/api/roster';
+  await page.route(endpoint,async route=>{
+   captured.resolve();
+   await gate.promise;
+   await route.continue();
+  },{times:1});
+  try{
+   await page.getByRole('button',{name:'3학년 가상과학 A1 명렬표 열기'}).click();
+   await captured.promise;
+   assert(await page.locator('[data-action=logout]').isDisabled());
+   const logout=await context.request.post(base+'/api/logout',{headers:{Origin:base},data:{}});
+   assert((await logout.json()).ok);
+   const delivered=page.waitForResponse(endpoint);
+   gate.resolve();
+   assert.equal((await delivered).status(),401);
+   await page.locator('form[data-form=login]').waitFor();
+   await idle();
+   assert.equal(await page.locator('#modal[open],#modal .roster-table tbody tr').count(),0);
   }finally{gate.resolve();}
  });
  assert.deepEqual(errors,[]);await writeFile('test-results/allocation-browser.json',JSON.stringify({steps,errors},null,2));
