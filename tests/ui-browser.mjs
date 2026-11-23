@@ -79,6 +79,10 @@ try{
   if(tab==='hours')await page.frameLocator('#course-pane iframe:not([hidden])').locator('.workbook').waitFor();
   await sizes('teacher '+tab);
  }
+ await page.goto(base+'/index.html#/teacher');await idle();
+ await clickMenu(page,page.locator('[data-tab="allocation"]'));await idle();
+ await page.locator('.allocation-table').waitFor();
+ await sizes('index teacher allocation');
  await page.goto(base+'/admin.html');await idle();
  await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await idle();
  for(const tab of ['sectionAssignment','students','timetable','allocation','classSwap','settings','hours']){

@@ -1,22 +1,25 @@
+.allocation-table td>strong:has(>.allocation-subject){padding-top:0}
 .allocation-table .allocation-subject{
  display:block;
  width:100%;
  min-height:32px;
- padding:0 2px;
+ padding:0;
  border:0;
  background:transparent;
  color:inherit;
  font:inherit;
- overflow-wrap:anywhere;
- text-decoration:underline;
+ text-align:center;
+ text-decoration:none;
  text-underline-offset:2px;
 }
+.allocation-table .allocation-subject:is(:hover,:focus-visible){text-decoration:underline}
 .allocation-subject:focus-visible{outline-offset:0}
-.allocation-count{display:block;margin:0 8px 6px;font-size:11.5px;line-height:1.25;color:#454545}
+.allocation-table td>.allocation-teachers:has(+.allocation-count){margin-bottom:2px}
+.allocation-count{display:block;margin:0 8px 2px;font-size:11.5px;line-height:1.25;color:#454545}
 .allocation-cell .allocation-count{margin:3px 0 0}
 .allocation-print-count{display:block;font-size:7.5pt;word-break:keep-all}
 
 @media(max-width:700px){
  .allocation-table .allocation-subject{min-height:44px}
- .allocation-count{margin:0 5px 6px;font-size:11px}
+ .allocation-count{margin:0 5px 2px;font-size:11px}
 }
