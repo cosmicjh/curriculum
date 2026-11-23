@@ -58,6 +58,51 @@ test('allocation counts match elective rosters and include assignments linked by
  assert.deepEqual(saved.data.allocation.counts,{'section-one':1,'section-two':0,'section-three':1,[sectionId]:1});
  assert.deepEqual((await h.api('allocation',{},teacher)).data.counts,saved.data.allocation.counts);
 });
+test('allocation reports only exact active consigned counts before and after a section relink',async t=>{
+ const h=await harness();t.after(()=>h.close());
+ const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
+ const source=backup(),[active]=source.store.students;
+ active.note='위탁';
+ active.choices.가상미술='A3';
+ const notes=[' 위탁 ','\ufeff위탁\ufeff','\u3000위탁\u3000','\r\n위탁\n','위탁교육','위탁.','위 탁'];
+ const variants=[...notes,'위탁'].map((note,i)=>{
+  const number=String(i+3);
+  return {...active,id:'student-note-'+number,sourceKey:'3-1-'+number,number,note,status:i<notes.length?'재학':'전출'};
+ });
+ source.store.students.push(...variants);
+ assert((await h.mutation('restore',{backup:source},admin)).ok);
+ // Restore normalizes notes, so seed the exact values directly in the fixture DB.
+ for(const {id,note} of variants)await h.sql('UPDATE students SET note=? WHERE term_id=? AND id=?',note,source.store.term,id);
+ const board=boardFixture();
+ board.rooms.push({id:'r3',label:'가상 미술실',classNum:''});
+ board.grades[0].blocks[0].cells.r3={subject:'가상미술',code:'A3',teachers:[]};
+ assert.equal((await h.api('allocation')).status,401);
+ assert.equal((await h.api('saveAllocation',{board})).status,401);
+ for(const cookie of [teacher,admin]){
+  const read=await h.api('allocation',{},cookie);
+  const roster=await h.api('roster',{query:{kind:'elective',sectionId:'section-one'}},cookie);
+  assert(read.ok&&roster.ok);
+  assert.deepEqual(roster.data.students.map(s=>s.note),['위탁',...notes]);
+  assert.equal(read.data.counts['section-one'],roster.data.students.length);
+  assert.equal(read.data.consignedCounts['section-one'],5);
+  assert.equal(read.data.consignedCounts['section-two'],0);
+  assert(!JSON.stringify(read.data).includes('위탁교육'));
+  assert(!JSON.stringify(read.data).includes(active.name));
+ }
+ const saved=await h.mutation('saveAllocation',{board,compact:true},admin);
+ assert(saved.ok,JSON.stringify(saved.error));
+ const {allocation}=saved.data,{sectionId}=allocation.board.grades[0].blocks[0].cells.r3;
+ const roster=await h.api('roster',{query:{kind:'elective',sectionId}},teacher);
+ assert(roster.ok,JSON.stringify(roster.error));
+ assert.equal(allocation.counts[sectionId],8);
+ assert.equal(allocation.consignedCounts[sectionId],5);
+ assert.equal(roster.data.students.filter(s=>s.note.trim()==='위탁').length,allocation.consignedCounts[sectionId]);
+ assert(!JSON.stringify(allocation).includes('위탁교육'));
+ assert(!JSON.stringify(allocation).includes(active.name));
+ const read=await h.api('allocation',{},teacher);
+ assert(read.ok,JSON.stringify(read.error));
+ assert.deepEqual(read.data.consignedCounts,allocation.consignedCounts);
+});
 test('allocation reads stay below 9,000 D1 rows for a school-sized roster',async t=>{
  const h=await harness();t.after(()=>h.close());
  const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
