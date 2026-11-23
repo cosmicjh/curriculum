@@ -109,6 +109,7 @@
   let classCatalog=null;
   const allocationViews=new Map();
   const studyroomViews=new Map();
+  let allocationPrint=null;
   async function showStudyroom(root,role){
     let view=studyroomViews.get(role);
     if(!view){const version=window.TIMETABLE_CONFIG?.assetVersion||'1',module=await import('./studyroom.js?v='+version),host=document.createElement('div');
@@ -177,6 +178,7 @@
     catch(error){if(error.code==='AUTH_REQUIRED'){rememberForms();sessionStorage.removeItem('timetable.'+role);if(role==='admin'){swapViews.get(role)?.view.destroy();swapViews.delete(role);state.admin=null;}else{state.teacherBoot=null;state.timetable=null;}if(state.route===role)renderLogin(role);}throw error;}
   }
   async function printClassSwap(html,css,page){
+    clearAllocationPrint();
     const target=$('#print-root'),host=document.createElement('div'),style=document.createElement('style');
     style.textContent=page;host.attachShadow({mode:'open'}).innerHTML='<style>'+css+'</style><div id="printRoot">'+html+'</div>';
     target.className='print-root';target.replaceChildren(style,host);await document.fonts.ready;
@@ -216,7 +218,7 @@
     $('#header').innerHTML=TTNavigation.opener()+'<div class="school-heading"><span class="brand"><span class="school-name">'+esc(school)+'</span><span class="compact-program-title">'+TTNavigation.title+'</span></span>'+term+'</div><div class="top-actions">'+(state.route!=='home'&&!token(state.route)?'<a class="quiet" href="'+href('home')+'">처음</a>':'')+(roles[state.route]&&token(state.route)?'<button class="quiet" data-action="logout">로그아웃</button>':'')+'</div>';TTNavigation.sync();
   }
   function head(title,actions=''){return '<div class="view-head"><div>'+(title?'<h1>'+esc(title)+'</h1>':'')+'</div>'+actions+'</div>';}
-  function showScreen(html,workspace=false){hideCourse();sectionPane.hidden=true;document.body.classList.remove('section-assignment-workspace');app.innerHTML=html;document.body.classList.toggle('workspace',workspace);}
+  function showScreen(html,workspace=false){clearAllocationPrint();hideCourse();sectionPane.hidden=true;document.body.classList.remove('section-assignment-workspace');app.innerHTML=html;document.body.classList.toggle('workspace',workspace);}
   function syncLoginPassword(role){
     const password=$('#password'),student=role==='student';
     password.closest('.field').hidden=student;
@@ -432,11 +434,24 @@
     if(state.route==='admin')return token('admin')?loadAdmin():renderLogin('admin');
   }
   function download(blob,name){const link=document.createElement('a'),url=URL.createObjectURL(blob);link.href=url;link.download=name;link.hidden=true;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
+  function clearAllocationPrint(){
+    if(!allocationPrint)return;
+    allocationPrint=null;
+    const target=$('#print-root');
+    target.replaceChildren();
+    target.className='print-root';
+    target.style.removeProperty('--allocation-print-height');
+  }
   async function print(html,kind,paper='A3'){
+    clearAllocationPrint();
     const target=$('#print-root');target.className='print-root print-'+kind;target.innerHTML=html;
-    await document.fonts.load('600 12px "Pretendard Variable"',target.textContent).catch(()=>{});await document.fonts.ready;
+    const job=kind==='allocation'?{calling:false,started:false}:null;
+    allocationPrint=job;
+    let returned=false;
     try{
-      if(kind==='allocation'){
+      await document.fonts.load('600 12px "Pretendard Variable"',target.textContent).catch(()=>{});await document.fonts.ready;
+      if(job){
+        if(allocationPrint!==job)return;
         const size=paper==='A4'?{paper:'A4',width:285,height:198}:{paper:'A3',width:408,height:285},sheet=target.querySelector('.allocation-print');
         target.classList.add('allocation-measure');
         const pxPerMm=96/25.4,maxWidth=(size.width-0.5)*pxPerMm,maxHeight=(size.height-2)*pxPerMm;
@@ -455,16 +470,25 @@
             if(fits(scale))lower=scale;
             else upper=scale;
           }
-          if(!fits(lower)){
-            target.replaceChildren();
-            throw Error('배치표를 선택한 용지 한 장에 맞출 수 없어 인쇄를 중단했습니다.');
-          }
+          if(!fits(lower))throw Error('배치표를 선택한 용지 한 장에 맞출 수 없어 인쇄를 중단했습니다.');
         }
         sheet.dataset.allocationPaper=size.paper;
         target.classList.remove('allocation-measure');
       }
-      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));window.print();
-    }finally{target.classList.remove('allocation-measure');}
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      if(job){
+        if(allocationPrint!==job)return;
+        job.calling=true;
+      }
+      window.print();
+      returned=true;
+    }finally{
+      if(job&&allocationPrint===job){
+        job.calling=false;
+        // A browser may return while its preview is open. Keep that job until afterprint.
+        if(!returned||!job.started)clearAllocationPrint();
+      }
+    }
   }
   async function mutation(action,args){
     const teacher=$('#link-teacher')&&$('#link-teacher').value,grade=$('#block-grade')&&$('#block-grade').value,blocksOpen=$('#block-grade')&&$('#block-grade').closest('details').open;
@@ -586,8 +610,16 @@
     if(el.id==='restore-file'&&el.files[0]){const file=el.files[0];if(file.size>10*1024*1024)throw Error('백업 파일 크기를 확인하세요.');const backup=JSON.parse(await file.text());if(backup.format!=='school-timetable-backup')throw Error('백업 파일 형식이 다릅니다.');if(confirm('선택한 백업으로 현재 학기의 자료를 복원하시겠습니까?')){await mutation('restore',{backup});toast('복원했습니다.');}}
   },null,['restore-file','link-teacher'].includes(el.id));});
   document.addEventListener('input',e=>{if(e.target.id==='filter-search'){state.filters.search=e.target.value;state.page=0;renderStudentTable();}if(e.target.id==='section-search')renderSectionTable();});
-  window.addEventListener('hashchange',()=>{if(!busyCount&&state.route!==route())run(renderRoute);});
-  window.addEventListener('afterprint',()=>{$('#print-root').innerHTML='';});
+  window.addEventListener('hashchange',()=>{if(state.route!==route()){clearAllocationPrint();if(!busyCount)run(renderRoute);}});
+  window.addEventListener('pagehide',clearAllocationPrint);
+  window.addEventListener('beforeprint',()=>{
+    if(allocationPrint?.calling)allocationPrint.started=true;
+    else clearAllocationPrint();
+  });
+  window.addEventListener('afterprint',()=>{
+    if(allocationPrint)clearAllocationPrint();
+    else $('#print-root').replaceChildren();
+  });
   async function start(){
     state.route=route();
     await renderRoute();

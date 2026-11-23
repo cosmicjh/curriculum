@@ -64,14 +64,15 @@ test('allocation reports only exact active consigned counts before and after a s
  const source=backup(),[active]=source.store.students;
  active.note='위탁';
  active.choices.가상미술='A3';
- source.store.students.push(...[
-  ['student-spaced',3,'재학',' 위탁 '],
-  ['student-partial',4,'재학','위탁교육'],
-  ['student-inactive',5,'전출','위탁']
- ].map(([id,number,status,note])=>({...active,id,sourceKey:'3-1-'+number,number:String(number),status,note})));
+ const notes=[' 위탁 ','\ufeff위탁\ufeff','\u3000위탁\u3000','\r\n위탁\n','위탁교육','위탁.','위 탁'];
+ const variants=[...notes,'위탁'].map((note,i)=>{
+  const number=String(i+3);
+  return {...active,id:'student-note-'+number,sourceKey:'3-1-'+number,number,note,status:i<notes.length?'재학':'전출'};
+ });
+ source.store.students.push(...variants);
  assert((await h.mutation('restore',{backup:source},admin)).ok);
- // Restore normalizes notes, so seed the padded value directly in the fixture DB.
- await h.sql('UPDATE students SET note=? WHERE term_id=? AND id=?',' 위탁 ',source.store.term,'student-spaced');
+ // Restore normalizes notes, so seed the exact values directly in the fixture DB.
+ for(const {id,note} of variants)await h.sql('UPDATE students SET note=? WHERE term_id=? AND id=?',note,source.store.term,id);
  const board=boardFixture();
  board.rooms.push({id:'r3',label:'가상 미술실',classNum:''});
  board.grades[0].blocks[0].cells.r3={subject:'가상미술',code:'A3',teachers:[]};
@@ -81,9 +82,9 @@ test('allocation reports only exact active consigned counts before and after a s
   const read=await h.api('allocation',{},cookie);
   const roster=await h.api('roster',{query:{kind:'elective',sectionId:'section-one'}},cookie);
   assert(read.ok&&roster.ok);
-  assert.deepEqual(roster.data.students.map(s=>s.note),['위탁',' 위탁 ','위탁교육']);
+  assert.deepEqual(roster.data.students.map(s=>s.note),['위탁',...notes]);
   assert.equal(read.data.counts['section-one'],roster.data.students.length);
-  assert.equal(read.data.consignedCounts['section-one'],2);
+  assert.equal(read.data.consignedCounts['section-one'],5);
   assert.equal(read.data.consignedCounts['section-two'],0);
   assert(!JSON.stringify(read.data).includes('위탁교육'));
   assert(!JSON.stringify(read.data).includes(active.name));
@@ -93,8 +94,8 @@ test('allocation reports only exact active consigned counts before and after a s
  const {allocation}=saved.data,{sectionId}=allocation.board.grades[0].blocks[0].cells.r3;
  const roster=await h.api('roster',{query:{kind:'elective',sectionId}},teacher);
  assert(roster.ok,JSON.stringify(roster.error));
- assert.equal(allocation.counts[sectionId],3);
- assert.equal(allocation.consignedCounts[sectionId],2);
+ assert.equal(allocation.counts[sectionId],8);
+ assert.equal(allocation.consignedCounts[sectionId],5);
  assert.equal(roster.data.students.filter(s=>s.note.trim()==='위탁').length,allocation.consignedCounts[sectionId]);
  assert(!JSON.stringify(allocation).includes('위탁교육'));
  assert(!JSON.stringify(allocation).includes(active.name));

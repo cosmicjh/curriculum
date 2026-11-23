@@ -17,6 +17,9 @@ const base=await h.listen();let browser;const errors=[],steps=[],actions=[];awai
 const step=async(name,fn)=>{await fn();steps.push(name);console.log('PASS '+name);};
 try{
  browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'msedge'}:{})});const context=await browser.newContext({viewport:{width:1920,height:1080}}),page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(new URL(r.url()).pathname.startsWith('/api/'))actions.push(new URL(r.url()).pathname.slice(5));});
+ await page.addInitScript(()=>window.addEventListener('beforeprint',event=>{
+  if(window.captureAllocationPreview)event.stopImmediatePropagation();
+ }));
  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
  async function openAllocation(){
   await clickMenu(page,page.locator('[data-tab=allocation]'));
@@ -39,6 +42,12 @@ try{
    return {name,sizes:rules.map(r=>r.style.getPropertyValue('size').toLowerCase()),margins:rules.map(r=>r.style.margin)};
   });
   assert.deepEqual(rule,{name:'allocation-'+paper.toLowerCase(),sizes:[paper.toLowerCase()+' landscape'],margins:['6mm']});
+ }
+ async function allocationPdf(path){
+  // Render the preview that the stub opened. CDP emits its own beforeprint for page.pdf().
+  await page.evaluate(()=>{window.captureAllocationPreview=true;});
+  try{return await page.pdf({path,preferCSSPageSize:true,printBackground:true});}
+  finally{await page.evaluate(()=>{window.captureAllocationPreview=false;});}
  }
  await step('administrator menus keep the same navigation and content frame',async()=>{
   await login('admin');let frame;
@@ -165,7 +174,7 @@ try{
    return title.top>=header.top&&title.bottom<=term.top+1&&term.bottom<=header.bottom;
   }),'the program title and term fit the mobile header without overlap');
   await page.screenshot({path:'test-results/allocation-mobile.png',fullPage:true});
-  await page.evaluate(()=>window.print=()=>{window.allocationPrint=document.querySelector('#print-root').textContent;});
+  await page.evaluate(()=>window.print=()=>{dispatchEvent(new Event('beforeprint'));window.allocationPrint=document.querySelector('#print-root').textContent;});
   for(const paper of ['A3','A4']){
    await page.locator('#allocation-paper').selectOption(paper);await page.locator('[data-alloc=print]').click();await page.waitForFunction(()=>window.allocationPrint);
    assert.match(await page.evaluate(()=>window.allocationPrint),/새 실험실/);assert.match(await page.evaluate(()=>window.allocationPrint),/2학년/);assert.match(await page.evaluate(()=>window.allocationPrint),/3학년/);
@@ -177,7 +186,7 @@ try{
    assert((await page.locator('#print-root .allocation-print-count').allTextContents()).includes('0명'));
    await page.emulateMedia({media:'print'});
    await assertAllocationPaper(paper);
-   const pdf=await page.pdf({path:'test-results/allocation-'+paper+'.pdf',preferCSSPageSize:true,printBackground:true}),raw=pdf.toString('latin1'),box=/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(raw);assert.equal((raw.match(/\/Type\s*\/Page\b/g)||[]).length,1,paper+' must be one page');assert(box);const [width,height]=paper==='A3'?[1191,842]:[842,595];assert(Math.abs(Number(box[1])-width)<1&&Math.abs(Number(box[2])-height)<1,paper+' landscape size');
+   const pdf=await allocationPdf('test-results/allocation-'+paper+'.pdf'),raw=pdf.toString('latin1'),box=/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(raw);assert.equal((raw.match(/\/Type\s*\/Page\b/g)||[]).length,1,paper+' must be one page');assert(box);const [width,height]=paper==='A3'?[1191,842]:[842,595];assert(Math.abs(Number(box[1])-width)<1&&Math.abs(Number(box[2])-height)<1,paper+' landscape size');
    assert.equal(await page.locator('html').evaluate(el=>getComputedStyle(el).page),'auto');
    await page.emulateMedia({media:null});
    await page.evaluate(()=>{window.allocationPrint='';});
@@ -285,7 +294,7 @@ try{
   const count=page.locator('tbody[data-allocation-grade="3"] tr[data-allocation-block="A"] td')
    .filter({hasText:'가상과학 A1'}).locator('.allocation-count');
   const printCount=async(expected,selector='[data-alloc=print]')=>{
-   await page.evaluate(()=>{window.consignedPrinted=false;window.print=()=>{window.consignedPrinted=true;};});
+   await page.evaluate(()=>{window.consignedPrinted=false;window.print=()=>{dispatchEvent(new Event('beforeprint'));window.consignedPrinted=true;};});
    await page.locator(selector).click();
    await page.waitForFunction(()=>window.consignedPrinted);
    const printRoot=page.locator('#print-root');
@@ -358,6 +367,62 @@ try{
   await checkbox.press('Space');
   assert.equal(await count.textContent(),'1명');
  });
+ await step('a skipped or unfinished A3 print cannot leak into the next portrait print',async()=>{
+  const printRoot=page.locator('#print-root'),sheet=printRoot.locator('.allocation-print');
+  const startA3=async(mode)=>{
+   await page.evaluate(mode=>{
+    window.paperAttempt=null;
+    window.print=()=>{
+     window.paperAttempt=document.querySelector('#print-root .allocation-print').dataset.allocationPaper;
+     if(mode==='throw')throw Error('Synthetic print failure');
+     if(mode==='preview')dispatchEvent(new Event('beforeprint'));
+    };
+   },mode);
+   await page.locator('#allocation-paper').selectOption('A3');
+   await page.locator('[data-alloc=print]').click();
+   await page.waitForFunction(()=>window.paperAttempt==='A3');
+  };
+  const assertCleared=async()=>{
+   assert.equal(await printRoot.getAttribute('class'),'print-root');
+   assert.equal(await printRoot.locator(':scope > *').count(),0);
+  };
+  const assertPortrait=async()=>{
+   const pdf=await page.pdf({preferCSSPageSize:true});
+   const raw=pdf.toString('latin1');
+   assert.equal((raw.match(/\/Type\s*\/Page\b/g)||[]).length,1);
+   const box=/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(raw);
+   assert(box&&Math.abs(Number(box[1])-595)<1&&Math.abs(Number(box[2])-842)<1,'A4 portrait size');
+  };
+  await startA3('ignored');
+  await assertCleared();
+  await assertPortrait();
+  await startA3('throw');
+  await page.locator('#toast').getByText('Synthetic print failure').waitFor();
+  await assertCleared();
+  await startA3('preview');
+  assert.equal(await sheet.getAttribute('data-allocation-paper'),'A3','retain the non-blocking preview after print() returns');
+  await assertPortrait(); // CDP beforeprint emulates a new browser print without an earlier afterprint.
+  await assertCleared();
+  await startA3('preview');
+  await page.getByRole('button',{name:'3학년 가상과학 A1 명렬표 열기'}).click();
+  await page.locator('#modal[open] .roster-table').waitFor();
+  await page.evaluate(()=>window.print=()=>{});
+  await page.locator('[data-action=print-roster]').click();await idle();
+  assert.equal(await printRoot.locator('.roster-table').count(),1);
+  assert.equal(await sheet.count(),0);
+  await assertPortrait();
+  await page.locator('#modal').getByRole('button',{name:'닫기'}).click();
+  await startA3('preview');
+  await clickMenu(page,page.locator('[data-tab=batch]'));await idle();
+  await assertCleared();
+  await page.locator('#batch-grade').selectOption('3');await idle();
+  await page.locator('#batch-class').selectOption('1');
+  await page.evaluate(()=>window.print=()=>{});
+  await page.locator('form[data-form=batch] button[type=submit]').click();await idle();
+  assert.equal(await printRoot.locator('.batch-page').count(),1);
+  await assertPortrait();
+  await openAllocation();
+ });
  await changeNote(student.note);
  for(const scenario of [
   {name:'at-length-limit',blocks:20,teachers:Array.from({length:3},(_,i)=>'합성교사'.repeat(20).slice(0,78)+'0'+i)},
@@ -392,7 +457,7 @@ try{
   await page.waitForFunction(rows=>document.querySelectorAll('.allocation-table tr[data-allocation-block]').length===rows,scenario.blocks*2);
   const pageCounts=[],sheetWidths=[];
   for(const paper of ['A3','A4']){
-   await page.evaluate(()=>{window.denseAllocationPrinted=false;window.print=()=>{window.denseAllocationPrinted=true;};});
+   await page.evaluate(()=>{window.denseAllocationPrinted=false;window.print=()=>{dispatchEvent(new Event('beforeprint'));window.denseAllocationPrinted=true;};});
    await page.locator('#allocation-paper').selectOption(paper);
    await page.locator('[data-alloc=print]').click();
    await page.waitForFunction(()=>window.denseAllocationPrinted);
@@ -402,7 +467,7 @@ try{
    await page.emulateMedia({media:'print'});
    await assertAllocationPaper(paper);
    sheetWidths.push(await table.evaluate(el=>el.getBoundingClientRect().width));
-   const pdf=await page.pdf({path:'test-results/allocation-'+scenario.name+'-'+paper+'.pdf',preferCSSPageSize:true,printBackground:true});
+   const pdf=await allocationPdf('test-results/allocation-'+scenario.name+'-'+paper+'.pdf');
    const raw=pdf.toString('latin1');
    pageCounts.push((raw.match(/\/Type\s*\/Page\b/g)||[]).length);
    const box=/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(raw);
