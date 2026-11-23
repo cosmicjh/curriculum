@@ -117,13 +117,36 @@
     root.replaceChildren(view.root);await view.refresh();
   }
   function allocationDirty(){return Array.from(allocationViews.values()).some(v=>v.dirty);}
+  function openAllocationRoster(view,sectionId){
+    return run(async()=>{
+      const boot=state.teacherBoot,teacher=session('teacher')||session('admin');
+      const currentView=()=>state.route==='teacher'&&route()==='teacher'&&state.teacherTab==='allocation'&&state.teacherBoot===boot&&boot?.meta.term===view.term&&$('#teacher-allocation')?.contains(view.root);
+      const currentSession=()=>{
+        const current=session('teacher')||session('admin');
+        return currentView()&&current?.role===teacher.role&&current.token===teacher.token&&current.expiresAt===teacher.expiresAt;
+      };
+      if(!teacher||!currentView())return;
+      let roster;
+      try{
+        roster=await call('roster',{query:{kind:'elective',sectionId},includeRevision:true},'teacher');
+        if(!currentSession())return;
+        if(!view.dirty&&view.revision!==roster.revision)await view.refresh();
+      }catch(error){
+        if(currentView())throw error;
+        return;
+      }
+      if(!currentSession())return;
+      if(view.revision!==roster.revision)throw Error('자료가 변경되었습니다. 명렬표를 다시 열어 주세요.');
+      showRoster(roster);
+    });
+  }
   async function showAllocation(root,role){
     const term=role==='admin'?state.admin.store.term:state.teacherBoot.meta.term,key=role+'|'+term;
     let view=allocationViews.get(key);
     if(!view){
       const version=window.TIMETABLE_CONFIG?.assetVersion||'1',host=document.createElement('div');
       const [module,data]=await Promise.all([import('./allocations.js?v='+version),call('allocation',{},role)]);
-      view=module.mountAllocation(host,data,{admin:role==='admin',request:(action,args={})=>call(action,args,role),onRoster:sectionId=>call('roster',{query:{kind:'elective',sectionId}},'teacher').then(showRoster),loadXlsx:()=>TTAssets.load('xlsx'),print:(html,kind,paper)=>print(html,kind,paper),onSaved:reply=>{state.admin.loaded.students=false;state.admin.store.sections=reply.allocation.sections;state.admin.sectionsRevision=reply.meta.sectionsRevision;state.admin.loaded.sections=true;state.admin.loaded.links=false;state.admin.loaded.settings=false;state.admin.lessonCache={};state.teacherBoot=null;state.timetable=null;useMeta(reply.meta);toast('배치표를 저장했습니다.');},onError:error=>run(()=>{throw error;})});
+      view=module.mountAllocation(host,data,{admin:role==='admin',request:(action,args={})=>call(action,args,role),onRoster:sectionId=>openAllocationRoster(view,sectionId),loadXlsx:()=>TTAssets.load('xlsx'),print:(html,kind,paper)=>print(html,kind,paper),onSaved:reply=>{state.admin.loaded.students=false;state.admin.store.sections=reply.allocation.sections;state.admin.sectionsRevision=reply.meta.sectionsRevision;state.admin.loaded.sections=true;state.admin.loaded.links=false;state.admin.loaded.settings=false;state.admin.lessonCache={};state.teacherBoot=null;state.timetable=null;useMeta(reply.meta);toast('배치표를 저장했습니다.');},onError:error=>run(()=>{throw error;})});
       view.root=host;allocationViews.set(key,view);
     }
     root.replaceChildren(view.root);if(!view.dirty&&view.revision!==state.meta.revision)await view.refresh();
@@ -204,6 +227,9 @@
   function renderLogin(role='student'){
     role=role||'student';
     state.studentTimetable=null;
+    state.roster=null;
+    if(modal.open)modal.close();
+    modal.replaceChildren();
     TTNavigation.render([],'','');
     hideSwap();header();
     const choices=Object.entries(roles).map(([value,label])=>({value,label}));

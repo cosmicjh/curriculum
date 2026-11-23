@@ -13,9 +13,8 @@ import {courseRequest} from '../modules/allocation/server/api.js';
 const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup','courseTransfer','toolTransfer']);
 const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);
 const teacherActions=new Set(['allocation','classSwap','teacherBootstrap','teacher','roster','classBatch']);
-const activeSectionAssignments="FROM assignments a JOIN students s ON s.term_id=a.term_id AND s.id=a.student_id WHERE a.term_id=? AND s.status='재학'";
 async function allocationCounts(db,term,sections){
- const rows=await db.all('SELECT a.section_id,COUNT(*) AS count '+activeSectionAssignments+' AND a.section_id IS NOT NULL GROUP BY a.section_id',term);
+ const rows=await db.all("SELECT section_id,COUNT(*) AS count FROM assignments WHERE term_id=? AND section_id IS NOT NULL AND student_id IN (SELECT id FROM students WHERE term_id=? AND status='재학') GROUP BY section_id",term,term);
  const counts=new Map(rows.map(r=>[r.section_id,r.count]));
  return Object.fromEntries(sections.map(s=>[s.id,counts.get(s.id)??0]));
 }
@@ -117,8 +116,8 @@ async function read(db,ctx,req){
   }
   if(q.kind==='elective'){
    const c=await db.first('SELECT * FROM sections WHERE term_id=? AND id=?',ctx.term,q.sectionId||'');if(!c)Auth.fail(404,'NOT_FOUND','분반 정보를 찾을 수 없습니다.');
-   const rows=await db.all('SELECT s.grade,s.class_num AS classNum,s.number,s.name,s.note '+activeSectionAssignments+' AND a.section_id=? ORDER BY CAST(s.grade AS INTEGER),CAST(s.class_num AS INTEGER),CAST(s.number AS INTEGER)',ctx.term,c.id);
-   return {title:c.subject,detail:c.code,students:rows};
+   const rows=await db.all("SELECT s.grade,s.class_num AS classNum,s.number,s.name,s.note FROM assignments a JOIN students s ON s.term_id=a.term_id AND s.id=a.student_id WHERE a.term_id=? AND a.section_id=? AND s.status='재학' ORDER BY CAST(s.grade AS INTEGER),CAST(s.class_num AS INTEGER),CAST(s.number AS INTEGER)",ctx.term,c.id);
+   return {title:c.subject,detail:c.code,students:rows,...(req.includeRevision===true?{revision:String(ctx.revision)}:{})};
   }
   const cs=Array.isArray(q.classes)?q.classes:[];if(cs.length>30||cs.some(s=>!String(s).match(/^[1-3]-[1-9][0-9]?$/)))Auth.fail(400,'INVALID_REQUEST','학급을 확인하세요.');
   const rows=await db.all("SELECT grade,class_num AS classNum,number,name,note FROM students WHERE term_id=? AND status='재학' AND grade||'-'||class_num IN (SELECT value FROM json_each(?)) ORDER BY CAST(grade AS INTEGER),CAST(class_num AS INTEGER),CAST(number AS INTEGER)",ctx.term,JSON.stringify(cs));return {title:D.clean(q.subject),detail:D.clean(q.detail)||cs.join(', '),students:rows};

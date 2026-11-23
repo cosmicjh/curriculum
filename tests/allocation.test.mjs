@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
 import {harness} from './harness.mjs';
 import {backup,fixture,allocationFixture as boardFixture} from './fixture.mjs';
+import {performanceFixture} from './performance-fixture.mjs';
 import {prepareAllocation} from '../src/allocations.js';
 
 test('allocation validates its source and keeps section identities and choices',()=>{
@@ -56,6 +57,24 @@ test('allocation counts match elective rosters and include assignments linked by
  assert.equal(roster.data.students.length,1);
  assert.deepEqual(saved.data.allocation.counts,{'section-one':1,'section-two':0,'section-three':1,[sectionId]:1});
  assert.deepEqual((await h.api('allocation',{},teacher)).data.counts,saved.data.allocation.counts);
+});
+test('allocation reads stay below 9,000 D1 rows for a school-sized roster',async t=>{
+ const h=await harness();t.after(()=>h.close());
+ const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
+ const {store,board}=performanceFixture();
+ store.students[0].status='전출';
+ assert((await h.mutation('restore',{backup:{format:'school-timetable-backup',schemaVersion:1,store}},admin)).ok);
+ assert((await h.mutation('saveAllocation',{board,compact:true},admin)).ok);
+ const response=await h.api('allocation',{},teacher);
+ assert(response.ok,JSON.stringify(response.error));
+ const rows=Number(response.headers.get('x-d1-rows-read'));
+ assert(rows>0&&rows<9000,'allocation read '+rows+' D1 rows');
+ const sectionId='section-1-0-2',query={kind:'elective',sectionId};
+ const roster=await h.api('roster',{query,includeRevision:true},teacher);
+ assert(roster.ok,JSON.stringify(roster.error));
+ assert.equal(roster.data.revision,response.data.meta.revision);
+ assert.equal(roster.data.students.length,29);
+ assert.equal(response.data.counts[sectionId],roster.data.students.length);
 });
 test('one allocation save updates teacher, student and class-swap, protects writes and survives backup/term changes',async t=>{
  const h=await harness();t.after(()=>h.close());const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');assert((await h.mutation('restore',{backup:backup()},admin)).ok);

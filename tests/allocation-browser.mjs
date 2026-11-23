@@ -102,6 +102,21 @@ try{
   await refresh.click();
   await count.filter({hasText:/^1명$/}).waitFor();
  });
+ await step('opening a roster updates stale allocation counts without a manual refresh',async()=>{
+  const button=page.getByRole('button',{name:'3학년 가상과학 A1 명렬표 열기'});
+  const count=button.locator('xpath=ancestor::td').locator('.allocation-count');
+  const roster=page.locator('#modal[open] .roster-header');
+  const student=(await h.api('adminStudent',{id:'student-one'},admin.cookie)).data.student;
+  for(const [status,total] of [['전출',0],['재학',1]]){
+   assert((await h.mutation('saveStudent',{student:{...student,status}},admin.cookie)).ok);
+   assert.equal(await count.textContent(),(1-total)+'명');
+   await button.click();
+   await roster.getByText('A1 · '+total+'명',{exact:true}).waitFor();
+   assert.equal(await count.textContent(),total+'명');
+   assert.equal(await page.locator('#modal .roster-table tbody tr').count(),total);
+   await roster.getByRole('button',{name:'닫기'}).click();
+  }
+ });
  await step('mobile search preserves all rooms and all grades print counts',async()=>{
   await page.setViewportSize({width:390,height:844});await clickMenu(page,page.locator('[data-tab=allocation]'));await page.locator('.allocation-table').waitFor();await idle();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.locator('#allocation-query').fill('협력교사');assert.equal(await page.locator('.allocation-table thead th').count(),23);
   assert.equal(await page.locator('.allocation-subject').first().evaluate(el=>getComputedStyle(el).minHeight),'44px');
@@ -125,6 +140,42 @@ try{
    await style.evaluate(el=>el.remove());await page.evaluate(()=>{window.allocationPrint='';});
   }
 
+ });
+ await step('a delayed roster response is discarded when the teacher logs out',async()=>{
+  await page.setViewportSize({width:1920,height:1080});
+  await page.evaluate(()=>{
+   const modal=document.querySelector('#modal'),open=modal.showModal;
+   window.openedLateRoster=false;
+   modal.showModal=function(){
+    if(this.querySelector('.roster-table tbody tr'))window.openedLateRoster=true;
+    return open.call(this);
+   };
+  });
+  const gate=Promise.withResolvers(),captured=Promise.withResolvers(),endpoint='**/api/roster';
+  await page.route(endpoint,async route=>{
+   const response=route.fetch();
+   captured.resolve(response);
+   await gate.promise;
+   await route.fulfill({response:await response});
+  },{times:1});
+  try{
+   await page.getByRole('button',{name:'3학년 가상과학 A1 명렬표 열기'}).click();
+   const response=await captured.promise;
+   assert.equal((await response.json()).data.students.length,1);
+   const loading=await page.locator('[data-action=logout]').isDisabled();
+   // A second tab can log out even while this tab's controls are locked.
+   const logout=await context.request.post(base+'/api/logout',{headers:{Origin:base},data:{}});
+   assert((await logout.json()).ok);
+   await page.evaluate(()=>{location.hash='#/home';});
+   const delivered=page.waitForResponse(endpoint);
+   gate.resolve();
+   await delivered;
+   await page.locator('form[data-form=login]').waitFor();
+   await idle();
+   assert.equal(await page.locator('#modal[open],#modal .roster-table tbody tr').count(),0);
+   assert.equal(await page.evaluate(()=>window.openedLateRoster),false);
+   assert(loading);
+  }finally{gate.resolve();}
  });
  assert.deepEqual(errors,[]);await writeFile('test-results/allocation-browser.json',JSON.stringify({steps,errors},null,2));
 }finally{await browser?.close();await h.close();}
