@@ -441,11 +441,26 @@
         const size=paper==='A4'?{paper:'A4',width:285,height:198}:{paper:'A3',width:408,height:285},sheet=target.querySelector('.allocation-print');
         pageStyle=document.createElement('style');pageStyle.textContent='@page{size:'+size.paper+' landscape;margin:6mm}';document.head.append(pageStyle);
         target.classList.add('allocation-measure');
-        const pxPerMm=sheet.getBoundingClientRect().width/408,maxWidth=size.width*pxPerMm,maxHeight=(size.height-2)*pxPerMm;let scale=1;
-        // Scaled fonts can wrap differently; remeasure the fitted rows before printing.
-        for(let pass=0;pass<4;pass++){
-          const rect=sheet.getBoundingClientRect(),ratio=Math.min(1,maxWidth/Math.max(rect.width,sheet.scrollWidth*scale),maxHeight/Math.max(rect.height,sheet.scrollHeight*scale));
-          if(ratio>=1)break;scale*=ratio;sheet.style.zoom=String(scale);
+        const pxPerMm=96/25.4,maxWidth=(size.width-0.5)*pxPerMm,maxHeight=(size.height-2)*pxPerMm;
+        target.style.setProperty('--allocation-print-height',maxHeight+'px');
+        const fits=scale=>{
+          // Use the full printable width at each scale so long cell text wraps less.
+          sheet.style.width=(maxWidth/scale-1)+'px';
+          sheet.style.transform='scale('+scale+')';
+          const rect=sheet.getBoundingClientRect();
+          return Math.max(rect.width,sheet.scrollWidth*scale)<=maxWidth&&Math.max(rect.height,sheet.scrollHeight*scale)<=maxHeight;
+        };
+        if(!fits(1)){
+          let lower=0.05,upper=1;
+          for(let pass=0;pass<30&&upper-lower>0.005;pass++){
+            const scale=(lower+upper)/2;
+            if(fits(scale))lower=scale;
+            else upper=scale;
+          }
+          if(!fits(lower)){
+            target.replaceChildren();
+            throw Error('배치표를 선택한 용지 한 장에 맞출 수 없어 인쇄를 중단했습니다.');
+          }
         }
         target.classList.remove('allocation-measure');
       }
