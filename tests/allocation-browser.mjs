@@ -319,5 +319,34 @@ try{
   assert.deepEqual(pageCounts,[1,1],scenario.name+' allocation PDF page counts for A3 and A4 landscape');
   assert(sheetWidths.every((width,i)=>width>=[408,285][i]*96/25.4*.95),scenario.name+' allocation uses the available landscape width');
  });
+ await step('allocation print stops when no scale fits and can be retried',async()=>{
+  const styleCount=await page.locator('head style').count();
+  await page.evaluate(()=>{
+   const measure=Element.prototype.getBoundingClientRect;
+   window.printFitMeasurements=0;
+   window.printCalls=0;
+   window.print=()=>{window.printCalls++;};
+   Element.prototype.getBoundingClientRect=function(){
+    const rect=measure.call(this);
+    if(!this.matches('.allocation-measure > .allocation-print'))return rect;
+    if(++window.printFitMeasurements>32)throw Error('Print fit exceeded its measurement budget');
+    return new DOMRect(rect.x,rect.y,rect.width,Infinity);
+   };
+   window.restorePrintMeasurement=()=>{Element.prototype.getBoundingClientRect=measure;};
+  });
+  try{
+   await page.locator('[data-alloc=print]').click({timeout:5000});
+   await page.locator('#toast').getByText('배치표를 선택한 용지 한 장에 맞출 수 없어 인쇄를 중단했습니다.').waitFor({timeout:5000});
+   const {measurements,prints}=await page.evaluate(()=>({measurements:window.printFitMeasurements,prints:window.printCalls}));
+   assert(measurements>0&&measurements<=32);
+   assert.equal(prints,0);
+   assert.equal(await page.locator('#print-root.allocation-measure,#print-root .allocation-print').count(),0);
+   assert.equal(await page.locator('head style').count(),styleCount);
+  }finally{
+   await page.evaluate(()=>window.restorePrintMeasurement());
+  }
+  await page.locator('[data-alloc=print]').click();
+  await page.waitForFunction(()=>window.printCalls===1,undefined,{timeout:5000});
+ });
  assert.deepEqual(errors,[]);await writeFile('test-results/allocation-browser.json',JSON.stringify({steps,errors},null,2));
 }finally{await browser?.close();await h.close();}

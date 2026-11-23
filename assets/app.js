@@ -451,13 +451,16 @@
           return Math.max(rect.width,sheet.scrollWidth*scale)<=maxWidth&&Math.max(rect.height,sheet.scrollHeight*scale)<=maxHeight;
         };
         if(!fits(1)){
-          let fitted=0,limit=1;
-          while(!fitted||limit-fitted>0.005){
-            const scale=(fitted+limit)/2;
-            if(fits(scale))fitted=scale;
-            else limit=scale;
+          let lower=0.05,upper=1;
+          for(let pass=0;pass<30&&upper-lower>0.005;pass++){
+            const scale=(lower+upper)/2;
+            if(fits(scale))lower=scale;
+            else upper=scale;
           }
-          fits(fitted);
+          if(!fits(lower)){
+            target.replaceChildren();
+            throw Error('배치표를 선택한 용지 한 장에 맞출 수 없어 인쇄를 중단했습니다.');
+          }
         }
         target.classList.remove('allocation-measure');
       }
