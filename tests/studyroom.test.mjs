@@ -1,10 +1,11 @@
-import {setupStudyroom} from './studyroom-fixture.mjs';
+import {setupStudyroom,studyroomFault,studyroomFaultHarness} from './studyroom-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {harness} from './harness.mjs';
 import {backup} from './fixture.mjs';
 import {localTime,schedule,currentSession} from '../src/studyroom-domain.js';
 import {createHash} from 'node:crypto';
+import {isTransientStudyroomD1} from '../src/studyroom.js';
 const today=()=>localTime(new Date()).date;
 test('D1 studyroom: shared roster, durable identity, teacher notes, archive and concurrency',async t=>{
  const h=await harness({studyroom:true});t.after(()=>h.close());const {admin,teacher,api,revision}=await setupStudyroom(h);
@@ -136,4 +137,183 @@ test('schedule validation, Seoul boundaries, and feature-disabled production def
  assert.throws(()=>schedule({effectiveDate:'2026-11-01',definitions:[{id:'x',label:'오류',start:'10:00',end:'09:00',days:[1]}]},'2026-11-01'));
  const ctx={settings:{academicYear:2026}},s=[{id:'s',effective_date:'2026-01-01',definitions:JSON.stringify([{id:'x',label:'가상',start:'08:00',end:'09:00',days:[1]}])}];assert(currentSession(s,ctx,'2026-11-01T23:00:00Z'));assert.equal(currentSession(s,ctx,'2026-11-02T00:00:00Z'),null);
  const h=await harness();t.after(()=>h.close());assert.equal((await h.api('studyroom',{op:'studentInfo',studentNumber:'30101',seat:'01'})).status,404);
+});
+
+test('D1 retry classification uses documented transient binding failures',()=>{
+ for(const message of [
+  'Network connection lost.',
+  'D1 DB reset because its code was updated.',
+  'Internal error while starting up D1 DB storage caused object to be reset.',
+  'Internal error in D1 DB storage caused object to be reset.',
+  'Replica disconnected from primary.',
+  'Cannot resolve D1 DB due to transient issue on remote node.',
+  "Can't read from request stream because client disconnected.",
+  'D1 DB is overloaded. Requests queued for too long.',
+  'D1 DB is overloaded. Too many requests queued.',
+  'D1 DB is overloaded. Too many resources consumed within a 10 second window'
+ ])assert(isTransientStudyroomD1(Error('D1_ERROR: '+message)),message);
+ assert(isTransientStudyroomD1(new Error('D1_ERROR',{cause:Error('Network connection lost.')})));
+ for(const message of [
+  'no such table: sr_attendance',
+  'UNIQUE constraint failed: sr_attendance.id',
+  "Your account has exceeded D1's free tier daily row write limit.",
+  'D1 DB storage operation exceeded timeout which caused object to be reset.',
+  'D1 DB exceeded its CPU time limit and was reset.'
+ ])assert(!isTransientStudyroomD1(Error('D1_ERROR: '+message)),message);
+});
+
+test('student submit retries transient D1 and write conflicts with replay before another commit',async t=>{
+ for(const [phase,count,message,expectedStatus,commits] of [
+  ['beforeCommit',1,'D1_ERROR: Network connection lost.',200,2],
+  ['afterCommit',1,'D1_ERROR: Network connection lost.',200,1],
+  ['beforeCommit',4,'D1_ERROR: sr_revision_conflict: SQLITE_CONSTRAINT',200,5],
+  ['beforeCommit',1,'D1_ERROR: sr_record_conflict: SQLITE_CONSTRAINT',200,2],
+  ['beforeCommit',1,{cause:'sr_revision_conflict: SQLITE_CONSTRAINT'},200,2],
+  ['beforeCommit',1,{cause:'sr_record_conflict: SQLITE_CONSTRAINT'},200,2],
+  ['beforeCommit',1,{cause:'UNIQUE constraint failed: sr_attendance.session_id, sr_attendance.person_id'},200,2],
+  ['replay',1,'D1_ERROR: Network connection lost.',200,1],
+  ['beforeCommit',5,'D1_ERROR: D1 DB is overloaded. Too many requests queued.',503,5],
+  ['beforeCommit',5,'D1_ERROR: D1 DB is overloaded. Too many resources consumed within a 10 second window',503,1],
+  ['beforeCommit',5,'D1_ERROR: sr_revision_conflict: SQLITE_CONSTRAINT',503,5]
+ ])await t.test(phase+' × '+count+' · '+(message.cause?'cause: '+message.cause:message),async t=>{
+  const h=await studyroomFaultHarness();t.after(()=>h.close());const {api}=await setupStudyroom(h);
+  const input={studentNumber:'30101',seat:'01'};
+  const confirmed=await api('studentInfo',input,'');assert(confirmed.ok);
+  const args={...input,studentKey:confirmed.data.studentKey,requestId:crypto.randomUUID()};
+  const response=await api('submit',args,'',studyroomFault(phase,count,message));
+  assert.equal(response.status,expectedStatus,JSON.stringify(response));
+  assert.equal(Number(response.headers.get('X-Test-Studyroom-Commits')),commits);
+  const [record]= (await h.sql('SELECT id, version FROM sr_attendance')).results;
+  const events=(await h.sql('SELECT request_id,record FROM sr_events WHERE action=?','submit')).results;
+  if(expectedStatus===503){
+   assert.deepEqual([response.code,response.error],['SR_RETRY','접속이 많아 저장하지 못했습니다. 출석 제출을 다시 누르세요.']);
+   assert.equal(record,undefined);assert.equal(events.length,0);
+  }else{
+   assert.deepEqual(record,{id:response.data.recordId,version:1});
+   assert.equal(events.length,1);assert.equal(events[0].request_id,args.requestId);
+   assert.deepEqual(response.data,JSON.parse(events[0].record));
+   assert.deepEqual((await api('submit',args,'',studyroomFault('beforeCommit',5))).data,response.data);
+  }
+ });
+});
+
+test('cause-only D1 business failures keep their student responses without retrying the commit',async t=>{
+ const h=await studyroomFaultHarness();t.after(()=>h.close());const {api}=await setupStudyroom(h);
+ for(const [cause,code,error] of [
+  ['sr_session_closed: SQLITE_CONSTRAINT','CLOSED','회차가 마감되었습니다. 교사에게 확인하세요.'],
+  ['UNIQUE constraint failed: sr_attendance.session_id, sr_attendance.seat','SEAT_OCCUPIED','이미 사용 중인 좌석입니다. 교사에게 확인하세요.']
+ ]){
+  const result=await api('submit',{studentNumber:'30101',seat:'01',requestId:crypto.randomUUID()},'',studyroomFault('beforeCommit',5,{cause}));
+  assert.deepEqual([result.status,result.code,result.error,result.headers.get('X-Test-Studyroom-Commits')],[409,code,error,'1']);
+ }
+ assert.equal((await h.sql('SELECT count(*) n FROM sr_attendance')).results[0].n,0);
+ assert.equal((await h.sql("SELECT count(*) n FROM sr_events WHERE action IN ('submit','recordSnapshot')")).results[0].n,0);
+});
+
+test('studyroom student preflight D1 faults and Pages rate-limit headers are scoped to student operations',async t=>{
+ const h=await studyroomFaultHarness();t.after(()=>h.close());const {api,admin}=await setupStudyroom(h);
+ const origin='https://cosmicjh.github.io',cors='Server-Timing, X-D1-Rows-Read, X-D1-Rows-Written';
+ const ip='school-nat',args={studentNumber:'30101',seat:'01',requestId:crypto.randomUUID()};
+ for(const op of ['studentInfo','submit'])for(const phase of ['context','limit']){
+  const result=await api(op,args,'',studyroomFault(phase));
+  assert.deepEqual([result.status,result.code,result.error],[503,'SR_RETRY','접속이 많아 저장하지 못했습니다. 출석 제출을 다시 누르세요.']);
+  assert.equal(result.headers.get('X-Test-Studyroom-Attempts'),'1');
+  assert.equal(result.headers.get('X-Test-Studyroom-Commits'),'0');
+ }
+ const teacherFault=await api('dashboard',{},admin.cookie,studyroomFault('context'));
+ assert.notEqual(teacherFault.code,'SR_RETRY');
+ assert.equal((await h.sql('SELECT count(*) n FROM sr_attendance')).results[0].n,0);
+ assert.equal((await api('studentInfo',args,'',{Origin:origin})).headers.get('Access-Control-Expose-Headers'),cors);
+ for(const [scope,count] of [['sr-student',1200],['login:teacher',10]]){
+  const bucket=scope+':'+createHash('sha256').update(ip).digest('hex');
+  await h.sql('INSERT INTO login_limits(bucket,attempts,expires_at) VALUES(?,?,?)',bucket,count,Date.now()+12000);
+ }
+ const headers={Origin:origin,'CF-Connecting-IP':ip};
+ for(const op of ['studentInfo','submit']){
+  const result=await api(op,args,'',headers);
+  assert.equal(result.status,429);
+  assert(Number(result.headers.get('Retry-After'))>=1&&Number(result.headers.get('Retry-After'))<=12);
+  assert.equal(result.headers.get('Access-Control-Expose-Headers'),cors+', Retry-After');
+ }
+ const local=await api('submit',args,'',{'CF-Connecting-IP':ip});
+ assert.equal(local.status,429);assert.equal(local.headers.get('Access-Control-Expose-Headers'),null);
+ const login=await h.api('login',{role:'teacher'},'',headers);
+ assert.equal(login.status,429);assert.equal(login.headers.get('Retry-After'),'60');assert.equal(login.headers.get('Access-Control-Expose-Headers'),cors);
+});
+
+test('a roster number swap before the first commit rejects the previously confirmed student key',async t=>{
+ const h=await studyroomFaultHarness();t.after(()=>h.close());const {api,admin}=await setupStudyroom(h);
+ const [ada,ben]=await Promise.all([
+  api('studentInfo',{studentNumber:'30101',seat:'03'},''),
+  api('studentInfo',{studentNumber:'30102',seat:'02'},'')
+ ]);
+ assert.match(ada.data.studentKey,/^[a-f0-9]{64}$/);
+ assert.match(ben.data.studentKey,/^[a-f0-9]{64}$/);
+ assert.notEqual(ada.data.studentKey,ben.data.studentKey);
+ for(const [studentNumber,seat] of [['30101','01'],['30102','02']]){
+  const legacy=await api('submit',{studentNumber,seat,requestId:crypto.randomUUID()},'');assert(legacy.ok);
+  assert.equal(legacy.data.studentKey,undefined);
+ }
+ const read=async()=>(await h.sql('SELECT * FROM sr_attendance ORDER BY student_id')).results;
+ const before=await read();
+ const body={studentNumber:'30101',studentKey:ada.data.studentKey,seat:'03',expectedSessionId:ada.data.session.id,requestId:crypto.randomUUID()};
+ const pending=api('submit',body,'',studyroomFault('commitGate',1,undefined,2));
+ try{
+  await h.waitForCommit();
+  for(const [id,number] of [['student-one','3'],['student-two','1'],['student-one','2']]){
+   const {student}=(await h.api('adminStudent',{id},admin.cookie)).data;
+   const save=await h.mutation('saveStudent',{student:{...student,number}},admin.cookie);assert(save.ok,JSON.stringify(save));
+  }
+ }finally{await h.releaseCommit();}
+ const rejected=await pending;
+ assert.deepEqual([rejected.status,rejected.code,rejected.error],[409,'STUDENT_CHANGED','학생 정보가 변경되었습니다. 이름 확인을 다시 하세요.']);
+ assert.equal(rejected.headers.get('X-Test-Studyroom-Revision-Conflicts'),'1');
+ assert.equal(rejected.headers.get('X-Test-Studyroom-Replay-Failures'),'1');
+ assert.deepEqual(await read(),before);
+ assert.equal((await h.sql('SELECT count(*) n FROM sr_events WHERE request_id=?',body.requestId)).results[0].n,0);
+ const fresh=(await api('studentInfo',body,'')).data;assert.equal(fresh.studentKey,ben.data.studentKey);
+ const accepted=await api('submit',{...body,studentKey:fresh.studentKey},'');assert(accepted.ok);
+ const legacyReplay=await api('submit',{...body,studentKey:undefined},'');assert.deepEqual(legacyReplay.data,accepted.data);
+});
+
+test('confirmed business errors survive a transient final replay failure',async t=>{
+ const h=await studyroomFaultHarness();t.after(()=>h.close());const {api,admin,revision}=await setupStudyroom(h);
+ const submit=(data,headers={})=>api('submit',{studentNumber:'30101',seat:'01',requestId:crypto.randomUUID(),...data},'',headers);
+ assert((await submit({})).ok);
+ for(const [data,status,code] of [
+  [{studentNumber:'30199'},404,'NOT_ELIGIBLE'],
+  [{expectedSessionId:'other-session'},409,'SESSION_CHANGED'],
+  [{studentNumber:'30102'},409,'SEAT_OCCUPIED'],
+  [{studentKey:'other-student'},409,'STUDENT_CHANGED']
+ ]){
+  const result=await submit(data,studyroomFault('responseReplay',0,undefined,1));
+  assert.deepEqual([result.status,result.code,result.headers.get('X-Test-Studyroom-Replay-Failures')],[status,code,'1']);
+ }
+ assert((await api('configuration',{expectedRevision:await revision(),enabled:false})).ok);
+ const closed=await submit({},studyroomFault('responseReplay',0,undefined,1));
+ assert.deepEqual([closed.status,closed.code,closed.headers.get('X-Test-Studyroom-Replay-Failures')],[409,'CLOSED','1']);
+ assert((await api('configuration',{expectedRevision:await revision(),enabled:true})).ok);
+ const pending=submit({},studyroomFault('commitGate',1,undefined,2));
+ try{
+  await h.waitForCommit();
+  const settings={...backup().store.settings,academicYear:2027,semester:1};
+  assert((await h.mutation('saveSettings',{settings},admin.cookie)).ok);
+ }finally{await h.releaseCommit();}
+ const changed=await pending;
+ assert.deepEqual([changed.status,changed.code,changed.headers.get('X-Test-Studyroom-Replay-Failures')],[409,'TERM_CHANGED','1']);
+ assert.equal((await h.sql("SELECT count(*) n FROM sr_events WHERE action='submit'")).results[0].n,1);
+});
+
+test('a closed session returns 409 and still replays an already committed request',async t=>{
+ const h=await studyroomFaultHarness();t.after(()=>h.close());const {api}=await setupStudyroom(h);
+ const body={studentNumber:'30101',seat:'01',requestId:crypto.randomUUID()};
+ const accepted=await api('submit',body,'');assert(accepted.ok);
+ const worker=await h.mf.getWorker();
+ await worker.scheduled({scheduledTime:new Date(accepted.data.session.date+'T23:59:01+09:00'),cron:'* * * * *'});
+ assert.equal((await h.sql('SELECT status FROM sr_sessions WHERE id=?',accepted.data.session.id)).results[0].status,'closed');
+ const closed=await api('submit',{...body,requestId:crypto.randomUUID()},'',studyroomFault('responseReplay',0,undefined,1));
+ assert.deepEqual([closed.status,closed.code,closed.error],[409,'CLOSED','회차가 마감되었습니다. 교사에게 확인하세요.']);
+ assert.equal(closed.headers.get('X-Test-Studyroom-Replay-Failures'),'1');
+ assert.deepEqual((await api('submit',body,'')).data,accepted.data);
+ assert.equal((await h.sql("SELECT count(*) n FROM sr_events WHERE action='submit'")).results[0].n,1);
 });

@@ -28,24 +28,56 @@ async function openSession(db,ctx,now){
  const rule=await db.first('SELECT * FROM sr_schedules WHERE term_id=? AND effective_date<=? ORDER BY effective_date DESC,version DESC LIMIT 1',ctx.term,D.localTime(now).date);
  const s=D.currentSession(rule?[rule]:[],ctx,now);if(!s)A.fail(409,'CLOSED','현재 접수할 회차가 없습니다.');return s;
 }
-async function replay(db,id,fingerprint,term){
- const e=await db.first('SELECT fingerprint,record,session_id FROM sr_events WHERE request_id=?',id);if(!e)return null;
- if(e.fingerprint!==fingerprint||!e.session_id?.startsWith(term+':'))A.fail(409,'REQUEST_REUSED','요청 내용이나 학기가 달라졌습니다. 입력을 다시 확인하세요.');return JSON.parse(e.record);
+const studentKeyFor=(personId,term)=>digest(JSON.stringify([personId,term]));
+async function requireStudentKey(key,personId,term){
+ if(key!==undefined&&key!==await studentKeyFor(personId,term))A.fail(409,'STUDENT_CHANGED','학생 정보가 변경되었습니다. 이름 확인을 다시 하세요.');
 }
+async function replay(db,id,fingerprint,term,studentKey){
+ const e=await db.first('SELECT fingerprint,record,session_id,person_id FROM sr_events WHERE request_id=?',id);if(!e)return null;
+ if(e.fingerprint!==fingerprint||!e.session_id?.startsWith(term+':'))A.fail(409,'REQUEST_REUSED','요청 내용이나 학기가 달라졌습니다. 입력을 다시 확인하세요.');
+ await requireStudentKey(studentKey,e.person_id,term);
+ return JSON.parse(e.record);
+}
+// https://developers.cloudflare.com/d1/observability/debug-d1/#list-of-d1_errors
+const matchesD1=(error,pattern)=>pattern.test(error.message)||pattern.test(error.cause?.message);
+const capacityWindow=/D1 DB is overloaded\. Too many resources consumed within a 10 second window/i;
+export function isTransientStudyroomD1(error){
+ return matchesD1(error,capacityWindow)||matchesD1(error,/Network connection lost|DB storage caused object to be reset|reset because its code was updated|Replica disconnected from primary|Cannot resolve D1 DB due to transient issue on remote node|Can't read from request stream because client disconnected|D1 DB is overloaded\. (?:Requests queued for too long|Too many requests queued)/i);
+}
+export function retryStudent(){A.fail(503,'SR_RETRY','접속이 많아 저장하지 못했습니다. 출석 제출을 다시 누르세요.');}
 async function student(db,ctx,req,submit){
  const n=D.number(req.studentNumber),seat=D.seat(req.seat),fingerprint=submit?await digest(JSON.stringify(['submit',n,seat])):null;
- if(submit){D.requestId(req.requestId);const prior=await replay(db,req.requestId,fingerprint,ctx.term);if(prior)return prior;}
- for(let attempt=0;attempt<3;attempt++){
-  const now=iso(),[st,person]=await Promise.all([state(db),findStudent(db,ctx,n)]),s=await openSession(db,ctx,now);
-  if(!person||!person.eligible)A.fail(404,'NOT_ELIGIBLE','이용 가능한 학생 정보가 없습니다. 교사에게 확인하세요.');
-  if(submit&&req.expectedSessionId&&req.expectedSessionId!==s.id)A.fail(409,'SESSION_CHANGED','학기 또는 회차가 변경되었습니다. 학생 정보를 다시 확인하세요.');
-  const info={studentNumber:n,name:person.name,seat,session:{id:s.id,label:s.label,date:s.date,endsAt:s.ends_at}};if(!submit)return info;
-  const previous=await db.first('SELECT * FROM sr_attendance WHERE session_id=? AND person_id=?',s.id,person.person_id);
-  const r={id:previous?.id||uid(),session_id:s.id,person_id:person.person_id,term_id:ctx.term,student_id:person.id,student_number:n,name:person.name,seat,state:'active',first_at:previous?.first_at||now,last_at:now,confirmed_by:previous?.seat===seat&&previous.state==='active'?previous.confirmed_by:null,confirmed_name:previous?.seat===seat&&previous.state==='active'?previous.confirmed_name:null,confirmed_at:previous?.seat===seat&&previous.state==='active'?previous.confirmed_at:null,version:(previous?.version||0)+1,note:previous?.note||''};
-  if(previous)for(const k of ['term_id','student_id','student_number','name'])r[k]=previous[k];
-  const reply={...info,recordId:r.id,submittedAt:r.first_at};
-  try{await commit(db,ctx,st,{kind:'student',record_id:previous?.id,record_version:previous?.version,session_id:s.id},[saveSession(db,s),saveRecord(db,r),event(db,{requestId:req.requestId,fingerprint,action:'submit',sessionId:s.id,personId:person.person_id,at:now,actor:'student',record:reply}),event(db,{action:'recordSnapshot',sessionId:s.id,personId:person.person_id,at:now,actor:'student',record:r})]);return reply;}
-  catch(e){const prior=await replay(db,req.requestId,fingerprint,ctx.term);if(prior)return prior;if(/sr_revision_conflict|sr_record_conflict|UNIQUE.*sr_attendance.session_id, sr_attendance.person_id/.test(e.message)&&attempt<2){const next=await S.context(db);if(next.term!==ctx.term)A.fail(409,'TERM_CHANGED','학기가 변경되었습니다. 다시 접속하세요.');ctx=next;continue;}if(/UNIQUE.*sr_attendance.session_id, sr_attendance.seat/.test(e.message))A.fail(409,'SEAT_OCCUPIED','이미 사용 중인 좌석입니다. 교사에게 확인하세요.');throw e;}
+ if(submit)D.requestId(req.requestId);
+ for(let attempt=0;attempt<5;attempt++){
+  try{
+   if(submit){const prior=await replay(db,req.requestId,fingerprint,ctx.term,req.studentKey);if(prior)return prior;}
+   if(attempt){const next=await S.context(db);if(next.term!==ctx.term)A.fail(409,'TERM_CHANGED','학기가 변경되었습니다. 다시 접속하세요.');ctx=next;}
+   const now=iso(),[st,person]=await Promise.all([state(db),findStudent(db,ctx,n)]),s=await openSession(db,ctx,now);
+   if(!person||!person.eligible)A.fail(404,'NOT_ELIGIBLE','이용 가능한 학생 정보가 없습니다. 교사에게 확인하세요.');
+   if(submit&&req.expectedSessionId&&req.expectedSessionId!==s.id)A.fail(409,'SESSION_CHANGED','학기 또는 회차가 변경되었습니다. 학생 정보를 다시 확인하세요.');
+   const info={studentNumber:n,name:person.name,seat,session:{id:s.id,label:s.label,date:s.date,endsAt:s.ends_at}};
+   if(!submit)return {...info,studentKey:await studentKeyFor(person.person_id,ctx.term)};
+   await requireStudentKey(req.studentKey,person.person_id,ctx.term);
+   const previous=await db.first('SELECT * FROM sr_attendance WHERE session_id=? AND person_id=?',s.id,person.person_id);
+   const r={id:previous?.id||uid(),session_id:s.id,person_id:person.person_id,term_id:ctx.term,student_id:person.id,student_number:n,name:person.name,seat,state:'active',first_at:previous?.first_at||now,last_at:now,confirmed_by:previous?.seat===seat&&previous.state==='active'?previous.confirmed_by:null,confirmed_name:previous?.seat===seat&&previous.state==='active'?previous.confirmed_name:null,confirmed_at:previous?.seat===seat&&previous.state==='active'?previous.confirmed_at:null,version:(previous?.version||0)+1,note:previous?.note||''};
+   if(previous)for(const k of ['term_id','student_id','student_number','name'])r[k]=previous[k];
+   const reply={...info,recordId:r.id,submittedAt:r.first_at};
+   await commit(db,ctx,st,{kind:'student',record_id:previous?.id,record_version:previous?.version,session_id:s.id},[saveSession(db,s),saveRecord(db,r),event(db,{requestId:req.requestId,fingerprint,action:'submit',sessionId:s.id,personId:person.person_id,at:now,actor:'student',record:reply}),event(db,{action:'recordSnapshot',sessionId:s.id,personId:person.person_id,at:now,actor:'student',record:r})]);
+   return reply;
+  }catch(e){
+   const closed=matchesD1(e,/sr_session_closed/),occupied=matchesD1(e,/UNIQUE.*sr_attendance.session_id, sr_attendance.seat/);
+   const businessError=closed||occupied||e.status>=400&&e.status<500;
+   const retryable=!businessError&&(isTransientStudyroomD1(e)||matchesD1(e,/sr_revision_conflict|sr_record_conflict|UNIQUE.*sr_attendance.session_id, sr_attendance.person_id/));
+   if(retryable&&!matchesD1(e,capacityWindow)&&attempt<4){await new Promise(resolve=>setTimeout(resolve,30*2**attempt*(1+Math.random())));continue;}
+   if(submit){
+    try{const prior=await replay(db,req.requestId,fingerprint,ctx.term,req.studentKey);if(prior)return prior;}
+    catch(error){if(error.code==='STUDENT_CHANGED'||!businessError)throw error;}
+   }
+   if(retryable)retryStudent();
+   if(closed)A.fail(409,'CLOSED','회차가 마감되었습니다. 교사에게 확인하세요.');
+   if(occupied)A.fail(409,'SEAT_OCCUPIED','이미 사용 중인 좌석입니다. 교사에게 확인하세요.');
+   throw e;
+  }
  }
 }
 async function dashboard(db,ctx,env){
@@ -144,7 +176,7 @@ export async function runStudyroomSchedule(db,now=iso()){
 }
 export async function studyroom(db,ctx,env,req,request){
  const op=req.op;
- if(['studentInfo','submit'].includes(op)){await A.rateLimit(db,request,'sr-student',600);return student(db,ctx,req,op==='submit');}
+ if(['studentInfo','submit'].includes(op)){await A.rateLimit(db,request,'sr-student',1200);return student(db,ctx,req,op==='submit');}
  const adminOps=new Set(['configuration','refreshInterval','setMember','linkStudent','export','closeDue']);
  const session=await A.authenticate(db,request,adminOps.has(op)?'admin':'teacher',env);
  if(req.viewTerm&&req.viewTerm!==ctx.term)A.fail(409,'TERM_CHANGED','활성 학기가 변경되었습니다.');
