@@ -5,7 +5,7 @@ import * as S from './storage.js';
 import * as Auth from './auth.js';
 import {allowedRequest,pagesRequest,cors} from './origin.js';
 import {prepareAllocation} from './allocations.js';
-import {studyroom,runStudyroomSchedule} from './studyroom.js';
+import {studyroom,runStudyroomSchedule,isTransientStudyroomD1,retryStudent} from './studyroom.js';
 import {requireEnabled,storeCourseTransfer} from './course-transfer.js';
 import {validTerm,newTermSettings,prepareToolTransfer,readToolTransfer,readCourseTransfer,importPayload} from './tool-transfer.js';
 import {allocationAccess,allocationFreezeError,allocationSchemaMissing,courseMigration,migrationVersion} from './course-migration.js';
@@ -253,6 +253,7 @@ async function mutate(db,env,ctx,session,req,headers){
 }
 async function api(request,env){
  const start=performance.now(),db=env.DB?S.database(env.DB):null,headers=new Headers({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'});let status=200,payload;
+ let studyroomStudent=false;
  cors(request,env,headers);
  try{
   const url=new URL(request.url),path=url.pathname;
@@ -298,7 +299,11 @@ async function api(request,env){
    }:undefined;
    data=await Auth.login(db,env,request,req,headers,initializeStudent);
    if(req.initialize&&!data.initial){const ctx=await S.context(db);data.initial=req.role==='admin'?await adminBoot(db,ctx,req):req.role==='teacher'?await teacherBoot(db,ctx):{meta:S.meta(ctx)};}
-  }else if(action==='studyroom')data=await studyroom(db,await S.context(db),env,req,request);
+  }else if(action==='studyroom'){
+   studyroomStudent=['studentInfo','submit'].includes(req.op);
+   try{data=await studyroom(db,await S.context(db),env,req,request);}
+   catch(error){if(studyroomStudent&&!(error.status>=400&&error.status<500)&&isTransientStudyroomD1(error))retryStudent();throw error;}
+  }
   else{
    const requiresAdmin=!teacherActions.has(action)||action==='classSwap'&&req.swapScope==='admin';
    const [session,ctx]=await Promise.all([action==='bootstrap'?null:Auth.authenticate(db,request,action==='student'?'student':requiresAdmin?'admin':'teacher',env),S.context(db)]);
@@ -327,7 +332,11 @@ async function api(request,env){
   if(String(e.message).includes('sr_staff_required')){e.status=401;e.code='STAFF_REQUIRED';e.message='출석 확인자 계정으로 다시 로그인하세요.';}
   if(String(e.message).includes('shared_migration_in_progress')){e.status=503;e.code='MIGRATING';e.message='자료 통합 중입니다. 잠시 후 다시 저장하세요. 입력 내용은 유지됩니다.';}
   if(/UNIQUE constraint failed/.test(e.message)){e.status=409;e.code='CONFLICT';}
-  status=e.status||400;payload={ok:false,code:e.code||'REQUEST_ERROR',error:status>=500&&!['MIGRATING','allocation_import_paused','allocation_schema_required','allocation_unavailable','allocation_source_unfrozen'].includes(e.code)?'서버 설정 또는 처리를 확인하세요.':e.message};if(status===429)headers.set('Retry-After','60');
+  status=e.status||400;payload={ok:false,code:e.code||'REQUEST_ERROR',error:status>=500&&!['MIGRATING','allocation_import_paused','allocation_schema_required','allocation_unavailable','allocation_source_unfrozen','SR_RETRY'].includes(e.code)?'서버 설정 또는 처리를 확인하세요.':e.message};
+  if(status===429){
+   headers.set('Retry-After',String(studyroomStudent?(e.retryAfter??60):60));
+   if(studyroomStudent&&headers.has('Access-Control-Expose-Headers'))headers.append('Access-Control-Expose-Headers','Retry-After');
+  }
  }
  headers.set('Server-Timing',`app;dur=${(performance.now()-start).toFixed(2)}, db;dur=${(db?.stats.ms||0).toFixed(2)}`);headers.set('X-D1-Rows-Read',String(db?.stats.read||0));headers.set('X-D1-Rows-Written',String(db?.stats.written||0));
  return Response.json(payload,{status,headers});

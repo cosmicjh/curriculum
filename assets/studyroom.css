@@ -16,13 +16,21 @@
 .sr-calendar button[aria-pressed=true]>span{text-decoration:underline;text-underline-offset:2px;font-weight:700}
 .sr-calendar [data-sr-count-day]{color:var(--ui-ink-2);font-size:11px;font-weight:600}.studyroom .sr-check{display:inline-flex;flex-direction:row;align-items:center;gap:6px;min-width:0;font-weight:450}.sr-check input{width:16px;min-height:16px;accent-color:#222}.sr-rule{display:flex;align-items:end;flex-wrap:wrap;gap:12px;padding:18px 0;border-bottom:1px solid #ddd}.sr-rule>label{max-width:160px}.sr-rule fieldset{display:flex;flex-wrap:wrap;gap:9px;max-width:330px;padding:8px 12px;border:1px solid #aaa;border-radius:6px}.sr-empty{padding:24px 0;color:#555}.sr-audit{padding-left:22px;overflow-wrap:anywhere}.sr-audit li{padding:12px 0;border-bottom:1px solid #ddd}.studyroom dialog{width:calc(100% - 32px);max-width:600px;padding:24px}.sr-dialog-head{margin-bottom:18px}.studyroom dialog form>label{margin-bottom:16px}.sr-student-page{margin:0;background:#fff;color:#222;font:15px/1.6 var(--ui-font);caret-color:#222}.sr-student-page main{max-width:460px;margin:9vh auto;padding:0 20px}.sr-student-page h1{font-size:23px;letter-spacing:-.03em;line-height:1.35;margin:0 0 12px}.sr-student-page h2{font-size:19px;margin:24px 0 12px}.sr-student-page select,.sr-student-page button{font:inherit;width:100%}.sr-student-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:24px 0}.sr-student-page button{margin-top:12px}.lookup:has(.studyroom){max-width:none}@media(max-width:700px){.sr-calendar td{padding:2px}.sr-toolbar{gap:10px}.sr-calendar-toolbar{gap:4px}.sr-calendar-toolbar .sr-toggle{gap:0}.sr-calendar-toolbar .sr-toggle button{padding-inline:5px}.sr-rule>label{flex:1;min-width:110px}.sr-rule fieldset{width:100%;max-width:none}.sr-dialog-head h2{font-size:19px}}@media(prefers-reduced-motion:reduce){.studyroom *{scroll-behavior:auto!important}}@media print{.studyroom{display:none}}
 .sr-toggle{display:flex;gap:4px;flex-wrap:wrap}.sr-toggle button[aria-pressed=true]{font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.sr-count,.sr-list-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px}
+.sr-count{justify-content:space-between}
+.sr-count [data-sr-grades]{margin-inline-start:auto}
+.sr-list-toolbar{justify-content:flex-end;margin-block:8px}
 .studyroom textarea{font:inherit;width:100%;max-width:100%}
 .sr-correction{margin:0 0 16px}.sr-correction summary{cursor:pointer;margin-bottom:10px}
 .sr-table .sr-note{white-space:normal;overflow-wrap:anywhere}
+.sr-table td,.sr-table th{padding-block:4px}
 .sr-table td{vertical-align:top;line-height:24px}
+.sr-table thead th{vertical-align:middle}
+.studyroom .sr-table th button{padding-inline:0;margin:0;white-space:nowrap}
+.sr-table th[aria-sort] button{font-weight:700;text-decoration:underline}
 .sr-query-person:not([hidden]){display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:18px}
 .sr-query-person h3{margin:0;overflow-wrap:anywhere}
-.studyroom .sr-table .sr-student-link{min-height:24px;margin:0;padding:0;line-height:24px;vertical-align:top;text-align:left}
+.studyroom .sr-table .sr-student-link{align-items:flex-start;margin:0;padding:0;line-height:24px;vertical-align:top;text-align:left}
 .studyroom .sr-student-link{text-decoration:underline;text-underline-offset:2px}
 .sr-day h3{margin-bottom:8px}.sr-day h4{margin:16px 0 6px}
 @media(max-width:920px){
@@ -33,7 +41,7 @@
  .sr-seat-grid button span{max-width:100%;font-size:10px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
  .sr-seat-grid button [data-number]{font-size:clamp(9px,2.5vw,12px);letter-spacing:-.025em}
  .sr-table table{min-width:0;table-layout:fixed;font-size:13px}
- .sr-table th,.sr-table td{padding:6px 3px;white-space:normal;overflow-wrap:anywhere;vertical-align:top}
+ .sr-table th,.sr-table td{padding:4px 3px;white-space:normal;overflow-wrap:anywhere;vertical-align:top}
  .sr-table th:nth-child(1){width:17%}
  .sr-table th:nth-child(2){width:18%}
  .sr-table th:nth-child(3){width:11%}
@@ -43,7 +51,7 @@
 
 .studyroom .sr-table .sr-query-note{position:relative;white-space:pre-wrap}
 .sr-query-table{table-layout:fixed}
-.studyroom .sr-query-note button{display:block;width:100%;margin:0;padding:0;text-align:left;line-height:24px;overflow-wrap:anywhere;white-space:pre-wrap}
+.studyroom .sr-query-note button{display:flex;align-items:flex-start;justify-content:flex-start;width:100%;margin:0;padding:0;text-align:left;line-height:24px;overflow-wrap:anywhere;white-space:pre-wrap}
 .studyroom .sr-query-note button::after{content:"";position:absolute;inset:0}
 .studyroom .sr-query-note button{-webkit-tap-highlight-color:transparent}
 .studyroom .sr-query-note:has(button:focus-visible){outline:2px solid var(--ui-ink);outline-offset:-2px}
