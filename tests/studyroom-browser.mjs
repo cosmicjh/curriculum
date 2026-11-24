@@ -1,7 +1,6 @@
 import {clickMenu} from './navigation-helper.mjs';
 import {chromium,webkit} from 'playwright';
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {harness} from './harness.mjs';
 import {setupStudyroom} from './studyroom-fixture.mjs';
@@ -140,8 +139,10 @@ try{
   await student.goto(url+'/studyroom-student.html?seat=99');
   await student.locator('[name=grade]').selectOption('3');
   await student.locator('#student-form button').click();await student.locator('#confirmation').waitFor();
-  const bucket='sr-student:'+createHash('sha256').update('local').digest('hex');
-  const prime=expiry=>h.sql('INSERT INTO login_limits(bucket,attempts,expires_at) VALUES(?,1200,?) ON CONFLICT(bucket) DO UPDATE SET attempts=excluded.attempts,expires_at=excluded.expires_at',bucket,expiry);
+  const prime=async expiry=>{
+   const {results}=await h.sql("UPDATE login_limits SET attempts=1200,expires_at=? WHERE bucket GLOB 'sr-student:*' RETURNING bucket",expiry);
+   assert(results.length>0,'the name lookup should create a student rate-limit bucket');
+  };
   const submitted=req=>req.url().endsWith('/api/studyroom')&&req.postDataJSON().op==='submit';
   const requests=[];student.on('request',req=>{if(submitted(req))requests.push({id:req.postDataJSON().requestId,at:Date.now()});});
   const status=student.getByRole('status'),submit=student.locator('#submit');
