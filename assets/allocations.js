@@ -25,12 +25,13 @@ export function mountAllocation(root,initial,{admin,request,onRoster,onSaved,pri
  }
  function table(){
   const grades=[...board.grades].sort((a,b)=>Number(b.grade)-Number(a.grade)),rooms=board.rooms;
+  const periods=Math.max(3,...grades.flatMap(g=>g.blocks.map(b=>b.slots.length)));
   const bodies=grades.map(g=>{
    const heading='<tr class="allocation-grade-row"><th scope="rowgroup">'+g.grade+'학년</th>'+rooms.map(r=>'<td>'+esc(g.homerooms[r.id]||'')+'</td>').join('')+'</tr>';
    const rows=g.blocks.map(b=>'<tr data-allocation-block="'+esc(b.code)+'"><th scope="row">'+(admin?'<button data-alloc="block" data-grade="'+g.grade+'" data-code="'+esc(b.code)+'" aria-label="'+esc(g.grade+'학년 '+b.code+' '+b.slots.map(t=>t.day+t.period).join(', ')+' 시간블록 수정')+'">':'<span>')+esc(b.code)+'<span class="allocation-times">'+b.slots.map(t=>'<span class="allocation-time">'+t.day+t.period+'</span>').join(' ')+'</span>'+(admin?'</button>':'</span>')+'</th>'+rooms.map(r=>screenCell(g,b,r)).join('')+'</tr>').join('');
    return '<tbody data-allocation-grade="'+g.grade+'">'+heading+(rows||'<tr><td class="allocation-empty" colspan="'+(rooms.length+1)+'">시간블록을 추가해 주세요.</td></tr>')+'</tbody>';
   }).join('');
-  return '<div class="allocation-scroll" tabindex="0" role="region" aria-label="전체 학년·교실 배치표"><table class="allocation-table"><caption class="sr-only">이동수업 교실 배치표</caption><thead><tr><th scope="col">블록 / 교시</th>'+rooms.map(r=>'<th scope="col">'+esc(r.label)+'</th>').join('')+'</tr></thead>'+bodies+'</table></div>';
+  return '<div class="allocation-scroll" tabindex="0" role="region" aria-label="전체 학년·교실 배치표"><table class="allocation-table" style="--allocation-periods:'+periods+'"><caption class="sr-only">이동수업 교실 배치표</caption><thead><tr><th scope="col">블록 / 교시</th>'+rooms.map(r=>'<th scope="col">'+esc(r.label)+'</th>').join('')+'</tr></thead>'+bodies+'</table></div>';
  }
  function printTable(){
   const times=Math.max(3,...board.grades.flatMap(g=>g.blocks.map(b=>b.slots.length)));
