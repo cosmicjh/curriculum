@@ -544,5 +544,61 @@ try{
   await page.locator('[data-alloc=print]').click();
   await page.waitForFunction(()=>window.printCalls===1,undefined,{timeout:5000});
  });
+ await step('block periods stay on one line inside the sticky column at every layout width',async()=>{
+  const board=allocationFixture();
+  board.rooms=fullBoard.rooms;
+  const blocks=board.grades[0].blocks;
+  const slots=text=>text.split(' ').map(([day,period])=>({day,period:Number(period)}));
+  blocks[0].slots=slots('화2 수2 금3');
+  blocks.push(
+   {code:'B',slots:slots('화7 목3 금1'),cells:{}},
+   {code:'C',slots:slots('수3 금5'),cells:{}}
+  );
+  const fourPeriods={code:'D',slots:slots('월6 화5 수1 목7'),cells:{}};
+  const save=async()=>assert((await h.mutation('saveAllocation',{board},admin.cookie)).ok);
+  for(const role of ['admin','teacher']){
+   await page.locator('[data-action=logout]').click();await idle();
+   await save();
+   await page.setViewportSize({width:1920,height:1080});
+   await login(role);
+   for(const width of [1920,1100]){
+    await page.setViewportSize({width,height:1080});
+    const cellWidth=await page.locator('.allocation-table thead th').first().evaluate(el=>el.getBoundingClientRect().width);
+    assert(cellWidth<=73,`${role} ${width}px, three periods: ${cellWidth}px first column`);
+   }
+   blocks.push(fourPeriods);await save();blocks.pop();
+   await page.locator('[data-alloc=refresh]').click();
+   await page.locator('[data-allocation-block="D"] .allocation-times').waitFor();
+   for(const width of [1920,1100,1000,700,390]){
+    await page.setViewportSize({width,height:width===390?844:1080});
+    await page.evaluate(()=>document.fonts.ready);
+    const layouts=await page.locator('.allocation-times').evaluateAll(lists=>lists.map(list=>{
+     const cell=list.closest('th').getBoundingClientRect(),rect=list.getBoundingClientRect();
+     const label=list.parentElement,code=document.createRange();
+     code.selectNode(label.firstChild);
+     return {
+      text:list.textContent,
+      periods:list.children.length,
+      height:rect.height,
+      lineHeight:parseFloat(getComputedStyle(list).lineHeight),
+      inside:rect.left>=cell.left&&rect.right<=cell.right&&[...list.children].every(period=>{
+       const {left,right}=period.getBoundingClientRect();
+       return left>=cell.left&&right<=cell.right;
+      }),
+      belowCode:rect.top>=code.getBoundingClientRect().bottom,
+      buttonHeight:label.matches('button[data-alloc="block"]')?label.getBoundingClientRect().height:null
+     };
+    }));
+    assert.deepEqual(layouts.map(layout=>layout.periods),[3,3,2,4]);
+    for(const layout of layouts){
+     const label=`${role} ${width}px, ${layout.text}`;
+     assert(Math.abs(layout.height-layout.lineHeight)<1,label+' must fit on one line');
+     assert(layout.inside,label+' must stay inside the first column');
+     assert(layout.belowCode,label+' must appear below the block code');
+     if(role==='admin')assert(layout.buttonHeight>=(width<=640?44:32),label+' must retain the button target height');
+    }
+   }
+  }
+ });
  assert.deepEqual(errors,[]);await writeFile('test-results/allocation-browser.json',JSON.stringify({steps,errors},null,2));
 }finally{await browser?.close();await h.close();}

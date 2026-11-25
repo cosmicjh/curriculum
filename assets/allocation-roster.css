@@ -1,3 +1,7 @@
+.allocation-table tr>th:first-child{width:max(96px,calc(21px + 23px * var(--allocation-periods,3)))}
+.allocation-table tbody th button[data-alloc="block"]{flex-direction:column;gap:0;padding-inline:0}
+.allocation-times{width:max-content;margin-inline:auto;white-space:nowrap}
+.allocation-times .allocation-time{margin:0}
 .allocation-table td>strong:has(>.allocation-subject){padding-top:0}
 .allocation-table .allocation-subject{
  display:block;
@@ -34,7 +38,11 @@
 }
 
 @media(max-width:700px){
+ .allocation-table tr>th:first-child{width:max(68px,calc(11px + 21px * var(--allocation-periods,3)))}
  .allocation-table .allocation-subject{min-height:44px}
  .allocation-filters .allocation-consigned{min-height:44px}
  .allocation-count{margin:0 5px 2px;font-size:11px}
+}
+@media(min-width:1100px){
+ .allocation-table tr>th:first-child{width:max(72px,calc(7px + 21px * var(--allocation-periods,3)))}
 }
