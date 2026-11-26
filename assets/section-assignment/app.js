@@ -231,6 +231,50 @@ let isRunning=false, fileLoadToken=0, cancelActive=null;
 let lastRunSettings=null, resultIncomplete=[];
 let hoursExportResults=null;
 let lockedControls=[];
+let targetTerm,activeTerm,isSending=false,isLoadingCounts=false;
+const termSwitchBtn=document.getElementById('termSwitchBtn'),termDialog=document.getElementById('termDialog');
+const termYear=document.getElementById('termYear'),termSemester=document.getElementById('termSemester');
+const courseCountsBtn=document.getElementById('courseCountsBtn');
+const previewOnlyActive='학생 배정 미리보기는 통합시간표 운영 학기에서만 할 수 있습니다.';
+function updateTermControls(){
+  const complete=hoursExportResults&&resultIncomplete.includes(false);
+  const unavailable=isRunning||isSending||!targetTerm;
+  termSwitchBtn.disabled=unavailable;
+  courseCountsBtn.disabled=unavailable||isLoadingCounts;
+  document.getElementById('hoursExportBtn').disabled=isRunning||!complete;
+  document.getElementById('sendHoursBtn').disabled=unavailable||!complete;
+  document.getElementById('previewStudentsBtn').disabled=unavailable||!complete||targetTerm!==activeTerm;
+  document.getElementById('studentPreviewStatus').textContent=targetTerm&&targetTerm!==activeTerm?previewOnlyActive:'';
+}
+window.setSectionAssignmentTerms=terms=>{
+  if(terms.targetTerm!==targetTerm){
+    document.getElementById('courseCountsStatus').textContent='';
+    document.getElementById('hoursExportStatus').textContent='';
+  }
+  ({targetTerm,activeTerm}=terms);
+  const [year,semester]=targetTerm?.split('-')??[];
+  document.getElementById('targetTerm').textContent=targetTerm?year+'학년도 '+semester+'학기':'학기 확인 중…';
+  const platform=document.getElementById('assignmentPlatformTerm');
+  platform.textContent='통합시간표 '+activeTerm;
+  platform.hidden=!targetTerm||targetTerm===activeTerm;
+  updateTermControls();
+};
+window.setSectionAssignmentTerms(bridge.terms());
+termSwitchBtn.addEventListener('click',()=>{
+  if(termSwitchBtn.disabled)return;
+  [termYear.value,termSemester.value]=targetTerm.split('-');
+  document.getElementById('termError').textContent='';
+  termDialog.showModal();
+});
+document.getElementById('termCancelBtn').addEventListener('click',()=>termDialog.close());
+termDialog.querySelector('form').addEventListener('submit',event=>{
+  event.preventDefault();
+  if(termSwitchBtn.disabled)return;
+  try{
+    window.setSectionAssignmentTerms(bridge.setTerm(Number(termYear.value)+'-'+termSemester.value));
+    termDialog.close();
+  }catch(error){document.getElementById('termError').textContent=error.message;}
+});
 function invalidateResults() {
   resultIncomplete=[];hoursExportResults=null;
   document.getElementById("hoursExportCard").classList.add("hidden");
@@ -244,6 +288,7 @@ function setBusy(busy) {
   } else {
     for(const [el,disabled] of lockedControls) el.disabled=disabled;
     lockedControls=[];
+    updateTermControls();
   }
   document.getElementById('cancelBtn').disabled=!busy;
   document.getElementById('cancelBtn').classList.toggle('hidden',!busy);
@@ -1312,7 +1357,6 @@ runBtn.addEventListener('click', async () => {
   }
   const firstComplete=resultIncomplete.findIndex(v=>!v);
   candidateSelect.value=firstComplete<0?'':String(firstComplete);
-  for(const id of ['hoursExportBtn','sendHoursBtn','previewStudentsBtn'])document.getElementById(id).disabled=firstComplete<0;
   document.getElementById('hoursExportStatus').textContent=firstComplete<0?'미배정이 있어 내보낼 수 없습니다.':'';
   document.getElementById('hoursExportCard').classList.remove('hidden');
   } catch(err) {
@@ -1405,14 +1449,13 @@ function selectedCandidate(){
   return rank;
 }
 
-const courseCountsBtn=document.getElementById('courseCountsBtn');
 courseCountsBtn.addEventListener('click',async()=>{
-  if(!loadedData||isRunning)return;
-  const workbook=loadedData,status=document.getElementById('courseCountsStatus');
-  courseCountsBtn.disabled=true;
+  if(!loadedData||courseCountsBtn.disabled)return;
+  const workbook=loadedData,term=targetTerm,status=document.getElementById('courseCountsStatus');
+  isLoadingCounts=true;updateTermControls();
   try{
     const rows=await bridge.loadCourseSections();
-    if(workbook!==loadedData||isRunning)return;
+    if(workbook!==loadedData||term!==targetTerm||isRunning)return;
     const key=(grade,name)=>grade+'|'+name.normalize('NFKC').replace(/[\s_-]/g,'').toUpperCase();
     const counts=new Map();
     for(const row of rows){
@@ -1428,17 +1471,22 @@ courseCountsBtn.addEventListener('click',async()=>{
     for(const {sheet,course,count} of updates)sheet.courses[course]=count;
     invalidateResults();renderCourseConfig();
     status.textContent=updates.length+'개 과목의 분반 수를 불러왔습니다.';
-  }catch(error){status.textContent=error.message;}
-  finally{courseCountsBtn.disabled=false;}
+  }catch(error){if(term===targetTerm)status.textContent=error.message;}
+  finally{isLoadingCounts=false;updateTermControls();}
 });
 
-document.getElementById('sendHoursBtn').addEventListener('click',()=>{
-  try{bridge.importHours(buildHoursExport(loadedData.sheets,hoursExportResults,selectedCandidate()));}
+async function sendResult(send){
+  if(termSwitchBtn.disabled)return;
+  isSending=true;updateTermControls();
+  try{await send();}
   catch(error){document.getElementById('hoursExportStatus').textContent=error.message;}
-});
-
-document.getElementById('previewStudentsBtn').addEventListener('click',()=>{
-  try{
+  finally{isSending=false;updateTermControls();}
+}
+document.getElementById('sendHoursBtn').addEventListener('click',()=>sendResult(()=>
+  bridge.importHours(buildHoursExport(loadedData.sheets,hoursExportResults,selectedCandidate()))
+));
+document.getElementById('previewStudentsBtn').addEventListener('click',()=>sendResult(()=>{
+    if(targetTerm!==activeTerm)throw Error(previewOnlyActive);
     const rank=selectedCandidate();
     const students=loadedData.sheets.flatMap((sheet,si)=>{
       const candidates=hoursExportResults[si].topCandidates;
@@ -1454,13 +1502,12 @@ document.getElementById('previewStudentsBtn').addEventListener('click',()=>{
           choices:Object.fromEntries(student.selected.map((subject,j)=>[subject,labels[result.assignments[student.rowIndex][j]]]))};
       });
     });
-    bridge.previewStudents(students);
-  }catch(error){document.getElementById('hoursExportStatus').textContent=error.message;}
-});
+    return bridge.previewStudents(students);
+}));
 
 document.getElementById('cancelBtn').addEventListener('click',()=>{if(cancelActive)cancelActive();});
 document.addEventListener('change',e=>{
-  if(!isRunning && loadedData && e.target.matches('input,select') && !['fileInput','settingsFile','hoursCandidate'].includes(e.target.id))invalidateResults();
+  if(!isRunning && loadedData && e.target.matches('input,select') && !e.target.closest('#termDialog') && !['fileInput','settingsFile','hoursCandidate'].includes(e.target.id))invalidateResults();
 },true);
 document.addEventListener('click',e=>{
   if(!isRunning && loadedData && e.target.closest('.btn-remove-pair,.x,#addCreditPairBtn,#addBigsecBtn,#addAvoidBtn,#addTeacherBtn,#applyDefaultMaxBtn'))invalidateResults();

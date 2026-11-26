@@ -76,7 +76,13 @@ async function links(db,ctx,includeSections=true){const {store:st,rt}=await S.sc
 async function read(db,ctx,req){
  const a=req.action;
  if(a==='bootstrap')return S.meta(ctx);
- if(a==='courseTransfer')return readCourseTransfer(db,ctx.term,req.summary==='counts'?'counts':req.summary===true);
+ if(a==='courseTransfer'){
+  if(req.summary==='counts'){
+   if(req.term!==undefined&&!validTerm(req.term))throw Error('학년도와 학기를 확인하세요.');
+   return readCourseTransfer(db,req.term??ctx.term,'counts');
+  }
+  return readCourseTransfer(db,ctx.term,req.summary===true);
+ }
  if(a==='toolTransfer')return readToolTransfer(db,ctx.term,req.kind);
  if(a==='allocation'){
   const st=await S.load(db,ctx,['sections','allocation']);
@@ -203,8 +209,14 @@ async function mutate(db,env,ctx,session,req,headers){
   statements.push(db.prepare('INSERT INTO terms(id,settings) VALUES(?,?)',req.term,JSON.stringify(defaults)));
   target=req.term;result={term:req.term};historyOnly=true;
  }else if(action==='stageToolTransfer'){
-  if(req.term!==ctx.term)Auth.fail(409,'TERM_CHANGED','현재 학기를 다시 확인하세요.');
-  const prepared=prepareToolTransfer(db,ctx.term,req.kind,req.data);
+  if(req.kind==='hours'){
+   if(!validTerm(req.term))throw Error('학년도와 학기를 확인하세요.');
+   if(req.term!==ctx.term){
+    const defaults=newTermSettings(ctx.settings,req.term);
+    statements.push(db.prepare('INSERT OR IGNORE INTO terms(id,settings) VALUES(?,?)',req.term,JSON.stringify(defaults)));
+   }
+  }else if(req.term!==ctx.term)Auth.fail(409,'TERM_CHANGED','현재 학기를 다시 확인하세요.');
+  const prepared=prepareToolTransfer(db,req.term,req.kind,req.data);
   statements.push(prepared.statement);result=prepared.result;
   target=req.kind;after=result;historyOnly=true;
  }else if(action==='switchTerm'){

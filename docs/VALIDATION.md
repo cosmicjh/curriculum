@@ -62,6 +62,44 @@ Windows, Node.js 24.22.1, pnpm 11.25.0, Miniflare 4.20260730.0, Wrangler 4.154.0
 
 통합 시험은 Miniflare의 실제 D1 SQLite 바인딩을 사용합니다. 별도 테스트 Worker의 SQL 통로는 tests/worker.mjs에만 있으며 배포 entry에는 포함되지 않습니다. Wrangler 검증은 매 실행마다 새 persist 디렉터리의 로컬 D1을 생성합니다. 운영 DB에는 테스트 SQL을 실행하지 않습니다.
 
+### 분반배정 대상 학기 전환 · 2026-11-26
+
+독립 검토 수정 후 Node.js 24.22.1과 Edge에서 `test:all`의 구성 명령을 저장소에서 다시 실행했다.
+
+| 실행 명령 | 종료 코드 | 통과 / 실패 |
+| --- | --- | --- |
+| `node --test --test-concurrency=1 tests/*.test.mjs modules/allocation/tests/*.test.mjs` | 0 | 190 / 0 |
+| `node tests/browser.mjs` | 0 | 10 / 0 |
+| `node tests/solver-browser.mjs` | 0 | 1 스위트 / 0 |
+| `node tests/browser-solver.mjs` | 0 | 1 스위트 / 0 |
+| `node modules/allocation/tests/browser.mjs` | 0 | 10 / 0 |
+| `node modules/allocation/tests/term-switch-browser.mjs` | 0 | 6 / 0 |
+| `node tests/section-assignment-browser.mjs` | 0 | 8 시나리오 그룹 / 0 |
+| `node tests/pages-browser.mjs` | 0 | 12 / 0 |
+| `tests/wrangler.mjs`의 Wrangler 로컬 시험 | 0 | 3 / 0 |
+| `node tests/teacher-tools-browser.mjs` | 0 | 9 / 0 |
+| `node tests/allocation-browser.mjs` | 0 | 23 / 0 |
+| `node tests/studyroom-browser.mjs` | 0 | 13 / 0 |
+| `node tests/ui-browser.mjs` | 0 | 38 / 0 |
+| `node tests/course-migration.mjs` | 0 | 1 리허설 / 0 |
+
+- `hours can create a future term without switching the operating term or widening student access`는 2027-1 신규 생성·전달, 2026-2 운영 학기와 리비전 유지, 시수배당 전환 후 수신, 잘못된 학기·다른 학기 학생·교사 요청 거부, 운영 학기와 리비전 쓰기 가드를 확인한다.
+- `courseTransfer counts use the requested term and default to the operating term`은 지정·생략 학기 조회, 잘못된 학기와 교사 요청 거부, 기존 전체 전송 조회 범위를 확인한다.
+- `section assignment defaults to allocation term and shows only a differing operating term`은 시수배당 기본 학기와 운영 학기 차이 표시를 확인한다. 전환 창은 1440px와 390px에서 확인했다.
+- `selected section assignment term persists across menus and restricts student preview`는 2027-1 선택 유지, 학생 미리보기 비활성화와 이유를 확인한다.
+- `section assignment uses the selected term for counts and hours, and locks switching while working`은 2027-1 분반 수 조회와 전송, 시수배당 학기가 다를 때 안내, 계산·전송 중 전환 차단을 확인한다.
+- `section assignment resets on refresh and logout and falls back for unavailable allocation`은 새로고침·로그아웃 시 선택 초기화, 시수배당을 읽지 못할 때 운영 학기 사용을 확인한다.
+- Wrangler 검증은 `tests/wrangler.mjs`의 시험 코드를 `node --input-type=module`로 실행하면서 자식 Wrangler 명령에 시험 전용 빈 `--env-file`을 지정했다. 새 로컬 D1 마이그레이션, 배포 건식 실행, 로컬 Worker 라우팅이 통과했다.
+- 솔버 시험은 로그인 시 분반배정이 보내는 관리자 `/term` GET을 최대 한 건 허용한다. 나머지는 기존 관리자 `/workspace` GET과 `all: true` 검사를 적용한다.
+
+독립 검토 후에는 분반배정 iframe이 마운트될 때와 표시될 때 호스트의 최신 학기를 사용하게 했다. 학기 확인 중에는 전환·분반 수 조회·시수 전송·학생 미리보기를 잠그고 파일 선택과 계산은 허용한다. 현재 세션의 `AUTH_REQUIRED`는 공통 재로그인 처리로 이어지고 로그아웃 전 요청의 늦은 응답은 호스트에서 버린다. Pages 전송 계층은 실패한 요청에 사용한 세션이 현재 메모리 세션일 때 인증 오류를 반영한다.
+
+- `a slow term lookup leaves admin navigation, file selection and calculation usable`은 `/term`을 지연시켜 관리자 메뉴 이동, 파일 선택, 배정 계산, 학기 의존 기능 잠금과 기본값 반영을 확인한다.
+- `delayed section assignment mount and later displays use the latest operating term`은 iframe 모듈을 지연시킨 상태에서 운영 학기를 바꾼 뒤 복귀해 차이 표시와 학생 미리보기 활성 여부를 확인한다.
+- `section assignment term authentication failure reopens the shared login`은 동일 출처의 `/term` 인증 오류가 공통 로그인으로 이어지는지 확인한다.
+- `a late Pages term AUTH_REQUIRED leaves the new admin session intact`와 `a current Pages term AUTH_REQUIRED clears the session and reopens login`은 교차 출처에서 실제 로컬 세션을 폐기하고 늦은 오류와 현재 오류를 구분하는지 확인한다.
+- 학기 전환 스타일은 `assets/section-assignment/view.html`에 유지했다. 기존 `style.css`의 정규화 SHA-256을 검증 계약이 고정한다.
+
 ## 기능·보안 시나리오
 
 - 익명 설정 조회·학생 한 명 조회, 전체 학생/다른 학생 미노출, 교사/관리자 접근 경계, 다른 출처·출처 없는 변경 거부, API no-store.

@@ -8,10 +8,49 @@
 <link rel="stylesheet" href="../assets/ui.css">
 <link rel="stylesheet" href="../assets/font.css">
 <link rel="stylesheet" href="style.css">
+<style>
+  .assignment-term { display:flex; flex-wrap:wrap; align-items:center; gap:0 8px; padding:4px 24px; }
+  .assignment-term span { color:var(--ui-ink-2); font-size:13px; }
+  #termDialog { inset:8px 0 auto; margin:0 auto; width:min(360px,calc(100% - 32px)); padding:16px;
+    border:1px solid var(--ui-line-strong); border-radius:var(--ui-radius); background:var(--ui-paper); color:var(--ui-ink); }
+  #termDialog::backdrop { background:#0005; }
+  #termDialog h2 { margin:0 0 12px; font-size:15px; }
+  .term-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .term-fields label { display:block; margin-bottom:4px; }
+  .term-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+  @media(max-width:820px) { .assignment-term { padding-inline:20px; } }
+  @media(max-width:560px) { .assignment-term { padding-inline:16px; } }
+</style>
 </head>
 <body>
 <p id="access" role="status">관리자 메뉴에서 분반배정을 열어 주세요.</p>
-<main hidden><div class="card">
+<main hidden>
+<div class="assignment-term">
+  <strong id="targetTerm" aria-label="대상 학기" role="status"></strong>
+  <button type="button" id="termSwitchBtn" aria-haspopup="dialog">학기 전환</button>
+  <span id="assignmentPlatformTerm" hidden></span>
+</div>
+<dialog id="termDialog" aria-labelledby="termDialogTitle">
+  <form>
+    <h2 id="termDialogTitle">학기 전환</h2>
+    <div class="term-fields">
+      <div>
+        <label for="termYear">학년도</label>
+        <input id="termYear" type="number" min="2020" max="2100" required autofocus>
+      </div>
+      <div>
+        <label for="termSemester">학기</label>
+        <select id="termSemester"><option value="1">1학기</option><option value="2">2학기</option></select>
+      </div>
+    </div>
+    <p class="desc" id="termError" role="alert"></p>
+    <div class="term-actions">
+      <button type="button" id="termCancelBtn">취소</button>
+      <button type="submit" class="primary">전환</button>
+    </div>
+  </form>
+</dialog>
+<div class="card">
   <h2>수강신청 파일</h2>
 
   <div class="file-area" id="fileArea">
@@ -137,7 +176,8 @@
 <label for="hoursCandidate">결과 후보</label><select id="hoursCandidate"></select>
 <button class="btn" id="hoursExportBtn" type="button" style="margin-top:10px">JSON 다운로드</button>
 <button class="btn secondary" id="sendHoursBtn" type="button">시수배당으로 보내기</button>
-<button class="btn secondary" id="previewStudentsBtn" type="button">학생 배정 미리보기</button>
+<button class="btn secondary" id="previewStudentsBtn" type="button" aria-describedby="studentPreviewStatus">학생 배정 미리보기</button>
+<p class="desc" id="studentPreviewStatus" role="status"></p>
 <p class="desc" id="hoursExportStatus" role="status"></p>
 </div></main>
 <script type="module">

@@ -58,7 +58,9 @@ try{
  await page.locator('[data-action=refresh-admin]').click();await idle();assert(await button.isDisabled());
  assert.match(await page.locator('[aria-label="내보내기 오류"]').innerText(),/가상 조회 실패/);
  await page.unroute('**/api/courseWorkspace');
- assert(requests.filter(r=>r.action==='courseWorkspace').every(r=>r.body.role==='admin'&&r.body.path==='/workspace'&&r.body.method==='GET'&&r.body.data.all===true));
+ const workspaceReads=requests.filter(r=>r.action==='courseWorkspace').map(r=>r.body);
+ assert(workspaceReads.filter(r=>r.path==='/term').length<=1);
+ assert(workspaceReads.every(r=>r.role==='admin'&&r.method==='GET'&&(r.path==='/term'||r.path==='/workspace'&&r.data.all===true)));
  for(const role of ['teacher','student']){
   await page.locator('[data-action=logout]').click();await idle();await page.goto(base+'/'+role+'.html');await idle();
   if(role==='teacher')await page.locator('#password').fill('1234');else await page.locator('#login-student-number').fill('30101');

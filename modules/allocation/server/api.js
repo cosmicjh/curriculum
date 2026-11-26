@@ -138,8 +138,8 @@ export async function courseRequest(db,session,path,method,data,sendTransfer,rec
     if(method==='POST')return switchTerm(s,data.term,session,now);
     if(method==='GET'){
       requireAdmin(session);
-      const [platform,archives]=await s.batch([[activeTermSql],["SELECT term FROM ca_term_archives WHERE sheet_id='' ORDER BY term DESC"]]);
-      return {activeTerm:platform[0]?.active_term??null,archivedTerms:archives.map(row=>row.term)};
+      const [platform,archives,workspace]=await s.batch([[activeTermSql],["SELECT term FROM ca_term_archives WHERE sheet_id='' ORDER BY term DESC"],['SELECT payload FROM ca_workspace WHERE id=1']]);
+      return {term:termOf(JSON.parse(workspace[0].payload)),activeTerm:platform[0]?.active_term??null,archivedTerms:archives.map(row=>row.term)};
     }
   }
   if(method==='GET'&&path==='/assignment-hours'){

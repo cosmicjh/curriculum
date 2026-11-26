@@ -9,7 +9,7 @@ import '../scripts/build-pages.mjs';
 // Reserved test hosts only. Every browser request is fulfilled locally or aborted.
 const pages='https://timetable-pages.test',api='https://timetable-api.test',h=await harness({frontendOrigin:pages,course:true});
 const cookieAdmin=await h.login();assert((await h.mutation('restore',{backup:backup()},cookieAdmin.cookie)).ok);
-let browser,bootstrapGate;const errors=[],requests=[],steps=[];await mkdir('test-results',{recursive:true});
+let browser,bootstrapGate,beforeCourseTerm;const errors=[],requests=[],steps=[];await mkdir('test-results',{recursive:true});
 async function step(name,fn){await fn();steps.push(name);console.log('PASS '+name);}
 try{
  browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'msedge'}:{})});
@@ -26,6 +26,13 @@ try{
   if(url.origin===api&&url.pathname.startsWith('/api/')){
    if(url.pathname==='/api/bootstrap'&&bootstrapGate)await bootstrapGate;
    assert.equal(req.headers().cookie,undefined);requests.push({action:url.pathname.slice(5),method:req.method(),origin:req.headers().origin,authorized:Boolean(req.headers().authorization)});
+   if(beforeCourseTerm&&url.pathname==='/api/courseWorkspace'&&req.method()==='POST'){
+    const call=req.postDataJSON();
+    if(call.path==='/term'&&call.method==='GET'){
+     const before=beforeCourseTerm;beforeCourseTerm=null;
+     await before(req);
+    }
+   }
    const response=await h.mf.dispatchFetch(req.url(),{method:req.method(),headers:req.headers(),...(['GET','OPTIONS'].includes(req.method())?{}:{body:req.postData()||'{}'})});
    return route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:Buffer.from(await response.arrayBuffer())});
   }
@@ -163,6 +170,40 @@ try{
  });
  await step('refresh requires a new login and logout revokes the in-memory Pages session',async()=>{
   await page.reload();await idle();await page.locator('#password').waitFor();assert.equal(await page.locator('[data-action=new-student]').count(),0);await login();await page.locator('[data-action=logout]').click();await page.locator('#login-role').waitFor();await idle();assert.equal(await page.evaluate(()=>TTApi.hasSession('admin')),false);await page.locator('#login-role').selectOption('admin');
+ });
+ await step('a late Pages term AUTH_REQUIRED leaves the new admin session intact',async()=>{
+  const staleTerm=Promise.withResolvers(),termStarted=Promise.withResolvers();
+  beforeCourseTerm=()=>{termStarted.resolve();return staleTerm.promise;};
+  try{
+   await login();await termStarted.promise;
+   await page.locator('[data-action=logout]').click();await idle();
+   await page.locator('#login-role').selectOption('admin');await login();
+   const term=page.frameLocator('#section-assignment-pane iframe').locator('#targetTerm');
+   await term.filter({hasText:'2026학년도 1학기'}).waitFor({state:'attached'});
+   const completed=await page.evaluate(()=>TIMETABLE_PERF.filter(r=>r.action==='courseWorkspace').length);
+   const rejected=page.waitForResponse(response=>response.url()===api+'/api/courseWorkspace'&&response.status()===401);
+   staleTerm.resolve();
+   assert.equal((await (await rejected).json()).code,'AUTH_REQUIRED');
+   await page.waitForFunction(count=>TIMETABLE_PERF.filter(r=>r.action==='courseWorkspace').length>count,completed);
+   assert(await page.evaluate(()=>TTApi.hasSession('admin')));
+   assert(await page.locator('#student-table').isVisible());
+   assert.equal(await page.evaluate(async()=>(await TTApi.request('adminBootstrap',{workspaceOnly:true})).store.term),'2026-2');
+  }finally{staleTerm.resolve();}
+ });
+ await step('a current Pages term AUTH_REQUIRED clears the session and reopens login',async()=>{
+  await page.locator('[data-action=logout]').click();await idle();
+  await page.locator('#login-role').selectOption('admin');
+  beforeCourseTerm=async req=>{
+   const revoked=await h.mf.dispatchFetch(api+'/api/logout',{method:'POST',headers:req.headers(),body:'{}'});
+   assert(revoked.ok);
+  };
+  const rejected=page.waitForResponse(response=>response.url()===api+'/api/courseWorkspace'&&response.status()===401);
+  await page.locator('#password').fill('1234');
+  await page.locator('form[data-form=login] button').click();
+  assert.equal((await (await rejected).json()).code,'AUTH_REQUIRED');
+  await page.waitForFunction(()=>!TTApi.hasSession('admin')&&sessionStorage.getItem('timetable.admin')===null);
+  assert.equal(await page.locator('#login-role').inputValue(),'admin');
+  assert(await page.locator('#sidebar').isHidden());
  });
  await step('Separate password buttons select the intended role and preserve unsaved settings',async()=>{
   await login();await clickMenu(page,page.locator('[data-action=admin-tab]').filter({hasText:'설정',exact:true}));await idle();

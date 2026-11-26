@@ -19,7 +19,7 @@ test('integrated allocation uses the existing workspace, role, and independent t
  const start=await request(admin,'admin');
  assert(start.ok);assert.equal(start.data.admin,true);assert.equal(start.data.global.school.semester,1);
  assert.equal(start.data.activeTerm,'2026-2');
- assert.deepEqual((await request(admin,'admin','/term')).data,{activeTerm:'2026-2',archivedTerms:[]});
+ assert.deepEqual((await request(admin,'admin','/term')).data,{term:'2026-1',activeTerm:'2026-2',archivedTerms:[]});
  assert.equal(start.data.departments.length,2);assert.equal(start.data.parts[0].teachers[0].name,'가상교사1');
  assert.equal((await request(admin,'admin','/auth/password','POST')).status,404);
  assert((await h.mutation('saveSettings',{settings:{...Core.defaultSettings(),courseAllocationTeachers:true}},admin)).ok);
@@ -34,20 +34,38 @@ test('integrated allocation uses the existing workspace, role, and independent t
  assert.deepEqual((await request(teacher,'teacher','/sheets/d1','PUT',save)).data,saved.data);
  assert((await request(admin,'admin','/term','POST',{term:'2027-1'})).ok);
  assert.equal((await request(admin,'admin')).data.global.school.year,2027);
- assert.deepEqual((await request(admin,'admin','/term')).data,{activeTerm:'2026-2',archivedTerms:['2026-1']});
+ assert.deepEqual((await request(admin,'admin','/term')).data,{term:'2027-1',activeTerm:'2026-2',archivedTerms:['2026-1']});
  assert((await request(admin,'admin','/term','POST',{term:'2026-1'})).ok);
  assert.equal((await request(admin,'admin')).data.parts[0].teachers[0].name,'가상교사수정');
  await h.sql("UPDATE ca_sheets SET payload=json_set(payload,'$.department.status','locked') WHERE id='d1'");
  const sent=await request(admin,'admin','/timetable-transfer','POST',{term:'2026-1'});
  assert.deepEqual(sent.data,{term:'2026-1',sections:1});
  assert.equal((await h.api('bootstrap')).data.term,'2026-2');
- assert((await h.mutation('switchTerm',{term:'2026-1'},admin)).ok);
+ await t.test('courseTransfer counts use the requested term and default to the operating term',async()=>{
+  const counts=(data={},cookie=admin)=>h.api('courseTransfer',{summary:'counts',...data},cookie);
+  const otherTerm=await counts({term:'2026-1'});assert(otherTerm.ok,otherTerm.error);
+  assert.equal(otherTerm.data.length,1);assert.equal(otherTerm.data[0].count,1);
+  assert.deepEqual((await counts()).data,[]);
+  assert.equal((await counts({term:'2027-3'})).status,400);
+  assert.equal((await counts({term:null})).status,400);
+  assert.equal((await counts({term:'2026-1'},teacher)).status,401);
+  assert.equal((await h.api('courseTransfer',{term:'2026-1'},admin)).data,null);
+  assert((await h.mutation('switchTerm',{term:'2026-1'},admin)).ok);
+  assert.deepEqual((await counts()).data,otherTerm.data);
+ });
  assert.equal((await h.api('courseTransfer',{},admin)).data.transfer.sections[0].teachers[0].name,'가상교사수정');
  assert.equal((await request(teacher,'teacher')).code,'COURSE_CLOSED');
  assert.equal((await request(admin,'admin')).data.admin,true);
  await h.api('logout',{},admin);
  assert.equal((await request(admin,'admin')).status,401);
 });
+const hours={format:'school-course-hours',schemaVersion:1,hoursUnit:'weekly-periods',includesStudentData:false,sheets:[{
+ sheetId:'grade3',sourceSheetName:'3학년',grade:3,students:['전달에서 제외할 이름'],
+ validation:{complete:true,hardConstraintsPassed:true,coupledCohortsPassed:true},coupledCohorts:[],
+ courses:[{courseId:'science',courseName:'가상과학',credits:3,weeklyHours:3,sectionCount:1,totalWeeklyHours:3,
+  sections:[{sectionId:'science-a',sectionCode:'A',timeBlock:'A',weeklyHours:3}]}]
+}]};
+
 test('school terms and staged transfers are admin-only, isolated, and versioned',async t=>{
  const h=await harness({course:true});t.after(()=>h.close());
  const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
@@ -68,12 +86,6 @@ test('school terms and staged transfers are admin-only, isolated, and versioned'
  assert.equal((await h.api('previewImport',{transferRef},admin)).data.changedStudents,1);
  assert((await stage(rows)).ok);
  assert.equal((await h.mutation('commitImport',{transferRef},admin)).code,'TRANSFER_CHANGED');
- const hours={format:'school-course-hours',schemaVersion:1,hoursUnit:'weekly-periods',includesStudentData:false,sheets:[{
-  sheetId:'grade3',sourceSheetName:'3학년',grade:3,students:['전달에서 제외할 이름'],
-  validation:{complete:true,hardConstraintsPassed:true,coupledCohortsPassed:true},coupledCohorts:[],
-  courses:[{courseId:'science',courseName:'가상과학',credits:3,weeklyHours:3,sectionCount:1,totalWeeklyHours:3,
-   sections:[{sectionId:'science-a',sectionCode:'A',timeBlock:'A',weeklyHours:3}]}]
- }]};
  assert((await h.mutation('stageToolTransfer',{term:'2026-2',kind:'hours',data:hours},admin)).ok);
  const receive=(role,cookie,data={})=>h.api('courseWorkspace',{role,path:'/assignment-hours',method:'GET',data},cookie);
  assert.equal((await receive('admin',admin,{term:'2026-2'})).code,'term_mismatch');
@@ -86,6 +98,37 @@ test('school terms and staged transfers are admin-only, isolated, and versioned'
  assert((await h.mutation('switchTerm',{term:'2027-1'},admin)).ok);
  assert.equal((await h.api('toolTransfer',{kind:'students'},admin)).data,null);
  assert.equal((await stage(rows)).code,'TERM_CHANGED');
+});
+
+test('hours can create a future term without switching the operating term or widening student access',async t=>{
+ const h=await harness({course:true});t.after(()=>h.close());
+ const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
+ const term='2027-1',operating='2026-2';
+ const stage=(args={},cookie=admin)=>h.mutation('stageToolTransfer',{term,kind:'hours',data:hours,...args},cookie);
+ const students={kind:'students',data:[{grade:'3',classNum:'1',number:'1',name:'가상학생하나',choices:{가상선택:'A1'}}]};
+ assert.equal((await stage({},teacher)).status,401);
+ assert.equal((await stage(students,teacher)).status,401);
+ assert.equal((await stage(students)).code,'TERM_CHANGED');
+ assert.equal((await stage({term:'2027-3'})).status,400);
+ assert.equal((await stage({data:{}})).status,400);
+ assert.equal((await stage({viewTerm:term})).code,'TERM_CHANGED');
+ assert.equal((await stage({expectedTerm:term})).code,'CONFLICT');
+ assert.equal((await stage({expectedRevision:'-1'})).code,'CONFLICT');
+ assert.deepEqual((await h.api('adminSettings',{},admin)).data.terms,[operating]);
+ const before=(await h.api('bootstrap')).data;
+ const saved=await stage();assert(saved.ok,saved.error);
+ assert.equal(saved.data.result.term,term);
+ assert.deepEqual((await h.api('adminSettings',{},admin)).data.terms,[term,operating]);
+ const after=(await h.api('bootstrap')).data;
+ assert.equal(after.term,operating);assert.equal(after.revision,before.revision);
+ assert.equal((await h.api('toolTransfer',{kind:'hours'},admin)).data,null);
+ const course=(path,method='GET',data={})=>h.api('courseWorkspace',{role:'admin',path,method,data},admin);
+ assert.equal((await course('/assignment-hours','GET',{term})).code,'term_mismatch');
+ assert((await course('/term','POST',{term})).ok);
+ const received=await course('/assignment-hours');
+ assert(received.ok,received.error);assert.equal(received.data.term,term);
+ assert.equal(received.data.id,saved.data.result.id);
+ assert.equal(received.data.data.sheets[0].year,2027);assert.equal(received.data.data.sheets[0].semester,1);
 });
 
 test('Workers + actual local D1: authorization, migration, edits, term isolation, backup, concurrent writes',async t=>{
