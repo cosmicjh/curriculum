@@ -14,6 +14,7 @@ try{
  page.on('pageerror',e=>errors.push(e.message));await context.route('**/*',r=>new URL(r.request().url()).origin===url?r.continue():r.abort());
  const button=a=>page.locator('[data-action="'+a+'"]');
  const idle=()=>page.waitForFunction(()=>document.body.dataset.loading==='false');
+ const waitForFocus=locator=>locator.and(page.locator(':focus')).waitFor({timeout:3000});
  async function login(){await page.goto(url+'/admin.html');await idle();await page.locator('#password').fill('1234');await page.locator('form[data-form=login] button').click();await clickMenu(page,page.locator('.admin-nav [data-tab=students]'));await page.locator('[data-action=new-student]').waitFor();await idle();}
  await step('student/mobile timetable, shared Pretendard, same-origin requests',async()=>{
   await page.goto(url+'/student.html');await idle();assert(await page.locator('#password').isHidden());await page.locator('#login-student-number').fill('30101');await page.locator('form[data-form=login] button').click();await page.locator('.tt').waitFor();await idle();
@@ -91,10 +92,9 @@ try{
   const countRequest=request=>{if(new URL(request.url()).pathname==='/api/deleteStudent')requests++;};
   page.on('request',countRequest);
   const confirmation=page.getByRole('dialog',{name:'학생 삭제'}),cancel=button('cancel-student-delete'),remove=button('delete-student');
-  const focused=el=>el.evaluate(node=>node===document.activeElement);
   await opener.press('Enter');await confirmation.waitFor();
   assert.equal(await confirmation.locator('p').textContent(),'30952 '+name+' · 재학 · 수강 2과목');
-  assert(await focused(cancel));
+  await waitForFocus(cancel);
   assert(await confirmation.evaluate(el=>el.scrollWidth<=el.clientWidth&&el.getBoundingClientRect().width<=innerWidth&&document.documentElement.scrollWidth<=innerWidth));
   for(const control of [opener,cancel,remove])assert(await control.evaluate(el=>{
    const style=getComputedStyle(el);
@@ -102,23 +102,23 @@ try{
   }));
   await confirmation.screenshot({path:'test-results/student-delete-mobile.png'});
   await page.keyboard.press('Enter');await confirmation.waitFor({state:'hidden'});
-  assert(await focused(opener));assert(await modal.isVisible());
+  await waitForFocus(opener);assert(await modal.isVisible());
   assert.equal(await page.locator('#edit-name').inputValue(),'미저장 이름');
   assert.match(await row.textContent(),new RegExp(name));
   assert.equal(requests,0);
   await page.keyboard.press('Enter');await confirmation.waitFor();
   await page.keyboard.press('Escape');await confirmation.waitFor({state:'hidden'});
-  assert(await focused(opener));assert.equal(requests,0);
+  await waitForFocus(opener);assert.equal(requests,0);
 
   await page.keyboard.press('Enter');await confirmation.waitFor();
-  await page.keyboard.press('Tab');assert(await focused(remove));
+  await page.keyboard.press('Tab');await waitForFocus(remove);
   await page.keyboard.press('Enter');await modal.waitFor({state:'hidden'});await idle();
   assert.equal(requests,1);page.off('request',countRequest);
   assert.equal(await row.count(),0);
   assert.equal(await pager.textContent(),'2 / 2');
   assert.equal(await button('edit-student').count(),1);
   for(const [id,value] of Object.entries(filters))assert.equal(await page.locator('#'+id).inputValue(),value);
-  assert(await focused(page.locator('#filter-search')));
+  await waitForFocus(page.locator('#filter-search'));
   assert.equal(await page.locator('#toast').textContent(),'삭제했습니다.');
   await page.setViewportSize({width:1440,height:1000});
  });
@@ -206,7 +206,7 @@ try{
    for(const [id,value] of Object.entries({'filter-grade':'3','filter-class':'9','filter-status':'재학','filter-search':'가상삭제'})){
     assert.equal(await page.locator('#'+id).inputValue(),value);
    }
-   assert(await page.locator('#filter-search').evaluate(el=>el===document.activeElement));
+   await waitForFocus(page.locator('#filter-search'));
    assert.equal(await page.locator('#toast').textContent(),refreshFails?'삭제했습니다. 학생 목록을 새로고침해 주세요.':'삭제했습니다.');
    if(refreshFails){await button('refresh-admin').click();await idle();}
   }
@@ -229,10 +229,13 @@ try{
   assert.equal((await conflict).status(),409);
   assert.equal((await (await conflict).json()).code,'CONFLICT');
   assert.equal((await probe).status(),200);
-  const alertFits=()=>alert.evaluate(el=>{
-   const bounds=el.getBoundingClientRect(),dialog=el.closest('dialog').getBoundingClientRect();
-   return el===document.activeElement&&bounds.top>=Math.max(0,dialog.top)&&bounds.bottom<=Math.min(innerHeight,dialog.bottom)&&bounds.right<=innerWidth;
-  });
+  async function alertFits(){
+   await waitForFocus(alert);
+   return alert.evaluate(el=>{
+    const bounds=el.getBoundingClientRect(),dialog=el.closest('dialog').getBoundingClientRect();
+    return bounds.top>=Math.max(0,dialog.top)&&bounds.bottom<=Math.min(innerHeight,dialog.bottom)&&bounds.right<=innerWidth;
+   });
+  }
   assert.match(await alert.textContent(),/자료가 변경되었습니다. 학생 목록을 새로고침한 뒤 다시 열어 주세요/);
   assert(await alertFits());
   await page.screenshot({path:'test-results/student-delete-error-mobile.png'});
@@ -250,6 +253,7 @@ try{
   assert(await alertFits());
   assert(await button('delete-student').isHidden());
   await button('cancel-student-delete').press('Enter');await confirmation.waitFor({state:'hidden'});
+  await waitForFocus(button('open-student-delete'));
   assert.equal(await page.locator('#edit-name').inputValue(),'삭제 오류 시 보존할 입력');
   assert.equal(await row.count(),1);
   await page.keyboard.press('Escape');await page.locator('#modal').waitFor({state:'hidden'});
@@ -261,8 +265,7 @@ try{
   for(const close of [()=>page.keyboard.press('Escape'),()=>modal.getByRole('button',{name:'취소',exact:true}).press('Enter')]){
    await name.press('Enter');await modal.waitFor();await idle();
    await close();await modal.waitFor({state:'hidden'});
-   await page.waitForFunction(()=>document.activeElement.textContent==='가상삭제 53');
-   assert(await name.evaluate(el=>el===document.activeElement));
+   await waitForFocus(name);
   }
   const id=await row.getAttribute('data-id');
   await name.evaluate(el=>el.remove());

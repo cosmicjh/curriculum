@@ -424,12 +424,15 @@
       if(!modal.open&&opener?.isConnected)opener.focus({preventScroll:true});
     },{once:true});
   }
-  function confirmStudentDelete(){
+  function confirmStudentDelete(opener){
     const s=state.editingStudent;
     modal.insertAdjacentHTML('beforeend','<dialog id="student-delete-confirmation" style="width:420px" aria-labelledby="student-delete-title" aria-describedby="student-delete-details"><h2 id="student-delete-title">학생 삭제</h2><div role="alert" class="error" style="overflow-wrap:anywhere" tabindex="-1" hidden></div><p id="student-delete-details" style="overflow-wrap:anywhere">'+esc(studentNo(s)+' '+s.name+' · '+s.status+' · 수강 '+countStudentChoices(s)+'과목')+'</p><div class="form-footer"><button type="button" data-action="cancel-student-delete" autofocus>취소</button><button type="button" class="primary" data-action="delete-student">삭제</button></div></dialog>');
-    const dialog=$('#student-delete-confirmation');
+    const dialog=modal.lastElementChild;
     dialog.addEventListener('cancel',e=>{if(busyCount)e.preventDefault();});
-    dialog.addEventListener('close',()=>dialog.remove(),{once:true});
+    dialog.addEventListener('close',()=>{
+      dialog.remove();
+      if(modal.open&&opener.isConnected)opener.focus({preventScroll:true});
+    },{once:true});
     dialog.showModal();
   }
   async function studentExistsAfterDelete(id){
@@ -645,7 +648,7 @@
       case 'import-example':await downloadImportExample(el.dataset.kind,el.dataset.format);break;
       case 'new-student':await editStudent('',el);break;
       case 'edit-student':await editStudent(el.dataset.id,el.querySelector('button'));break;
-      case 'open-student-delete':confirmStudentDelete();break;
+      case 'open-student-delete':confirmStudentDelete(el);break;
       case 'cancel-student-delete':el.closest('dialog').close();break;
       case 'delete-student':{
         const id=state.editingStudent.id,dialog=el.closest('dialog'),alert=dialog.querySelector('[role=alert]');

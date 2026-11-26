@@ -184,3 +184,27 @@ Windows의 Node.js 24.22.1과 가상 자료를 사용했다. 실행 환경에 pn
 브라우저 건수는 스크립트가 출력한 통과 항목 수로 집계했다. 공유 UI는 화면 점검 38건, 이관은 전체 리허설 1건이다. Worker 시험은 `node --input-type=module -e`로 `tests/wrangler.mjs`를 불러와 세 Wrangler 자식 명령에 빈 환경 파일을 `--env-file test-results/student-delete-recovery-verification/empty.env`로 전달했다.
 
 2차 재검토의 실행 목록과 원시 로그는 `test-results/student-delete-recovery-verification/`에 있다. `test-results/student-delete-mobile.png`의 390px 확인 창과 `test-results/student-delete-error-mobile.png`의 390×240 오류 상태를 육안으로 확인했다. 운영 원격 환경과 실제 모바일 기기는 미검증이며 병합 전 재검토가 남아 있다. 삭제 전 학생 정보는 승인 설계에 따라 변경 이력에 남는다.
+
+### CI의 학생 삭제 확인 창 초점 복귀
+
+- Ubuntu CI에서 `tests/browser.mjs:111`의 Escape 후 삭제 버튼 초점 단언이 실패했다. 당시 확인 창은 브라우저의 기본 초점 복귀에 의존했다. 닫힘 이벤트의 정리가 끝나기 전에 다시 열면 같은 ID를 가진 이전 창을 선택할 수도 있었다. [GitHub Actions 실행](https://github.com/cosmicjh/curriculum/actions/runs/45747047981/job/139665526059)
+- 확인 창의 닫힘 이벤트는 수정 창이 열려 있고 원래 삭제 버튼이 DOM에 연결된 경우 그 버튼에 초점을 돌려준다. 새로 삽입한 확인 창에 이벤트를 연결한다. 수정 창은 기존에도 닫힘 이벤트에서 이름 버튼에 초점을 돌려준다.
+- 브라우저 시험은 동일한 버튼에 최대 3초 안에 초점이 돌아오는지 확인한다. Escape·취소, 확인 창 오류 후 취소, 수정 창 닫힘, 삭제 성공 후 검색 칸 초점을 검사한다.
+
+`node_modules/.bin/playwright.cmd install chromium`은 종료 코드 0으로 기본 Chromium을 로컬 캐시에 설치했다. Windows의 `tests/browser.mjs`가 Edge 채널을 지정하므로, 아래 코드를 저장소에서 표준 입력으로 `node --input-type=module`에 전달해 테스트 프로세스에서만 채널 지정을 제거했다. Chromium Headless Shell 156.0.8078.4를 사용했다.
+
+```js
+import {chromium} from 'playwright';
+const launch=chromium.launch.bind(chromium);
+chromium.launch=({channel,...options})=>launch(options);
+await import('./tests/browser.mjs');
+```
+
+| 기본 Chromium의 `tests/browser.mjs` | 종료 코드 | 통과 | 실패 |
+| --- | ---: | ---: | ---: |
+| 수정 전 | 1 | 7 | 1 |
+| 수정 후 | 0 | 16 | 0 |
+
+Windows 기본 Chromium에서는 수정 전 Escape 직후의 초점 단언을 지나 다음 확인 창 열기에서 시간 초과가 발생했다. 두 로그는 `test-results/student-delete-focus-verification/chromium-before.log`와 `chromium-after.log`에 있다. 수정 후 Ubuntu CI 결과는 미검증이다.
+
+이 수정 후 Windows에서 `test:all` 구성 명령 14개를 직접 실행했다. 기본 브라우저 시험은 저장소의 Windows 기본값인 Edge로 실행했고 전체 결과는 위 구성 명령 표와 같은 종료 코드와 통과·실패 수였다. Worker 시험은 앞과 같은 방식으로 세 Wrangler 자식 명령에 빈 `--env-file test-results/student-delete-focus-verification/empty.env`를 전달했다. 명령별 기록과 원시 로그는 `test-results/student-delete-focus-verification/`에 있다.
