@@ -105,6 +105,8 @@ Windows, Node.js 24.22.1, pnpm 11.25.0, Miniflare 4.20260730.0, Wrangler 4.154.0
 - 익명 설정 조회·학생 한 명 조회, 전체 학생/다른 학생 미노출, 교사/관리자 접근 경계, 다른 출처·출처 없는 변경 거부, API no-store.
 - HttpOnly·Secure·SameSite=Strict 쿠키 실동작, 비밀번호 계산, 로그인 실패 시 이전 세션 폐기, IP 시도 제한, 로그아웃, 교사/관리자 비밀번호 변경 후 기존 세션 거부, 초기화 재접근에도 변경된 비밀번호 유지.
 - 학생 한 명 수정 시 다른 학생 행 불변, 반·번호 수정에도 ID/원본학번 유지, 학생 추가·휴학·전출과 조회/명렬표 제외, 분반 코드 변경과 관련 학생 배정 유지.
+- 관리자만 운영 학기의 학생 한 명과 수강 배정을 삭제할 수 있다. 교사·비인증 요청은 401, 없는 학생은 404, 학기·리비전 충돌은 409다. 삭제 전 학생과 수강 배정을 변경 이력에 남기고 학생 리비전을 올린다. 다른 학생과 학기 자료, 스터디룸 연결·이용 설정·출석·이력은 보존한다. 같은 학기·ID의 학생이 복원되면 기존 출석의 `person_id`에 다시 연결된다.
+- 학생 수정 창의 삭제 버튼을 누르면 학번·이름·학적·수강 과목 수를 표시한다. 취소하면 수정 창의 입력값과 초점이 유지된다. 확인하면 학생이 목록에서 빠지고 현재 필터와 유효한 페이지가 유지된다. 키보드 조작과 390px 가로 넘침·버튼 높이를 검증한다.
 - 교실·축약명·학생 웹 수정값과 학적을 보호하는 재등록, 전체교사시간표 단독 교체 시 학생 자료 불변, 5개 XLSX의 실제 브라우저 업로드·미리보기·등록, 3학년 2/3단위 병합·동일 과목 충돌 감지.
 - 수동 수업 연결, 시간블록 저장, 2+1수업의 3개 교시·공강, 학기 전환 후 빈 새 학기, 이전 학기 복귀, 오래된 저장의 충돌 거부.
 - 다른 관리자의 학기 전환 시 기존 화면의 요청 거부·새 학기 목록 갱신, 교사/관리자 캐시 버전 검증, 다른 화면 메타가 관리자 캐시의 학기를 바꾸지 않도록 분리.
@@ -145,3 +147,40 @@ Windows, Node.js 24.22.1, pnpm 11.25.0, Miniflare 4.20260730.0, Wrangler 4.154.0
 4. 기존 GitHub Pages를 보존할 게시 브랜치를 확정한 뒤 필요하면 운영 브랜치 병합.
 
 Worker·D1·Secret 등록과 원격 배포는 완료했습니다. 운영 학생 자료 이관과 GitHub↔Cloudflare 자동 배포 연결은 완료했다고 보고하지 않습니다.
+
+## 관리자 학생 삭제 실행 결과 · 2026-11-26
+
+- `admin student deletion is term-scoped, guarded, audited, and preserves studyroom identity`는 운영 학기의 학생·수강 배정 삭제, 다른 학생과 다른 학기 보존, 전체 삭제 전 값과 `null` 삭제 후 값, 학생 리비전 증가, 401·404·409 거부를 검증한다. 스터디룸의 다섯 테이블을 삭제 전후에 비교하고 같은 학기·ID의 학생을 백업에서 복원해 기존 `person_id`와 출석이 보존되는지 확인한다.
+- `admin student deletion confirms by keyboard, preserves cancel drafts, filters and page at 390px`는 추가 창과 수정 창의 버튼 노출, 확인 창의 학생 정보, 취소·Escape 시 요청 없음과 수정값·초점 유지, 확인 후 목록·필터·페이지·초점·알림, 390px에서의 가로 넘침과 버튼 높이를 검증한다.
+- `student deletion refreshes concurrent additions and class filters on the current page`는 다른 관리자 세션에서 추가한 학생과 학급이 삭제 응답의 리비전에 맞춰 표시되는지 검증한다. 현재 검색어와 필터, 유효한 페이지를 유지하며 선택 학급의 마지막 학생을 삭제해도 해당 필터가 유지되는지 확인한다.
+- `student deletion recovers committed writes after 400, 409 and lost responses`는 삭제를 실제 로컬 D1에 커밋한 뒤 브라우저에 400·409·연결 실패를 돌려준다. 학생 상세 404를 확인해 완료 처리하고 목록을 다시 불러오며 새 학생, 검색어·필터·페이지, 검색 칸 초점을 확인한다. 목록 조회도 실패하면 삭제된 행을 제거하고 새로고침을 안내한다.
+- `student deletion preserves a real conflict and shows an unverified result at 390x240`는 다른 관리자의 선행 수정으로 실제 409를 발생시킨다. 409·404의 다시 열기 안내, 상태를 확인하지 못했을 때 새로고침 안내와 확인 버튼 숨김, 390×240 화면의 오류 초점과 수정 입력 보존을 확인한다.
+- `closing student edit by Escape or Cancel restores focus to the name button`은 두 방식으로 수정 창을 닫았을 때 이름 버튼으로 초점이 돌아오는지 확인한다. 버튼이 없는 행에서 수정 창을 열고 닫아도 예외가 발생하지 않아야 한다.
+- `student deletion reloads a changed operating term and retains the previous draft`는 수정 중 실제 운영 학기를 바꿔 삭제 요청에서 `TERM_CHANGED`를 받는다. 두 모달이 닫히고 새 학기 목록이 로드되며 기존 학기로 돌아갔을 때 학생과 초안이 남는지 확인한다.
+
+Windows의 Node.js 24.22.1과 가상 자료를 사용했다. 실행 환경에 pnpm이 없어 `package.json`의 `test:all` 구성 명령 14개를 이 저장소에서 직접 실행했다. 첫 구현 검증에서 공통 CSS 해시 검사 1건이 실패해 고정 CSS를 복원한 뒤 전체를 재실행했다.
+
+1차 재검토 검증에서 시수배당 학기 전환 시험이 학교 설정 폼을 기다리다 30초 시간 초과로 종료 코드 1을 반환했다. 같은 작업 트리에서 해당 명령을 단독 재실행해 종료 코드 0으로 6개 항목을 통과했다. 두 기록은 `test-results/student-delete-review-verification-final/`에 있다.
+
+2차 재검토 수정 후에는 `test:all`의 구성 명령 14개가 모두 종료 코드 0이었다.
+
+| 실행 명령 또는 진입점 | 종료 코드 | 통과 | 실패 |
+| --- | ---: | ---: | ---: |
+| `node --test --test-concurrency=1 tests/*.test.mjs modules/allocation/tests/*.test.mjs` | 0 | 191 | 0 |
+| `node tests/browser.mjs` | 0 | 16 | 0 |
+| `node tests/solver-browser.mjs` | 0 | 1 | 0 |
+| `node tests/browser-solver.mjs` | 0 | 1 | 0 |
+| `node modules/allocation/tests/browser.mjs` | 0 | 10 | 0 |
+| `node modules/allocation/tests/term-switch-browser.mjs` | 0 | 6 | 0 |
+| `node tests/section-assignment-browser.mjs` | 0 | 8 | 0 |
+| `node tests/pages-browser.mjs` | 0 | 12 | 0 |
+| `tests/wrangler.mjs` | 0 | 3 | 0 |
+| `node tests/teacher-tools-browser.mjs` | 0 | 9 | 0 |
+| `node tests/allocation-browser.mjs` | 0 | 23 | 0 |
+| `node tests/studyroom-browser.mjs` | 0 | 13 | 0 |
+| `node tests/ui-browser.mjs` | 0 | 38 | 0 |
+| `node tests/course-migration.mjs` | 0 | 1 | 0 |
+
+브라우저 건수는 스크립트가 출력한 통과 항목 수로 집계했다. 공유 UI는 화면 점검 38건, 이관은 전체 리허설 1건이다. Worker 시험은 `node --input-type=module -e`로 `tests/wrangler.mjs`를 불러와 세 Wrangler 자식 명령에 빈 환경 파일을 `--env-file test-results/student-delete-recovery-verification/empty.env`로 전달했다.
+
+2차 재검토의 실행 목록과 원시 로그는 `test-results/student-delete-recovery-verification/`에 있다. `test-results/student-delete-mobile.png`의 390px 확인 창과 `test-results/student-delete-error-mobile.png`의 390×240 오류 상태를 육안으로 확인했다. 운영 원격 환경과 실제 모바일 기기는 미검증이며 병합 전 재검토가 남아 있다. 삭제 전 학생 정보는 승인 설계에 따라 변경 이력에 남는다.

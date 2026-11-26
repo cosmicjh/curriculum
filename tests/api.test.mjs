@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {harness} from './harness.mjs';
 import {backup,fixture} from './fixture.mjs';
+import {setupStudyroom} from './studyroom-fixture.mjs';
 import Core from '../src/core.js';
 import {summarize} from '../scripts/compare-backups.mjs';
 test('integrated allocation uses the existing workspace, role, and independent term',async t=>{
@@ -232,6 +233,64 @@ test('Workers + actual local D1: authorization, migration, edits, term isolation
  });
  const fresh=await h.login('admin','새관리자4321');for(const action of ['bootstrap','adminBootstrap','adminStudent']){const r=await h.api(action,{id:'student-two'},fresh.cookie);samples.push({action,ms:r.elapsed,bytes:r.bytes,rowsRead:r.headers.get('x-d1-rows-read'),rowsWritten:r.headers.get('x-d1-rows-written')});}
  await mkdir('test-results',{recursive:true});await writeFile('test-results/api-metrics.json',JSON.stringify(samples,null,2));
+});
+
+test('admin student deletion is term-scoped, guarded, audited, and preserves studyroom identity',async t=>{
+ const h=await harness({studyroom:true});t.after(()=>h.close());
+ const {admin,teacher,api:study,revision:studyRevision}=await setupStudyroom(h);
+ const id='student-one',term='2026-2',otherTerm='2026-1',personId='synthetic-linked-person';
+ await h.sql('INSERT INTO student_people(id,created_at) VALUES(?,?)',personId,'2026-01-01T00:00:00Z');
+ assert((await study('linkStudent',{studentId:id,personId,expectedRevision:await studyRevision()})).ok);
+ assert((await study('setMember',{personId,enabled:true,expectedRevision:await studyRevision()})).ok);
+ const attendance=await study('submit',{studentNumber:'30101',seat:'07',requestId:crypto.randomUUID()},'');
+ assert(attendance.ok,JSON.stringify(attendance));
+
+ const otherBackup=backup();otherBackup.store.term=otherTerm;otherBackup.store.settings.semester=1;
+ assert((await h.mutation('saveSettings',{settings:otherBackup.store.settings},admin.cookie)).ok);
+ assert((await h.mutation('restore',{backup:otherBackup},admin.cookie)).ok);
+ assert((await h.mutation('switchTerm',{term},admin.cookie)).ok);
+
+ const rows=async (query,...args)=>(await h.sql(query,...args)).results;
+ const roster=()=>Promise.all([
+  rows('SELECT * FROM students WHERE term_id!=? OR id!=? ORDER BY term_id,id',term,id),
+  rows('SELECT * FROM assignments WHERE term_id!=? OR student_id!=? ORDER BY term_id,student_id,subject',term,id)
+ ]);
+ const studyroom=()=>Promise.all(['student_person_links','student_people','sr_members','sr_attendance','sr_events'].map(table=>rows('SELECT * FROM '+table+' ORDER BY rowid')));
+ const [otherRows,studyroomBefore]=await Promise.all([roster(),studyroom()]);
+ assert(otherRows.every(table=>table.some(row=>row.term_id===otherTerm&&(row.id===id||row.student_id===id))));
+ assert(studyroomBefore.every(table=>table.length>0));
+ assert(studyroomBefore[3].some(row=>row.id===attendance.data.recordId&&row.person_id===personId));
+ const {student,meta}=(await h.api('adminStudent',{id},admin.cookie)).data;
+ const payload={id,expectedTerm:term,expectedRevision:meta.revision,patch:true};
+ const backupCount=await rows('SELECT count(*) AS n FROM backups');
+ assert.equal((await h.api('deleteStudent',payload,teacher.cookie)).status,401);
+ assert.equal((await h.api('deleteStudent',payload)).status,401);
+ assert.equal((await h.api('deleteStudent',{...payload,id:'missing'},admin.cookie)).status,404);
+ assert.equal((await h.api('deleteStudent',{...payload,expectedRevision:String(Number(meta.revision)-1)},admin.cookie)).status,409);
+ assert.equal((await h.api('deleteStudent',{...payload,expectedTerm:otherTerm},admin.cookie)).status,409);
+ assert.deepEqual((await h.api('adminStudent',{id},admin.cookie)).data.student,student);
+ assert.deepEqual(await rows("SELECT id FROM history WHERE action='deleteStudent'"),[]);
+
+ const result=await h.api('deleteStudent',payload,admin.cookie);
+ assert(result.ok,JSON.stringify(result));
+ assert.equal(result.data.meta.revision,String(Number(meta.revision)+1));
+ const studentsRevision=Number(meta.revisions.students.split(':')[1]);
+ assert.equal(result.data.meta.revisions.students,term+':'+(studentsRevision+1));
+ for(const part of ['sections','schedule'])assert.equal(result.data.meta.revisions[part],meta.revisions[part]);
+ assert.equal((await h.api('adminStudent',{id},admin.cookie)).status,404);
+ assert.deepEqual(await rows('SELECT * FROM students WHERE term_id=? AND id=?',term,id),[]);
+ assert.deepEqual(await rows('SELECT * FROM assignments WHERE term_id=? AND student_id=?',term,id),[]);
+ assert.deepEqual(await roster(),otherRows);
+ const history=await rows("SELECT term_id,target,before_value,after_value,backup_id FROM history WHERE action='deleteStudent'");
+ assert.deepEqual(history,[{term_id:term,target:'30101 가상학생하나',before_value:JSON.stringify(student),after_value:'null',backup_id:null}]);
+ assert.deepEqual(await rows('SELECT count(*) AS n FROM backups'),backupCount);
+ assert.deepEqual(await studyroom(),studyroomBefore);
+
+ // Restoring the roster inserts the same (term_id, id), including non-default links.
+ assert((await h.mutation('restore',{backup:backup()},admin.cookie)).ok);
+ assert.equal((await h.api('adminStudent',{id},admin.cookie)).status,200);
+ assert.deepEqual(await rows('SELECT person_id FROM student_person_links WHERE term_id=? AND student_id=?',term,id),[{person_id:personId}]);
+ assert.deepEqual(await studyroom(),studyroomBefore);
 });
 
 test('allocation distinguishes a missing schema from an empty migrated workspace',async t=>{

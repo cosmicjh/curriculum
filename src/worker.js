@@ -11,7 +11,7 @@ import {validTerm,newTermSettings,prepareToolTransfer,readToolTransfer,readCours
 import {allocationAccess,allocationFreezeError,allocationSchemaMissing,courseMigration,migrationVersion} from './course-migration.js';
 import {courseRequest} from '../modules/allocation/server/api.js';
 const reads=new Set(['allocation','classSwap','bootstrap','student','teacherBootstrap','teacher','roster','classBatch','adminBootstrap','adminStudent','adminSections','adminLinks','adminLessons','adminHistory','adminSettings','dashboard','previewImport','downloadBackup','courseTransfer','toolTransfer']);
-const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);
+const writes=new Set(['saveAllocation','commitImport','saveStudent','deleteStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);
 const teacherActions=new Set(['allocation','classSwap','teacherBootstrap','teacher','roster','classBatch']);
 async function allocationCounts(db,term,sections){
  // Read each student and linked assignment once. Keep note text inside D1.
@@ -172,6 +172,16 @@ async function mutate(db,env,ctx,session,req,headers){
   const st=await S.load(db,ctx,['students','sections'],'AND id=?',[req.student?.id||'']);if(req.student?.id&&!st.students.length)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');
   before=st.students[0]||null;result=D.student(req.student||{},before);after=result;target=Core.sid(result)+' '+result.name;parts=['students'];changedStudents=[result];
   statements=S.writeStudents(db,ctx.term,[result],st.sections,st.students);
+ }else if(action==='deleteStudent'){
+  if(typeof req.id!=='string'||!req.id)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');
+  const {students}=await S.load(db,ctx,['students'],'AND id=?',[req.id]);
+  before=students[0];
+  if(!before)Auth.fail(404,'NOT_FOUND','학생 정보가 없습니다.');
+  target=Core.sid(before)+' '+before.name;parts=['students'];bootstrap=true;
+  statements=[
+   db.prepare('DELETE FROM assignments WHERE term_id=? AND student_id=?',ctx.term,before.id),
+   db.prepare('DELETE FROM students WHERE term_id=? AND id=?',ctx.term,before.id)
+  ];
  }else if(action==='saveSection'){
   const sections=(await db.all('SELECT * FROM sections WHERE term_id=?',ctx.term)).map(S.sectionRow),old=sections.find(s=>s.id===req.section?.id);
   if(req.section?.id&&!old)Auth.fail(404,'NOT_FOUND','분반 정보가 없습니다.');const next=D.section(req.section||{},old);before=old||null;after=next;result=next;changedSection=next;target=next.subject+' '+next.code;parts=['sections'];

@@ -59,6 +59,241 @@ try{
   await clickMenu(page,page.locator('.admin-nav [data-tab=settings]'));await idle();await clickMenu(page,button('admin-tab').filter({hasText:'자료 등록'}));await idle();await clickMenu(page,page.locator('.admin-nav [data-tab=students]'));await idle();assert.equal(await page.locator('#student-table tbody tr').count(),0);assert.equal(await page.locator('.school-heading .term-label').textContent(),'2026학년도 1학기');
   assert((await h.mutation('switchTerm',{term:'2026-2'},admin.cookie)).ok);await button('refresh-admin').click();await idle();assert((await page.locator('#student-table').innerText()).includes('브라우저보호값'));
  });
+ await step('admin student deletion confirms by keyboard, preserves cancel drafts, filters and page at 390px',async()=>{
+  const name='가상삭제'+('A'.repeat(65));
+  const students=Array.from({length:52},(_,i)=>({
+   grade:'3',classNum:'9',number:String(i+1),name:i===51?name:'가상삭제 '+(i+1),
+   choices:i===51?{가상과학:'A1',가상언어:'B1'}:{}
+  }));
+  const seeded=await h.mutation('commitImport',{payload:{format:'timetable-import',students}},admin.cookie);
+  assert(seeded.ok,JSON.stringify(seeded));
+  await button('refresh-admin').click();await idle();
+  const opener=button('open-student-delete'),modal=page.locator('#modal');
+  await button('new-student').click();await idle();
+  assert.equal(await modal.locator('h2').textContent(),'학생 추가');
+  assert.equal(await opener.count(),0);
+  await page.keyboard.press('Escape');await modal.waitFor({state:'hidden'});
+
+  await page.setViewportSize({width:390,height:844});
+  const filters={'filter-grade':'3','filter-class':'9','filter-status':'재학','filter-search':'가상삭제'};
+  for(const id of ['filter-grade','filter-class','filter-status'])await page.locator('#'+id).selectOption(filters[id]);
+  await page.locator('#filter-search').fill(filters['filter-search']);
+  await button('student-page').filter({hasText:'다음'}).click();
+  const pager=page.locator('#student-table .pager div small'),row=button('edit-student').filter({hasText:name});
+  assert.equal(await pager.textContent(),'2 / 2');
+  assert.equal(await opener.count(),0);
+  await row.getByRole('button').press('Enter');await idle();
+  assert.equal(await modal.locator('h2').textContent(),'학생 수정');
+  assert.equal(await opener.count(),1);
+  await page.locator('#edit-name').fill('미저장 이름');
+
+  let requests=0;
+  const countRequest=request=>{if(new URL(request.url()).pathname==='/api/deleteStudent')requests++;};
+  page.on('request',countRequest);
+  const confirmation=page.getByRole('dialog',{name:'학생 삭제'}),cancel=button('cancel-student-delete'),remove=button('delete-student');
+  const focused=el=>el.evaluate(node=>node===document.activeElement);
+  await opener.press('Enter');await confirmation.waitFor();
+  assert.equal(await confirmation.locator('p').textContent(),'30952 '+name+' · 재학 · 수강 2과목');
+  assert(await focused(cancel));
+  assert(await confirmation.evaluate(el=>el.scrollWidth<=el.clientWidth&&el.getBoundingClientRect().width<=innerWidth&&document.documentElement.scrollWidth<=innerWidth));
+  for(const control of [opener,cancel,remove])assert(await control.evaluate(el=>{
+   const style=getComputedStyle(el);
+   return el.getBoundingClientRect().height>=44&&style.borderTopWidth==='0px'&&style.backgroundColor==='rgba(0, 0, 0, 0)';
+  }));
+  await confirmation.screenshot({path:'test-results/student-delete-mobile.png'});
+  await page.keyboard.press('Enter');await confirmation.waitFor({state:'hidden'});
+  assert(await focused(opener));assert(await modal.isVisible());
+  assert.equal(await page.locator('#edit-name').inputValue(),'미저장 이름');
+  assert.match(await row.textContent(),new RegExp(name));
+  assert.equal(requests,0);
+  await page.keyboard.press('Enter');await confirmation.waitFor();
+  await page.keyboard.press('Escape');await confirmation.waitFor({state:'hidden'});
+  assert(await focused(opener));assert.equal(requests,0);
+
+  await page.keyboard.press('Enter');await confirmation.waitFor();
+  await page.keyboard.press('Tab');assert(await focused(remove));
+  await page.keyboard.press('Enter');await modal.waitFor({state:'hidden'});await idle();
+  assert.equal(requests,1);page.off('request',countRequest);
+  assert.equal(await row.count(),0);
+  assert.equal(await pager.textContent(),'2 / 2');
+  assert.equal(await button('edit-student').count(),1);
+  for(const [id,value] of Object.entries(filters))assert.equal(await page.locator('#'+id).inputValue(),value);
+  assert(await focused(page.locator('#filter-search')));
+  assert.equal(await page.locator('#toast').textContent(),'삭제했습니다.');
+  await page.setViewportSize({width:1440,height:1000});
+ });
+ await step('student deletion refreshes concurrent additions and class filters on the current page',async()=>{
+  const filter=page.locator('#filter-class'),pager=page.locator('#student-table .pager div small');
+  const target=button('edit-student').filter({hasText:'가상삭제 51'});
+  const sameClass=button('edit-student').filter({hasText:'가상삭제 53'});
+  const newClass=button('edit-student').filter({hasText:'가상삭제 새학급'});
+  assert.equal(await pager.textContent(),'2 / 2');
+  assert.equal(await sameClass.count(),0);
+  assert.equal(await filter.locator('option[value="8"]').count(),0);
+  for(const [classNum,number,name] of [['9','53','가상삭제 53'],['8','1','가상삭제 새학급']]){
+   const added=await h.mutation('saveStudent',{student:{grade:'3',classNum,number,name,status:'재학',choices:{}}},admin.cookie);
+   assert(added.ok,JSON.stringify(added));
+  }
+  await target.getByRole('button').press('Enter');await idle();
+  await button('open-student-delete').press('Enter');
+  const deleted=page.waitForResponse('**/api/deleteStudent');
+  await button('delete-student').press('Enter');assert.equal((await deleted).status(),200);await idle();
+  assert.equal(await target.count(),0);
+  assert(await sameClass.isVisible());
+  assert.equal(await pager.textContent(),'2 / 2');
+  for(const [id,value] of Object.entries({'filter-grade':'3','filter-class':'9','filter-status':'재학','filter-search':'가상삭제'})){
+   assert.equal(await page.locator('#'+id).inputValue(),value);
+  }
+  await filter.selectOption('8');
+  assert(await newClass.isVisible());
+  await newClass.getByRole('button').press('Enter');await idle();
+  await button('open-student-delete').press('Enter');
+  await button('delete-student').press('Enter');await idle();
+  assert.equal(await newClass.count(),0);
+  assert.equal(await filter.inputValue(),'8');
+  assert.equal(await pager.textContent(),'1 / 1');
+  await filter.selectOption('9');
+  await button('student-page').filter({hasText:'다음'}).click();
+ });
+ await step('student deletion recovers committed writes after 400, 409 and lost responses',async()=>{
+  const cases=[
+   [54,400,'REQUEST_ERROR'],
+   [55,409,'SAVED_REFRESH_REQUIRED'],
+   [56,0,'NETWORK_ERROR'],
+   [57,0,'NETWORK_ERROR',true]
+  ];
+  const student=(number,name)=>({grade:'3',classNum:'9',number:String(number),name,status:'재학',choices:{}});
+  for(const [number] of cases){
+   const added=await h.mutation('saveStudent',{student:student(number,'가상삭제 '+number)},admin.cookie);
+   assert(added.ok,JSON.stringify(added));
+  }
+  await button('refresh-admin').click();await idle();
+  assert.equal(await page.locator('#student-table .pager div small').textContent(),'2 / 2');
+  let requests=0;
+  const countRequest=request=>{if(request.url().endsWith('/api/deleteStudent'))requests++;};
+  page.on('request',countRequest);
+  for(const [index,[number,status,code,refreshFails]] of cases.entries()){
+   const row=button('edit-student').filter({hasText:'가상삭제 '+number});
+   await row.getByRole('button').press('Enter');await idle();
+   await button('open-student-delete').press('Enter');
+   let committedStatus,addition;
+   await page.route('**/api/deleteStudent',async route=>{
+    const committed=await route.fetch();
+    committedStatus=committed.status();
+    if(code==='SAVED_REFRESH_REQUIRED'){
+     addition=await h.mutation('saveStudent',{student:student(58,'가상삭제 58')},admin.cookie);
+    }
+    if(status)await route.fulfill({status,json:{ok:false,code,error:'시험 응답 실패'}});
+    else await route.abort('failed');
+   },{times:1});
+   const probe=page.waitForResponse(response=>response.url().endsWith('/api/adminStudent')&&response.status()===404);
+   let bootstrap;
+   if(refreshFails)await page.route('**/api/adminBootstrap',route=>route.abort('failed'),{times:1});
+   else bootstrap=page.waitForResponse('**/api/adminBootstrap');
+   await button('delete-student').press('Enter');
+   assert.equal((await (await probe).json()).code,'NOT_FOUND');
+   if(bootstrap)assert.equal((await bootstrap).status(),200);
+   await page.locator('#modal').waitFor({state:'hidden'});await idle();
+   assert.equal(committedStatus,200);
+   assert.equal(requests,index+1);
+   assert.equal(await row.count(),0);
+   assert.equal(await button('delete-student').count(),0);
+   if(code==='SAVED_REFRESH_REQUIRED'){
+    assert(addition.ok,JSON.stringify(addition));
+    assert(await button('edit-student').filter({hasText:'가상삭제 58'}).isVisible());
+   }
+   assert.equal(await page.locator('#student-table .pager div small').textContent(),'2 / 2');
+   for(const [id,value] of Object.entries({'filter-grade':'3','filter-class':'9','filter-status':'재학','filter-search':'가상삭제'})){
+    assert.equal(await page.locator('#'+id).inputValue(),value);
+   }
+   assert(await page.locator('#filter-search').evaluate(el=>el===document.activeElement));
+   assert.equal(await page.locator('#toast').textContent(),refreshFails?'삭제했습니다. 학생 목록을 새로고침해 주세요.':'삭제했습니다.');
+   if(refreshFails){await button('refresh-admin').click();await idle();}
+  }
+  page.off('request',countRequest);
+ });
+ await step('student deletion preserves a real conflict and shows an unverified result at 390x240',async()=>{
+  await page.setViewportSize({width:390,height:240});
+  const row=button('edit-student').filter({hasText:'가상삭제 53'});
+  await row.getByRole('button').press('Enter');await idle();
+  await page.locator('#edit-name').fill('삭제 오류 시 보존할 입력');
+  await button('open-student-delete').press('Enter');
+  const confirmation=page.getByRole('dialog',{name:'학생 삭제'}),alert=confirmation.getByRole('alert');
+  assert.equal(await alert.count(),0);
+  const id=await row.getAttribute('data-id');
+  const {student}=(await h.api('adminStudent',{id},admin.cookie)).data;
+  const saved=await h.mutation('saveStudent',{student:{...student,note:'다른 관리자의 수정'}},admin.cookie);
+  assert(saved.ok,JSON.stringify(saved));
+  const conflict=page.waitForResponse('**/api/deleteStudent'),probe=page.waitForResponse('**/api/adminStudent');
+  await button('delete-student').press('Enter');await idle();
+  assert.equal((await conflict).status(),409);
+  assert.equal((await (await conflict).json()).code,'CONFLICT');
+  assert.equal((await probe).status(),200);
+  const alertFits=()=>alert.evaluate(el=>{
+   const bounds=el.getBoundingClientRect(),dialog=el.closest('dialog').getBoundingClientRect();
+   return el===document.activeElement&&bounds.top>=Math.max(0,dialog.top)&&bounds.bottom<=Math.min(innerHeight,dialog.bottom)&&bounds.right<=innerWidth;
+  });
+  assert.match(await alert.textContent(),/자료가 변경되었습니다. 학생 목록을 새로고침한 뒤 다시 열어 주세요/);
+  assert(await alertFits());
+  await page.screenshot({path:'test-results/student-delete-error-mobile.png'});
+  for(const [status,code,message] of [[404,'NOT_FOUND','학생 정보가 없습니다.'],[0,'NETWORK_ERROR','서버에 연결하지 못했습니다.']]){
+   await page.route('**/api/deleteStudent',route=>status?route.fulfill({status,json:{ok:false,code,error:message}}):route.abort('failed'),{times:1});
+   await button('delete-student').press('Enter');await idle();
+   assert((await alert.textContent()).includes(message));
+   if(status)assert.match(await alert.textContent(),/학생 목록을 새로고침한 뒤 다시 열어 주세요/);
+   assert(await alertFits());
+  }
+  await page.route('**/api/deleteStudent',route=>route.abort('failed'),{times:1});
+  await page.route('**/api/adminStudent',route=>route.abort('failed'),{times:1});
+  await button('delete-student').press('Enter');await idle();
+  assert.equal(await alert.textContent(),'삭제 결과를 확인하지 못했습니다. 학생 목록을 새로고침해 주세요.');
+  assert(await alertFits());
+  assert(await button('delete-student').isHidden());
+  await button('cancel-student-delete').press('Enter');await confirmation.waitFor({state:'hidden'});
+  assert.equal(await page.locator('#edit-name').inputValue(),'삭제 오류 시 보존할 입력');
+  assert.equal(await row.count(),1);
+  await page.keyboard.press('Escape');await page.locator('#modal').waitFor({state:'hidden'});
+  await page.setViewportSize({width:1440,height:1000});
+ });
+ await step('closing student edit by Escape or Cancel restores focus to the name button',async()=>{
+  const row=button('edit-student').filter({hasText:'가상삭제 53'}),name=row.getByRole('button');
+  const modal=page.locator('#modal');
+  for(const close of [()=>page.keyboard.press('Escape'),()=>modal.getByRole('button',{name:'취소',exact:true}).press('Enter')]){
+   await name.press('Enter');await modal.waitFor();await idle();
+   await close();await modal.waitFor({state:'hidden'});
+   await page.waitForFunction(()=>document.activeElement.textContent==='가상삭제 53');
+   assert(await name.evaluate(el=>el===document.activeElement));
+  }
+  const id=await row.getAttribute('data-id');
+  await name.evaluate(el=>el.remove());
+  await page.locator(`[data-action="edit-student"][data-id="${id}"] td`).first().click();await idle();
+  await page.keyboard.press('Escape');await modal.waitFor({state:'hidden'});
+  await button('refresh-admin').click();await idle();
+  assert(await name.isVisible());
+ });
+ await step('student deletion reloads a changed operating term and retains the previous draft',async()=>{
+  const row=button('edit-student').filter({hasText:'가상삭제 53'});
+  const id=await row.getAttribute('data-id');
+  await row.getByRole('button').press('Enter');await idle();
+  await page.locator('#edit-name').fill('이전 학기에서 보존할 입력');
+  assert((await h.mutation('switchTerm',{term:'2026-1'},admin.cookie)).ok);
+  await button('open-student-delete').press('Enter');
+  const changed=page.waitForResponse('**/api/deleteStudent');
+  await button('delete-student').press('Enter');await idle();
+  assert.equal((await changed).status(),409);
+  assert.equal((await (await changed).json()).code,'TERM_CHANGED');
+  assert.equal(await page.locator('dialog[open]').count(),0);
+  assert.equal(await button('delete-student').count(),0);
+  assert.equal(await row.count(),0);
+  assert.equal(await page.locator('.school-heading .term-label').textContent(),'2026학년도 1학기');
+  assert((await h.mutation('switchTerm',{term:'2026-2'},admin.cookie)).ok);
+  assert.equal((await h.api('adminStudent',{id},admin.cookie)).status,200);
+  await button('refresh-admin').click();await idle();
+  await page.locator('#filter-search').fill('가상삭제 53');
+  await row.getByRole('button').press('Enter');await idle();
+  assert.equal(await page.locator('#edit-name').inputValue(),'이전 학기에서 보존할 입력');
+  await page.keyboard.press('Escape');await page.locator('#modal').waitFor({state:'hidden'});
+ });
  await step('teacher timetable cell roster, course roster and A4 four-up class print',async()=>{
   for(let n=3;n<=5;n++)assert((await h.mutation('saveStudent',{student:{grade:'3',classNum:'1',number:String(n),name:'가상인쇄'+n,status:'재학',note:'',choices:{가상과학:'A1'}}},admin.cookie)).ok);
   await page.goto(url+'/teacher.html');await idle();await page.locator('#teacher-name').fill('가상교사');await page.locator('form[data-form=teacher] button').click();await page.locator('.cell-button').first().waitFor();await idle();await page.locator('.cell-button').filter({hasText:'가상과학'}).first().click();await page.locator('.roster-table').waitFor();await idle();assert((await page.locator('.roster-table').innerText()).includes('브라우저보호값'));await button('print-roster').click();await idle();await page.evaluate(()=>dispatchEvent(new Event('afterprint')));await button('close-modal').click();

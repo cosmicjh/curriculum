@@ -238,7 +238,7 @@
     for(const role of Object.keys(roles))sessionStorage.removeItem('timetable.'+role);
   }
   function token(role){return (session(role)||role==='teacher'&&session('admin')||{}).token||'';}
-  async function call(action,args={},role){const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);const viewTerm=role==='admin'?state.admin?.store.term:role==='teacher'?state.teacherBoot?.meta.term:undefined;return TTApi.request(action,{...(!['adminBootstrap','teacherBootstrap','login','logout'].includes(action)&&viewTerm?{viewTerm}:{}),...(writes.has(action)?{expectedTerm:state.admin?.store.term,expectedRevision:state.admin?.meta.revision}:{}),...args});}
+  async function call(action,args={},role){const writes=new Set(['saveAllocation','commitImport','saveStudent','deleteStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);const viewTerm=role==='admin'?state.admin?.store.term:role==='teacher'?state.teacherBoot?.meta.term:undefined;return TTApi.request(action,{...(!['adminBootstrap','teacherBootstrap','login','logout'].includes(action)&&viewTerm?{viewTerm}:{}),...(writes.has(action)?{expectedTerm:state.admin?.store.term,expectedRevision:state.admin?.meta.revision}:{}),...args});}
   function toast(message){$('#toast').textContent=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').textContent='',5500);}
   function date(value){return value?new Date(value).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}):'';}
   function options(values,selected,empty){return (empty!==undefined?'<option value="">'+esc(empty)+'</option>':'')+values.map(v=>{const a=typeof v==='object'?v:{value:v,label:v};return '<option value="'+esc(a.value)+'"'+(String(a.value)===String(selected)?' selected':'')+'>'+esc(a.label)+'</option>';}).join('');}
@@ -403,10 +403,44 @@
       root.prepend(nav);
     }
   }
-  function renderStudents(root){const f=state.filters;root.innerHTML='<div class="filters">'+select('filter-grade',['1','2','3'],f.grade,'학년')+select('filter-class',Array.from(new Set(state.admin.store.students.filter(s=>!f.grade||s.grade===f.grade).map(s=>s.classNum))).sort((a,b)=>a-b),f.classNum,'학급')+select('filter-status',['재학','전출','자퇴','휴학','졸업'],f.status,'학적')+input('filter-search',f.search,'placeholder="이름·학번 검색" aria-label="학생 검색"')+'<button class="primary" data-action="new-student">추가</button>'+'<button data-action="student-transfer-preview">서버 분반배정</button>'+importTools('students')+'</div><div id="student-table"></div>';renderStudentTable();}
-  function renderStudentTable(){const f=state.filters,rows=state.admin.store.students.filter(s=>(!f.grade||s.grade===f.grade)&&(!f.classNum||s.classNum===f.classNum)&&(!f.status||s.status===f.status)&&(!f.search||s.name.includes(f.search)||studentNo(s).includes(f.search))).sort((a,b)=>Number(a.grade)-Number(b.grade)||Number(a.classNum)-Number(b.classNum)||Number(a.number)-Number(b.number));const max=Math.max(0,Math.ceil(rows.length/50)-1);state.page=Math.min(state.page,max);$('#student-table').innerHTML='<div class="table-scroll"><table class="data-table"><thead><tr><th>학번</th><th>이름</th><th>학적</th><th>수강</th><th>비고</th></tr></thead><tbody>'+rows.slice(state.page*50,state.page*50+50).map(s=>'<tr class="clickable" data-action="edit-student" data-id="'+esc(s.id)+'"><td>'+studentNo(s)+'</td><td>'+esc(s.name)+'</td><td>'+esc(s.status)+'</td><td>'+(s.choiceCount==null?Object.values(s.choices||{}).filter(Boolean).length:s.choiceCount)+'</td><td>'+esc(s.note)+'</td></tr>').join('')+'</tbody></table></div><div class="pager"><small>'+rows.length+'명</small><div><button class="quiet" data-action="student-page" data-delta="-1" '+(!state.page?'disabled':'')+'>이전</button><small>'+(state.page+1)+' / '+(max+1)+'</small><button class="quiet" data-action="student-page" data-delta="1" '+(state.page>=max?'disabled':'')+'>다음</button></div></div>';}
+  function renderStudents(root){
+    const f=state.filters,classes=state.admin.store.students.filter(s=>!f.grade||s.grade===f.grade).map(s=>s.classNum);
+    if(f.classNum)classes.push(f.classNum);
+    root.innerHTML='<div class="filters">'+select('filter-grade',['1','2','3'],f.grade,'학년')+select('filter-class',Array.from(new Set(classes)).sort((a,b)=>a-b),f.classNum,'학급')+select('filter-status',['재학','전출','자퇴','휴학','졸업'],f.status,'학적')+input('filter-search',f.search,'placeholder="이름·학번 검색" aria-label="학생 검색"')+'<button class="primary" data-action="new-student">추가</button>'+'<button data-action="student-transfer-preview">서버 분반배정</button>'+importTools('students')+'</div><div id="student-table"></div>';
+    renderStudentTable();
+  }
+  function renderStudentTable(){const f=state.filters,rows=state.admin.store.students.filter(s=>(!f.grade||s.grade===f.grade)&&(!f.classNum||s.classNum===f.classNum)&&(!f.status||s.status===f.status)&&(!f.search||s.name.includes(f.search)||studentNo(s).includes(f.search))).sort((a,b)=>Number(a.grade)-Number(b.grade)||Number(a.classNum)-Number(b.classNum)||Number(a.number)-Number(b.number));const max=Math.max(0,Math.ceil(rows.length/50)-1);state.page=Math.min(state.page,max);$('#student-table').innerHTML='<div class="table-scroll"><table class="data-table"><thead><tr><th>학번</th><th>이름</th><th>학적</th><th>수강</th><th>비고</th></tr></thead><tbody>'+rows.slice(state.page*50,state.page*50+50).map(s=>'<tr class="clickable" data-action="edit-student" data-id="'+esc(s.id)+'"><td>'+studentNo(s)+'</td><td style="padding-block:0"><button type="button" style="padding:0;color:inherit" aria-label="'+esc(studentNo(s)+' '+s.name+' 수정')+'">'+esc(s.name)+'</button></td><td>'+esc(s.status)+'</td><td>'+countStudentChoices(s)+'</td><td>'+esc(s.note)+'</td></tr>').join('')+'</tbody></table></div><div class="pager"><small>'+rows.length+'명</small><div><button class="quiet" data-action="student-page" data-delta="-1" '+(!state.page?'disabled':'')+'>이전</button><small>'+(state.page+1)+' / '+(max+1)+'</small><button class="quiet" data-action="student-page" data-delta="1" '+(state.page>=max?'disabled':'')+'>다음</button></div></div>';}
   function studentNo(s){return s.grade+String(s.classNum).padStart(2,'0')+String(s.number).padStart(2,'0');}
-  async function editStudent(id){const data=await call('adminStudent',{id:id||'',sectionsRevision:state.admin.loaded.sections?state.admin.sectionsRevision:''},'admin');if(data.sections){state.admin.store.sections=data.sections;state.admin.sectionsRevision=data.sectionsRevision;state.admin.loaded.sections=true;}state.editingRevision=data.meta.revision;const s=data.student||{grade:state.filters.grade||'2',classNum:state.filters.classNum||'1',number:'',name:'',status:'재학',note:'',choices:{}};state.editingStudent=s;openDialog(modalHead(s.id?'학생 수정':'학생 추가')+'<form data-form="save-student"><div class="form-grid">'+field('학년','edit-grade',select('edit-grade',['1','2','3'],s.grade))+field('학급','edit-class',input('edit-class',s.classNum,'type="number" min="1" max="99" required'))+field('번호','edit-number',input('edit-number',s.number,'type="number" min="1" max="99" required'))+field('이름','edit-name',input('edit-name',s.name,'required maxlength="80"'))+field('학적','edit-status',select('edit-status',['재학','전출','자퇴','휴학','졸업'],s.status))+field('비고','edit-note',input('edit-note',s.note,'maxlength="500"'))+'</div><div class="choice-list" id="student-choices"></div><div class="form-footer"><button type="button" data-action="close-modal">취소</button><button class="primary">저장</button></div></form>');renderStudentChoices(s.grade,s.choices);}
+  function countStudentChoices(s){return s.choiceCount??Object.values(s.choices||{}).filter(Boolean).length;}
+  async function editStudent(id,opener){
+    const data=await call('adminStudent',{id:id||'',sectionsRevision:state.admin.loaded.sections?state.admin.sectionsRevision:''},'admin');
+    if(data.sections){state.admin.store.sections=data.sections;state.admin.sectionsRevision=data.sectionsRevision;state.admin.loaded.sections=true;}
+    state.editingRevision=data.meta.revision;
+    const s=data.student||{grade:state.filters.grade||'2',classNum:state.filters.classNum||'1',number:'',name:'',status:'재학',note:'',choices:{}};
+    state.editingStudent=s;
+    openDialog(modalHead(s.id?'학생 수정':'학생 추가')+'<form data-form="save-student"><div class="form-grid">'+field('학년','edit-grade',select('edit-grade',['1','2','3'],s.grade))+field('학급','edit-class',input('edit-class',s.classNum,'type="number" min="1" max="99" required'))+field('번호','edit-number',input('edit-number',s.number,'type="number" min="1" max="99" required'))+field('이름','edit-name',input('edit-name',s.name,'required maxlength="80"'))+field('학적','edit-status',select('edit-status',['재학','전출','자퇴','휴학','졸업'],s.status))+field('비고','edit-note',input('edit-note',s.note,'maxlength="500"'))+'</div><div class="choice-list" id="student-choices"></div><div class="form-footer">'+(s.id?'<button type="button" style="margin-inline-end:auto" data-action="open-student-delete">삭제</button>':'')+'<button type="button" data-action="close-modal">취소</button><button class="primary">저장</button></div></form>');
+    renderStudentChoices(s.grade,s.choices);
+    modal.addEventListener('close',()=>{
+      if(!modal.open&&opener?.isConnected)opener.focus({preventScroll:true});
+    },{once:true});
+  }
+  function confirmStudentDelete(){
+    const s=state.editingStudent;
+    modal.insertAdjacentHTML('beforeend','<dialog id="student-delete-confirmation" style="width:420px" aria-labelledby="student-delete-title" aria-describedby="student-delete-details"><h2 id="student-delete-title">학생 삭제</h2><div role="alert" class="error" style="overflow-wrap:anywhere" tabindex="-1" hidden></div><p id="student-delete-details" style="overflow-wrap:anywhere">'+esc(studentNo(s)+' '+s.name+' · '+s.status+' · 수강 '+countStudentChoices(s)+'과목')+'</p><div class="form-footer"><button type="button" data-action="cancel-student-delete" autofocus>취소</button><button type="button" class="primary" data-action="delete-student">삭제</button></div></dialog>');
+    const dialog=$('#student-delete-confirmation');
+    dialog.addEventListener('cancel',e=>{if(busyCount)e.preventDefault();});
+    dialog.addEventListener('close',()=>dialog.remove(),{once:true});
+    dialog.showModal();
+  }
+  async function studentExistsAfterDelete(id){
+    try{
+      await call('adminStudent',{id,sectionsRevision:state.admin.sectionsRevision},'admin');
+      return true;
+    }catch(error){
+      if(['AUTH_REQUIRED','TERM_CHANGED'].includes(error.code))throw error;
+      return error.status===404&&error.code==='NOT_FOUND'?false:null;
+    }
+  }
   function renderStudentChoices(grade,choices){const sections=state.admin.store.sections.filter(s=>s.grade===grade),subjects=Array.from(new Set(sections.map(s=>s.subject))).sort((a,b)=>a.localeCompare(b,'ko'));$('#student-choices').innerHTML=subjects.map((name,i)=>field(name,'choice-'+i,'<select id="choice-'+i+'" data-subject="'+esc(name)+'">'+options(sections.filter(s=>s.subject===name).map(s=>s.code).sort((a,b)=>a.localeCompare(b,'ko',{numeric:true})),choices[name],'미배정')+'</select>')).join('');}
   function renderSections(root){root.innerHTML='<div class="filters">'+select('section-grade',['1','2','3'],'','학년')+input('section-search','','placeholder="과목·분반·교실 검색" aria-label="분반 검색"')+'<button class="primary" data-action="new-section">추가</button>'+importTools('sections')+'<button data-action="course-transfer">시수배당 전달 자료</button></div><div id="section-table"></div>';renderSectionTable();}
   function renderSectionTable(){const g=$('#section-grade').value,q=$('#section-search').value;const rows=state.admin.store.sections.filter(s=>(!g||s.grade===g)&&(!q||[s.subject,s.code,s.room].join(' ').includes(q)));$('#section-table').innerHTML='<div class="table-scroll"><table class="data-table"><thead><tr><th>학년</th><th>과목</th><th>분반</th><th>축약명</th><th>교실</th></tr></thead><tbody>'+rows.map(s=>'<tr class="clickable" data-action="edit-section" data-id="'+esc(s.id)+'"><td>'+s.grade+'</td><td>'+esc(s.subject)+'</td><td>'+esc(s.code)+'</td><td>'+esc(s.shortName)+'</td><td>'+esc(s.room)+'</td></tr>').join('')+'</tbody></table></div>'}
@@ -527,8 +561,9 @@
   }
   async function mutation(action,args){
     const teacher=$('#link-teacher')&&$('#link-teacher').value,grade=$('#block-grade')&&$('#block-grade').value,blocksOpen=$('#block-grade')&&$('#block-grade').closest('details').open;
-    const reply=await call(action,Object.assign({expectedRevision:action==='saveStudent'?state.editingRevision:state.admin.meta.revision,patch:true,workspaceOnly:state.adminTab!=='students',viewTeacher:teacher||''},args),'admin');
-    if(action==='saveStudent')forgetDraft('save-student');if(action==='saveSection')forgetDraft('save-section');if(action==='saveSettings')forgetDraft('settings');if(action==='commitImport')forgetDraft('preview-import');
+    const studentEdit=action==='saveStudent'||action==='deleteStudent';
+    const reply=await call(action,Object.assign({expectedRevision:studentEdit?state.editingRevision:state.admin.meta.revision,patch:true,workspaceOnly:state.adminTab!=='students',viewTeacher:teacher||''},args),'admin');
+    if(studentEdit)forgetDraft('save-student');if(action==='saveSection')forgetDraft('save-section');if(action==='saveSettings')forgetDraft('settings');if(action==='commitImport')forgetDraft('preview-import');
     state.teacherBoot=null;state.timetable=null;
     if(reply.bootstrap)state.admin=reply.bootstrap;
     else {
@@ -608,8 +643,47 @@
       case 'course-transfer':await previewCourseTransfer();break;
       case 'bulk-import':openBulkImport(el.dataset.kind);break;
       case 'import-example':await downloadImportExample(el.dataset.kind,el.dataset.format);break;
-      case 'new-student':await editStudent();break;
-      case 'edit-student':await editStudent(el.dataset.id);break;
+      case 'new-student':await editStudent('',el);break;
+      case 'edit-student':await editStudent(el.dataset.id,el.querySelector('button'));break;
+      case 'open-student-delete':confirmStudentDelete();break;
+      case 'cancel-student-delete':el.closest('dialog').close();break;
+      case 'delete-student':{
+        const id=state.editingStudent.id,dialog=el.closest('dialog'),alert=dialog.querySelector('[role=alert]');
+        let refreshFailed=false;
+        alert.hidden=true;
+        try{await mutation('deleteStudent',{id});}
+        catch(error){
+          if(['AUTH_REQUIRED','TERM_CHANGED'].includes(error.code))throw error;
+          const exists=await studentExistsAfterDelete(id);
+          if(exists!==false){
+            let message=error.code==='CONFLICT'?'자료가 변경되었습니다.':error.message||'삭제 요청을 처리하지 못했습니다.';
+            if(error.status===409||error.status===404)message+=' 학생 목록을 새로고침한 뒤 다시 열어 주세요.';
+            if(exists===null){
+              message='삭제 결과를 확인하지 못했습니다. 학생 목록을 새로고침해 주세요.';
+              el.hidden=true;
+            }
+            alert.hidden=false;
+            alert.textContent=message;
+            dialog.scrollTop=0;
+            loadingFocus=alert;
+            break;
+          }
+          forgetDraft('save-student');
+          state.teacherBoot=null;state.timetable=null;
+          try{await loadAdmin(true);}
+          catch(reloadError){
+            if(['AUTH_REQUIRED','TERM_CHANGED'].includes(reloadError.code))throw reloadError;
+            state.admin.store.students=state.admin.store.students.filter(s=>s.id!==id);
+            state.admin.loaded.students=false;
+            renderAdmin();
+            refreshFailed=true;
+          }
+        }
+        dialog.close();modal.close();modal.replaceChildren();state.editingStudent=null;
+        loadingFocus=$('#filter-search');
+        toast(refreshFailed?'삭제했습니다. 학생 목록을 새로고침해 주세요.':'삭제했습니다.');
+        break;
+      }
       case 'student-page':state.page+=Number(el.dataset.delta);renderStudentTable();break;
       case 'new-section':editSection();break;
       case 'edit-section':editSection(el.dataset.id);break;
@@ -627,7 +701,7 @@
       case 'restore-backup':if(confirm('현재 학기의 자료를 이 백업으로 복원하시겠습니까?')){await mutation('restore',{backupId:el.dataset.id});toast('복원했습니다.');}break;
       case 'switch-term':if($('#switch-term').value===state.admin.store.term)break;await mutation('switchTerm',{term:$('#switch-term').value});toast('학기를 전환했습니다.');break;
     }
-  },el.tagName==='BUTTON'?el:null,!['close-modal','password-dialog','teacher-tab','student-page','new-section','edit-section','restore-file'].includes(action));});
+  },el.tagName==='BUTTON'?el:null,!['close-modal','password-dialog','teacher-tab','student-page','open-student-delete','cancel-student-delete','new-section','edit-section','restore-file'].includes(action));});
   document.addEventListener('change',e=>{const el=e.target;run(async()=>{
     if(el.id==='login-role'){
       syncLoginPassword(el.value);
