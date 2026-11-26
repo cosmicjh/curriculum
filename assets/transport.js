@@ -34,14 +34,15 @@
   async function send(name,data){
    const quickRead=name==='login'||reads.has(name)&&!['previewImport','downloadBackup','classBatch'].includes(name)||name==='passwordParameters'||name==='classSwap'&&['load','resume'].includes(data.swapAction)||name==='courseWorkspace'&&data.method==='GET'||name==='studyroom'&&['dashboard','query','students','settings','history'].includes(data.op);
    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs??(quickRead?15000:110000));
-   try{const response=await fetch(new URL(name,api),{method:'POST',credentials:cross?'omit':'same-origin',cache:'no-store',headers:{'Content-Type':'application/json',...(cross&&memorySession?{Authorization:'Bearer '+memorySession.token}:{})},body:JSON.stringify(data),signal:controller.signal});
+   const sentSession=memorySession;
+   try{const response=await fetch(new URL(name,api),{method:'POST',credentials:cross?'omit':'same-origin',cache:'no-store',headers:{'Content-Type':'application/json',...(cross&&sentSession?{Authorization:'Bearer '+sentSession.token}:{})},body:JSON.stringify(data),signal:controller.signal});
     function responseError(code,message){return Object.assign(Error(message),{code,status:response.status,...(timeoutMs!==undefined&&response.status===429?{retryAfter:response.headers.get('Retry-After')}:{})});}
     const upstreamError=()=>responseError('UPSTREAM_ERROR','서버 응답을 확인하지 못했습니다 ('+response.status+'). 입력 자료를 보관하고 자료 목록에서 저장 여부를 확인하세요.');
     if(!response.headers.get('Content-Type')?.includes('application/json'))throw upstreamError();
     const body=await response.text();let result;
     try{result=JSON.parse(body);}catch(e){if(timeoutMs!==undefined&&(response.status>=500||response.status===429))throw upstreamError();throw e;}
     const perf=global.TIMETABLE_PERF||(global.TIMETABLE_PERF=[]);perf.push({action:name,elapsedMs:Math.round(performance.now()-started),bytes:Number(response.headers.get('Content-Length'))||new TextEncoder().encode(body).length,serverTiming:response.headers.get('Server-Timing'),rowsRead:Number(response.headers.get('X-D1-Rows-Read')),rowsWritten:Number(response.headers.get('X-D1-Rows-Written'))});if(perf.length>80)perf.shift();
-    if(!result.ok){if(result.code==='AUTH_REQUIRED'){if(action==='login'||memorySession?.role==='teacher'||!cross)storeTeacher(null);memorySession=null;}throw responseError(result.code,result.error||'요청을 처리하지 못했습니다.');}return result.data;
+    if(!result.ok){if(result.code==='AUTH_REQUIRED'&&(!cross||action==='login'||sentSession===memorySession)){if(action==='login'||memorySession?.role==='teacher'||!cross)storeTeacher(null);memorySession=null;}throw responseError(result.code,result.error||'요청을 처리하지 못했습니다.');}return result.data;
    }catch(e){
     if(e.name==='AbortError'){
      const error=Error(quickRead?'조회 응답이 지연되었습니다. 다시 조회해 주세요.':'응답을 확인하지 못했습니다. 입력값을 보관하고 새로고침하여 저장 결과를 확인하세요.');

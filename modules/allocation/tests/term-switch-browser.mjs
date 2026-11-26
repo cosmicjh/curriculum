@@ -22,7 +22,7 @@ try{
   const seeded=await h.api('/global','PUT',{global,newSheets:[],revision:globalRevision,operationId:crypto.randomUUID()},admin);
   assert(seeded.ok,seeded.error);
   assert((await switchApi('2026-1')).ok);
-  assert.deepEqual((await get('/term')).data,{activeTerm:'2026-2',archivedTerms:['2026-2','2026-1']});
+  assert.deepEqual((await get('/term')).data,{term:'2026-1',activeTerm:'2026-2',archivedTerms:['2026-2','2026-1']});
 
   const origin=await h.listen();
   browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:process.platform==='win32'?{channel:'msedge'}:{})});

@@ -4,7 +4,8 @@
   const days=['월','화','수','목','금'],roles={student:'학생',teacher:'교사',admin:'관리자'};
   const studentMenu=['studentTimetable','학생 시간표'];
   const teacherLastModuleKey='timetable.teacherLastModule';
-  const state={meta:null,teacherBoot:null,timetable:null,studentTimetable:null,roster:null,admin:null,adminTab:'sectionAssignment',teacherTab:'timetable',page:0,filters:{grade:'',classNum:'',status:'',search:''},importPayload:null,importPreview:null,route:'home'};
+  const validSectionTerm=term=>typeof term==='string'&&/^(?:20[2-9][0-9]|2100)-[12]$/.test(term);
+  const state={meta:null,teacherBoot:null,timetable:null,studentTimetable:null,roster:null,admin:null,adminTab:'sectionAssignment',sectionTerm:null,teacherTab:'timetable',page:0,filters:{grade:'',classNum:'',status:'',search:''},importPayload:null,importPreview:null,route:'home'};
   // Drafts remain in memory only, scoped to term/form/entity. Never retain passwords.
   const formDrafts=new Map();
   function draftKey(form){return form.dataset.draftKey||(form.dataset.draftKey=[state.meta?.term||'',form.dataset.form,form.dataset.form==='save-student'?(state.editingStudent?.id||'new'):form.dataset.form==='save-section'?(state.editingSection?.id||'new'):''].join('|'));}
@@ -20,7 +21,25 @@
   const coursePane=document.createElement('section'),courseFrames=new Map();
   coursePane.id='course-pane';coursePane.hidden=true;app.after(coursePane);
   const sectionPane=document.createElement('section');sectionPane.id='section-assignment-pane';sectionPane.hidden=true;app.after(sectionPane);
-  let sectionFrame=null;
+  let sectionFrame=null,sectionTermRequest=null;
+  function sectionTerms(){return {targetTerm:state.sectionTerm,activeTerm:state.admin?.store.term??null};}
+  function syncSectionTerms(){sectionFrame?.contentWindow?.setSectionAssignmentTerms?.(sectionTerms());}
+  function loadSectionTerm(){
+    if(state.sectionTerm!==null||sectionTermRequest)return;
+    const request=call('courseWorkspace',{role:'admin',path:'/term',method:'GET',data:{}},'admin');
+    sectionTermRequest=request;
+    run(async()=>{
+      const allocation=await request.catch(error=>{
+        if(sectionTermRequest===request&&error.code==='AUTH_REQUIRED')throw error;
+        return null;
+      });
+      if(sectionTermRequest!==request)return;
+      sectionTermRequest=null;
+      if(!state.admin)return;
+      state.sectionTerm=validSectionTerm(allocation?.term)?allocation.term:state.admin.store.term;
+      syncSectionTerms();
+    },null,false);
+  }
   function showSectionAssignment(){
     if(!sectionFrame){
       sectionFrame=document.createElement('iframe');sectionFrame.title='분반배정';
@@ -28,10 +47,19 @@
       sectionPane.append(sectionFrame);
     }
     sectionPane.hidden=false;document.body.classList.add('section-assignment-workspace');
+    syncSectionTerms();loadSectionTerm();
   }
   window.sectionAssignmentConnect=source=>{
-    if(sectionFrame?.contentWindow!==source||state.route!=='admin'||!token('admin'))return null;
+    if(sectionFrame?.contentWindow!==source||state.route!=='admin'||!state.admin||!token('admin'))return null;
     return {
+      terms:sectionTerms,
+      setTerm:term=>{
+        requireSectionAssignment(source);
+        if(busyCount)throw Error('처리가 끝난 뒤 학기를 전환하세요.');
+        if(!validSectionTerm(term))throw Error('학년도와 학기를 확인하세요.');
+        state.sectionTerm=term;
+        return sectionTerms();
+      },
       resize:height=>{if(sectionFrame?.contentWindow===source&&Number.isFinite(height))sectionFrame.style.height=Math.ceil(height)+'px';},
       loadXlsx:()=>TTAssets.load('xlsx'),
       importHours:data=>run(()=>openAssignmentHours(source,data)),
@@ -40,11 +68,13 @@
     };
   };
   function requireSectionAssignment(source){
-    if(sectionFrame?.contentWindow!==source||state.route!=='admin'||state.adminTab!=='sectionAssignment'||!token('admin'))throw Error('관리자 메뉴에서 분반배정을 열어 주세요.');
+    if(sectionFrame?.contentWindow!==source||state.route!=='admin'||state.adminTab!=='sectionAssignment'||!state.admin||!token('admin'))throw Error('관리자 메뉴에서 분반배정을 열어 주세요.');
+    if(!state.sectionTerm)throw Error('대상 학기를 확인하는 중입니다.');
   }
   async function openAssignmentHours(source,data){
     requireSectionAssignment(source);
-    const saved=await call('stageToolTransfer',{term:state.admin.store.term,kind:'hours',data},'admin');
+    const saved=await call('stageToolTransfer',{term:state.sectionTerm,kind:'hours',data},'admin');
+    state.admin.loaded.settings=false;
     toast(saved.term+' 학기에 시수배당 자료를 전달했습니다.');
     state.adminTab='hours';renderAdmin();
     const frame=courseFrames.get('admin');
@@ -58,12 +88,14 @@
   }
   async function loadAssignmentSectionCounts(source){
     requireSectionAssignment(source);
-    const rows=await call('courseTransfer',{summary:'counts'},'admin');
-    if(!rows.length)throw Error('현재 학기에 전달된 시수배당 확정 분반이 없습니다.');
+    const term=state.sectionTerm;
+    const rows=await call('courseTransfer',{summary:'counts',term},'admin');
+    if(!rows.length)throw Error(term+'에 전달된 시수배당 확정 분반이 없습니다.');
     return rows;
   }
   async function previewAssignedStudents(source,students){
     requireSectionAssignment(source);
+    if(state.sectionTerm!==state.admin.store.term)throw Error('학생 배정 미리보기는 통합시간표 운영 학기에서만 할 수 있습니다.');
     const saved=await call('stageToolTransfer',{term:state.admin.store.term,kind:'students',data:students},'admin');
     await previewServerTransfer(saved);
   }
@@ -201,7 +233,10 @@
   function route(){const h=location.hash.match(/^#\/(home|student|teacher|admin)/);return h?h[1]:(document.body.dataset.page||'home');}
   function href(page){return '#/'+page;}
   function session(role){try{const s=JSON.parse(sessionStorage.getItem('timetable.'+role)||'null')||(role==='teacher'?TTApi.rememberedTeacher():null);if(s&&s.expiresAt>Date.now()&&TTApi.hasSession(role))return s;}catch(e){}sessionStorage.removeItem('timetable.'+role);return null;}
-  function clearSessions(){for(const role of Object.keys(roles))sessionStorage.removeItem('timetable.'+role);}
+  function clearSessions(){
+    sectionTermRequest=null;state.sectionTerm=null;
+    for(const role of Object.keys(roles))sessionStorage.removeItem('timetable.'+role);
+  }
   function token(role){return (session(role)||role==='teacher'&&session('admin')||{}).token||'';}
   async function call(action,args={},role){const writes=new Set(['saveAllocation','commitImport','saveStudent','saveSection','saveOverride','saveBlock','saveBlocks','saveSettings','switchTerm','createTerm','stageToolTransfer','backup','restore','changePassword']);const viewTerm=role==='admin'?state.admin?.store.term:role==='teacher'?state.teacherBoot?.meta.term:undefined;return TTApi.request(action,{...(!['adminBootstrap','teacherBootstrap','login','logout'].includes(action)&&viewTerm?{viewTerm}:{}),...(writes.has(action)?{expectedTerm:state.admin?.store.term,expectedRevision:state.admin?.meta.revision}:{}),...args});}
   function toast(message){$('#toast').textContent=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').textContent='',5500);}
