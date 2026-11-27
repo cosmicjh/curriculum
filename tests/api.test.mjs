@@ -109,7 +109,7 @@ test('hours can create a future term without switching the operating term or wid
  const students={kind:'students',data:[{grade:'3',classNum:'1',number:'1',name:'가상학생하나',choices:{가상선택:'A1'}}]};
  assert.equal((await stage({},teacher)).status,401);
  assert.equal((await stage(students,teacher)).status,401);
- assert.equal((await stage(students)).code,'TERM_CHANGED');
+ assert.equal((await stage(students)).status,400);
  assert.equal((await stage({term:'2027-3'})).status,400);
  assert.equal((await stage({data:{}})).status,400);
  assert.equal((await stage({viewTerm:term})).code,'TERM_CHANGED');
@@ -130,6 +130,105 @@ test('hours can create a future term without switching the operating term or wid
  assert(received.ok,received.error);assert.equal(received.data.term,term);
  assert.equal(received.data.id,saved.data.result.id);
  assert.equal(received.data.data.sheets[0].year,2027);assert.equal(received.data.data.sheets[0].semester,1);
+});
+
+test('future student transfers connect only matched promoted students and preserve legacy exact matching',async t=>{
+ const h=await harness();t.after(()=>h.close());
+ const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
+ const term='2027-1',sourceTerm='2026-2';
+ const rows=['가상유지','가상누락','가상대응이름','가상학년','가상명부','가상명부이름'].map((name,i)=>({
+  grade:'1',classNum:'1',number:String(i+1),name,choices:{가상선택:'A1'}
+ }));
+ const stage=(args={},cookie=admin)=>h.mutation('stageToolTransfer',{term,kind:'students',data:rows,...args},cookie);
+ const summary=(cookie=admin)=>h.api('toolTransfer',{kind:'students'},cookie);
+ assert.equal((await stage({},teacher)).status,401);
+ assert.equal((await stage({},'')).status,401);
+ assert.equal((await stage({term:'2026-1'})).status,409);
+ assert.equal((await stage({term:'2027-3'})).status,400);
+ assert.equal((await stage({data:[{...rows[0],grade:'3'}]})).status,400);
+ assert.equal((await stage({expectedTerm:term})).code,'CONFLICT');
+ assert.equal((await stage({expectedRevision:'-1'})).code,'CONFLICT');
+ const before=(await h.api('bootstrap')).data;
+ const saved=await stage();assert(saved.ok,saved.error);
+ assert.equal(saved.data.result.sourceTerm,sourceTerm);
+ assert.equal(saved.data.result.count,rows.length);
+ assert.deepEqual((await h.api('adminSettings',{},admin)).data.terms,[term,sourceTerm]);
+ const after=(await h.api('bootstrap')).data;
+ assert.equal(after.term,sourceTerm);assert.equal(after.revision,before.revision);
+ assert.equal((await summary()).data,null);
+ assert.deepEqual(JSON.parse((await h.sql("SELECT content FROM tool_transfers WHERE term_id=? AND kind='students'",term)).results[0].content),{sourceTerm,students:rows});
+
+ assert((await h.mutation('switchTerm',{term},admin)).ok);
+ assert.equal((await summary(teacher)).status,401);
+ assert.equal((await summary('')).status,401);
+ assert.deepEqual((await summary()).data,saved.data.result);
+ const promoted={grade:'2',classNum:'7',number:'11',name:rows[0].name,status:'재학',note:'가상 비고',choices:{}};
+ const linked=await h.mutation('saveStudent',{student:promoted},admin);assert(linked.ok,linked.error);
+ assert((await h.mutation('saveStudent',{student:{...promoted,number:'16',name:'다른 가상학생'}},admin)).ok);
+ const studentMapping=[
+  {oldNumber:'10101',newNumber:'20711',name:rows[0].name},
+  {oldNumber:'10103',newNumber:'20713',name:'다른 가상학생'},
+  {oldNumber:'10104',newNumber:'30714',name:rows[3].name},
+  {oldNumber:'10105',newNumber:'20715',name:rows[4].name},
+  {oldNumber:'10106',newNumber:'20716',name:rows[5].name}
+ ];
+ const ref={kind:'students',id:saved.data.result.id};
+ const transferRef={...ref,studentMapping};
+ const preview=(transferRef,cookie=admin)=>h.api('previewImport',{transferRef},cookie);
+ const commit=(transferRef,cookie=admin)=>h.mutation('commitImport',{transferRef},cookie);
+ for(const cookie of [teacher,'']){
+  assert.equal((await preview(transferRef,cookie)).status,401);
+  assert.equal((await commit(transferRef,cookie)).status,401);
+ }
+ assert.equal((await preview(ref)).status,400);
+ assert.equal((await commit(ref)).status,400);
+ const maximumRows=[...studentMapping,...Array.from({length:3000-studentMapping.length},(_,i)=>({
+  oldNumber:String(11000+i),newNumber:String(21000+i),name:'가상 무관 학생'
+ }))];
+ assert((await preview({...ref,studentMapping:maximumRows})).ok);
+ const overMaximum={...ref,studentMapping:[...maximumRows,{oldNumber:'18000',newNumber:'28000',name:'가상 초과 학생'}]};
+ for(const request of [preview,commit]){
+  const denied=await request(overMaximum);
+  assert.equal(denied.status,400);assert.match(denied.error,/3,000행까지/);
+ }
+ for(const invalid of [
+  [...studentMapping,{...studentMapping[0],newNumber:'20717'}],
+  [...studentMapping,{...studentMapping[0],oldNumber:'10107'}],
+  [{...studentMapping[0],newNumber:'2711'}],
+  [{...studentMapping[0],name:''}],
+  studentMapping.slice(1)
+ ]){
+  assert.equal((await preview({...ref,studentMapping:invalid})).status,400);
+  assert.equal((await commit({...ref,studentMapping:invalid})).status,400);
+ }
+ const result=await preview(transferRef);assert(result.ok,result.error);
+ assert.deepEqual(result.data.errors,[]);
+ assert.equal(result.data.changedStudents,1);
+ assert.deepEqual(result.data.inferredSections,['2학년 가상선택 A1']);
+ assert.deepEqual(result.data.excludedStudents.map(row=>[row.oldNumber,row.reason]),[
+  ['10102','대응 없음'],['10103','이름 불일치'],['10104','진급 학년 불일치'],['10105','명부 없음'],['10106','명부 이름 불일치']
+ ]);
+ const applied=await commit(transferRef);assert(applied.ok,applied.error);
+ const detail=(await h.api('adminStudent',{id:linked.data.result.id},admin)).data.student;
+ assert.deepEqual(detail.choices,{가상선택:'A1'});assert.equal(detail.note,promoted.note);
+ assert.equal((await h.api('adminBootstrap',{},admin)).data.store.students.length,2);
+ assert((await h.sql("SELECT backup_id FROM history WHERE action='commitImport'")).results[0].backup_id);
+ assert.deepEqual(JSON.parse((await h.sql("SELECT content FROM tool_transfers WHERE term_id=? AND kind='students'",term)).results[0].content),{sourceTerm,students:rows});
+ const manual=await h.mutation('saveStudent',{student:{...detail,choices:{가상선택:'B'}}},admin);assert(manual.ok,manual.error);
+ assert.match((await preview(transferRef)).data.errors.join('\n'),/수동 배정과 충돌/);
+ assert.equal((await commit(transferRef)).status,400);
+
+ const legacyRows=[{...promoted,choices:{가상선택:'B'}},{...promoted,number:'16',name:'이름 불일치'}];
+ await h.sql("UPDATE tool_transfers SET transfer_id='legacy',content=? WHERE term_id=? AND kind='students'",JSON.stringify(legacyRows),term);
+ assert.equal((await preview(transferRef)).code,'TRANSFER_CHANGED');
+ assert.equal((await commit(transferRef)).code,'TRANSFER_CHANGED');
+ assert.equal((await summary()).data.sourceTerm,term);
+ assert.equal((await summary()).data.count,2);
+ const legacyRef={kind:'students',id:'legacy'};
+ assert.match((await preview(legacyRef)).data.errors.join('\n'),/재학생 명부와 이름 또는 학번이 일치하지 않습니다/);
+ assert.equal((await commit(legacyRef)).status,400);
+ await h.sql("UPDATE tool_transfers SET content=? WHERE term_id=? AND kind='students'",JSON.stringify(legacyRows.slice(0,1)),term);
+ assert((await commit(legacyRef)).ok);
 });
 
 test('Workers + actual local D1: authorization, migration, edits, term isolation, backup, concurrent writes',async t=>{

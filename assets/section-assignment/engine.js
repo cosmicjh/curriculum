@@ -63,9 +63,26 @@ function ensureParallelCapacity(sheet, opts) {
     if(ids.length>eligible*limit)throw new Error(`'${course}': ${ids.length}분반을 사용 가능한 ${eligible}개 시간블록에 동시 분반 상한 ${limit}개로 배치할 수 없습니다. 현재 설정에서는 최대 ${eligible*limit}분반까지 가능합니다. 분반 수·시간블록·동시 분반 상한을 확인해 주세요.`);
   }
 }
+function coupledSectionCapacity(capacities,parentSid,childSid=parentSid) {
+  return Math.min(capacities[parentSid],capacities[childSid]);
+}
+
+function sectionCapacities(sheet,maxPerSection,cohortLinks=[]) {
+  const applicants=new Map();
+  for(const student of sheet.students)for(const course of student.selected)applicants.set(course,(applicants.get(course)||0)+1);
+  const capacities=sheet.algoState.sections.map(({course})=>Math.max(maxPerSection,Math.ceil((applicants.get(course)||0)/sheet.courses[course])));
+  for(const {parentSid,childSid} of cohortLinks){
+    const capacity=coupledSectionCapacity(capacities,parentSid,childSid);
+    capacities[parentSid]=capacity;
+    capacities[childSid]=capacity;
+  }
+  return capacities;
+}
+
 // Independent audit: recompute actual assignments, never trust cached totals alone.
 function validateResult(sheet, result, opts) {
   const errors=[], sections=sheet.algoState.sections, n=sections.length;
+  const capacities=opts.sectionCapacities??sectionCapacities(sheet,opts.maxPerSection);
   const loads=Array(n).fill(0), members=sections.map(()=>new Set());
   const rows=new Set(sheet.students.map(stu=>String(stu.rowIndex)));
   if (!Array.isArray(result.secToGroup) || result.secToGroup.length!==n) return {ok:false,complete:false,errors:['분반 코드 배열 길이 오류']};
@@ -101,7 +118,7 @@ function validateResult(sheet, result, opts) {
   }
   for (const row of Object.keys(result.assignments)) if (!rows.has(row)) errors.push(`존재하지 않는 학생: ${row}`);
   for (let sid=0;sid<n;sid++) {
-    if (loads[sid]>opts.maxPerSection) errors.push(`분반 ${sid}: 정원 초과`);
+    if (loads[sid]>capacities[sid]) errors.push(`분반 ${sid}: 정원 초과`);
     if (loads[sid]!==result.sectionLoad[sid]) errors.push(`분반 ${sid}: 인원 집계 불일치`);
     for (const row of members[sid]) for (const other of (opts.avoidMap || {})[row] || []) if (members[sid].has(other)) errors.push(`분반 ${sid}: 기피 학생 동반 배정`);
   }
@@ -512,7 +529,7 @@ function findBestPartialMatching(courseOpts, courseNames, nGroups, groupCredits,
 
 function assignStudents(sheet, secToGroup, opts) {
   const { sections, courseToSections } = sheet.algoState;
-  const { maxPerSection, nGroups, rnd, avoidMap, groupCredits, courseCredits, creditPairs } = opts;
+  const { sectionCapacities, nGroups, rnd, avoidMap, groupCredits, courseCredits, creditPairs } = opts;
   const hasAvoid = avoidMap && Object.keys(avoidMap).length > 0;
 
   // 대단위 분반 지원: course → group → [sids]
@@ -563,7 +580,7 @@ function assignStudents(sheet, secToGroup, opts) {
       const m = courseGroupToSecs[c] || {};
       for (const gStr of Object.keys(m)) {
         const g = +gStr;
-        let eligible = m[gStr].filter(s => sectionLoad[s] < maxPerSection);
+        let eligible = m[gStr].filter(s => sectionLoad[s] < sectionCapacities[s]);
         if (myAvoids && myAvoids.size > 0) {
           eligible = eligible.filter(s => {
             for (const otherRow of sectionStudents[s]) {
@@ -720,7 +737,6 @@ function courseBalanceObjective(sheet, sectionLoad, courseName, allowedDiff) {
 
 function rematchStudentsForBalance(sheet, secToGroup, result, opts, sectionMembers) {
   const { courseToSections } = sheet.algoState;
-  const maxPerSection = Number(opts.maxPerSection || 9999);
   const groupCredits = opts.groupCredits || sheet.groupCredits || [];
   const courseCredits = opts.courseCredits || sheet.courseCredits || {};
   const creditPairs = opts.creditPairs || new Set();
@@ -782,7 +798,7 @@ function rematchStudentsForBalance(sheet, secToGroup, result, opts, sectionMembe
         // 같은 코드에 복수 분반이 있으면 가장 덜 찬 적격 분반 하나만 후보로 둔다.
         const bestByGroup = new Map();
         for (const sid of (courseToSections[c] || [])) {
-          if (result.sectionLoad[sid] >= maxPerSection) continue;
+          if (result.sectionLoad[sid] >= opts.sectionCapacities[sid]) continue;
           if (myAvoids && myAvoids.size > 0) {
             let blocked = false;
             for (const otherRow of sectionMembers[sid]) {
@@ -873,7 +889,6 @@ function rebalanceStudentAssignments(sheet, secToGroup, result, opts) {
   }
 
   const { sections, courseToSections } = sheet.algoState;
-  const maxPerSection = Number(opts.maxPerSection || 9999);
   const studentByRow = new Map(sheet.students.map(s => [s.rowIndex, s]));
   const sectionMembers = sections.map(() => new Set());
   for (const stu of sheet.students) {
@@ -908,7 +923,7 @@ function rebalanceStudentAssignments(sheet, secToGroup, result, opts) {
           for (const targetSid of sortedLow) {
             if (sourceSid === targetSid) continue;
             if (result.sectionLoad[sourceSid] - result.sectionLoad[targetSid] < 2) continue;
-            if (result.sectionLoad[targetSid] >= maxPerSection) continue;
+            if (result.sectionLoad[targetSid] >= opts.sectionCapacities[targetSid]) continue;
 
             // 현재 과목의 과밀 분반 학생 중 실제 이동 가능한 학생을 찾는다.
             const rows = [...sectionMembers[sourceSid]].sort((a, b) => a - b);
@@ -1193,7 +1208,7 @@ function repairIncompleteAssignments(sheet, secToGroup, result, opts) {
     const choices=stu.selected.map(c=>{
       const best=new Map();
       for(const sid of sheet.algoState.courseToSections[c]) {
-        if(result.sectionLoad[sid]>=opts.maxPerSection)continue;
+        if(result.sectionLoad[sid]>=opts.sectionCapacities[sid])continue;
         if([...(opts.avoidMap || {})[stu.rowIndex] || []].some(row=>members[sid].has(row)))continue;
         const g=secToGroup[sid], prior=best.get(g);
         if(prior===undefined || result.sectionLoad[sid]<result.sectionLoad[prior])best.set(g,sid);
@@ -1328,7 +1343,7 @@ function auditCoupledCohorts(sheet, result, opts = {}) {
   return {ok:errors.length===0,errors:[...new Set(errors)],links};
 }
 
-function compileCoupledProblem(sheet, opts) {
+function compileCoupledProblem(sheet, opts, logFn) {
   const families = ensureCoupledConfiguration(sheet,opts);
   if (!families.length) return null;
   const ones = new Set(families.map(f => f.one));
@@ -1352,6 +1367,17 @@ function compileCoupledProblem(sheet, opts) {
   }
   inner.cohortProjection={sheet,innerToReal,realToInner};
   const innerOpts={...opts,courseCredits:inner.courseCredits,creditPairs:new Set(),bigsecCourses:new Set([...opts.bigsecCourses || []].filter(c=>!ones.has(c))),cohortPools:pools};
+  innerOpts.sectionCapacities=innerToReal.map(ids=>{
+    const capacity=coupledSectionCapacity(opts.sectionCapacities,...ids);
+    if(ids.some(sid=>opts.sectionCapacities[sid]>capacity)){
+      const label=ids.map(sid=>{
+        const {course,idx}=sheet.algoState.sections[sid];
+        return `'${course}' ${idx}분반`;
+      }).join(' + ');
+      logFn(`  [${sheet.name}] 2+1 결합 ${label} · 적용 정원 ${capacity}명으로 제한`,'warn');
+    }
+    return capacity;
+  });
   innerOpts.coverageGroups=opts.coverageGroups?.map(ids => [...new Set(ids.map(sid=>realToInner[sid]))]);
   if (opts.conflicts) {
     innerOpts.conflicts=inner.algoState.sections.map(()=>new Set());
@@ -1407,7 +1433,16 @@ function countCohortPoolViolations(secToGroup, opts) {
 
 async function runSheet(sheet, opts, logFn) {
   ensureParallelCapacity(sheet,opts);
-  const compiled=compileCoupledProblem(sheet,opts);
+  const capacities=sectionCapacities(sheet,opts.maxPerSection);
+  opts={...opts,sectionCapacities:capacities};
+  for(const [course,ids] of Object.entries(sheet.algoState.courseToSections)){
+    const capacity=capacities[ids[0]];
+    if(capacity>opts.maxPerSection){
+      const applicants=sheet.students.filter(s=>s.selected.includes(course)).length;
+      logFn(`  [${sheet.name}] '${course}' 신청 ${applicants}명 · ${ids.length}분반 · 적용 정원 ${capacity}명으로 상향`,'warn');
+    }
+  }
+  const compiled=compileCoupledProblem(sheet,opts,logFn);
   if (!compiled) return runSheetCore(sheet,opts,logFn);
   logFn('  2+1 동일 학생 구성 (강제): 결합 과목을 하나의 3학점 단위로 배정·이동·균등화합니다.','dim');
   const result=await runSheetCore(compiled.sheet,compiled.opts,logFn);
@@ -1604,4 +1639,4 @@ async function runSheetCore(sheet, opts, logFn) {
 
 // ============================================================
 
-export { escapeHtml, courseGroupCounts, ensureParallelCapacity, validateResult, studentDisplay, parseWorkbook, buildSections, computeConflictSections, pairKey, courseSpreadSummary, ensureCoupledConfiguration, auditCoupledCohorts, runSheet };
+export { escapeHtml, courseGroupCounts, ensureParallelCapacity, sectionCapacities, validateResult, studentDisplay, parseWorkbook, buildSections, computeConflictSections, pairKey, courseSpreadSummary, ensureCoupledConfiguration, auditCoupledCohorts, runSheet };

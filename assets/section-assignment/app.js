@@ -1,4 +1,4 @@
-import { escapeHtml, courseGroupCounts, ensureParallelCapacity, validateResult, studentDisplay, parseWorkbook, buildSections, computeConflictSections, pairKey, courseSpreadSummary, ensureCoupledConfiguration, auditCoupledCohorts, runSheet } from "./engine.js";
+import { escapeHtml, courseGroupCounts, ensureParallelCapacity, sectionCapacities, validateResult, studentDisplay, parseWorkbook, buildSections, computeConflictSections, pairKey, courseSpreadSummary, ensureCoupledConfiguration, auditCoupledCohorts, runSheet } from "./engine.js";
 
 export function mountSectionAssignment(bridge){
 let XLSX;
@@ -108,11 +108,12 @@ function buildOutputWorkbook(allSheets, allSheetResults, candidateIndex) {
   appendSheet(XLSX.utils.aoa_to_sheet(audits),'결과 검증');
 
   // 그룹별 시간표
-  const groupRows = [['시트', '분반 코드', '코드 학점', '과목', '과목 학점', '분반 일련번호', '인원', '시간블록 코드']];
+  const groupRows = [['시트', '분반 코드', '코드 학점', '과목', '과목 학점', '분반 일련번호', '인원', '시간블록 코드', '적용 정원']];
   for (let si = 0; si < allSheets.length; si++) {
     const sheet = allSheets[si];
     const result = getResult(si);
     const { sections } = sheet.algoState;
+    const capacities=sectionCapacities(sheet,lastRunSettings.maxPerSection,result.validation.cohortLinks);
     for (let g = 0; g < sheet.groups.length; g++) {
       const items = [];
       for (let sid = 0; sid < sections.length; sid++) {
@@ -129,6 +130,7 @@ function buildOutputWorkbook(allSheets, allSheetResults, candidateIndex) {
           sections[sid].idx,
           result.sectionLoad[sid],
           sheet.groups[g],
+          capacities[sid],
         ]);
       }
       const total = items.reduce((a, sid) => a + result.sectionLoad[sid], 0);
@@ -137,7 +139,7 @@ function buildOutputWorkbook(allSheets, allSheetResults, candidateIndex) {
     }
   }
   const wsGroups = XLSX.utils.aoa_to_sheet(groupRows);
-  wsGroups['!cols'] = [{wch:18},{wch:12},{wch:10},{wch:26},{wch:10},{wch:14},{wch:8},{wch:14}];
+  wsGroups['!cols'] = [{wch:18},{wch:12},{wch:10},{wch:26},{wch:10},{wch:14},{wch:8},{wch:14},{wch:12}];
   appendSheet(wsGroups, '코드별 시간표');
 
   // 미배정 학생
@@ -197,7 +199,7 @@ function buildOutputWorkbook(allSheets, allSheetResults, candidateIndex) {
   for (const sheet of allSheets) {
     cfgRows.push(['분반코드', sheet.name, sheet.groups.join(', '), sheet.groupCredits.join(', '), '', '']);
     cfgRows.push(['선택검증', sheet.name, '기대 총학점', sheet.expectedTotalCredits == null ? '자동' : sheet.expectedTotalCredits, '', '']);
-    cfgRows.push(['공통정원', sheet.name, '분반당 최대 인원', (loadedData && loadedData.globalMax) || 35, '', '']);
+    cfgRows.push(['공통정원', sheet.name, '기본 정원', lastRunSettings.maxPerSection, '', '']);
     if (coverageEnabled[sheet.name]) {
       cfgRows.push(['코드커버리지', sheet.name, (coverageCourses[sheet.name] || []).join(', '), '모든 코드 커버 강제', '', '']);
     }
@@ -231,25 +233,28 @@ let isRunning=false, fileLoadToken=0, cancelActive=null;
 let lastRunSettings=null, resultIncomplete=[];
 let hoursExportResults=null;
 let lockedControls=[];
+let loadedData=null;
 let targetTerm,activeTerm,isSending=false,isLoadingCounts=false;
 const termSwitchBtn=document.getElementById('termSwitchBtn'),termDialog=document.getElementById('termDialog');
 const termYear=document.getElementById('termYear'),termSemester=document.getElementById('termSemester');
 const courseCountsBtn=document.getElementById('courseCountsBtn');
-const previewOnlyActive='학생 배정 미리보기는 통합시간표 운영 학기에서만 할 수 있습니다.';
+const previewStudentsBtn=document.getElementById('previewStudentsBtn'),studentPreviewStatus=document.getElementById('studentPreviewStatus');
+const termYearDifference=()=>Number(targetTerm?.slice(0,4))-Number(activeTerm?.slice(0,4));
 function updateTermControls(){
   const complete=hoursExportResults&&resultIncomplete.includes(false);
   const unavailable=isRunning||isSending||!targetTerm;
   termSwitchBtn.disabled=unavailable;
   courseCountsBtn.disabled=unavailable||isLoadingCounts;
-  document.getElementById('hoursExportBtn').disabled=isRunning||!complete;
+  document.getElementById('hoursExportBtn').disabled=isRunning||!targetTerm||!complete;
   document.getElementById('sendHoursBtn').disabled=unavailable||!complete;
-  document.getElementById('previewStudentsBtn').disabled=unavailable||!complete||targetTerm!==activeTerm;
-  document.getElementById('studentPreviewStatus').textContent=targetTerm&&targetTerm!==activeTerm?previewOnlyActive:'';
+  previewStudentsBtn.disabled=unavailable||!complete;
+  previewStudentsBtn.textContent=targetTerm&&targetTerm!==activeTerm?'학생 배정 저장':'학생 배정 미리보기';
 }
 window.setSectionAssignmentTerms=terms=>{
-  if(terms.targetTerm!==targetTerm){
+  if(terms.targetTerm!==targetTerm||terms.activeTerm!==activeTerm){
     document.getElementById('courseCountsStatus').textContent='';
     document.getElementById('hoursExportStatus').textContent='';
+    studentPreviewStatus.textContent='';
   }
   ({targetTerm,activeTerm}=terms);
   const [year,semester]=targetTerm?.split('-')??[];
@@ -257,6 +262,9 @@ window.setSectionAssignmentTerms=terms=>{
   const platform=document.getElementById('assignmentPlatformTerm');
   platform.textContent='통합시간표 '+activeTerm;
   platform.hidden=!targetTerm||targetTerm===activeTerm;
+  if(loadedData)document.querySelectorAll('[data-sheet-grade]').forEach(label=>{
+    label.textContent=sheetGradeLabel(loadedData.sheets[Number(label.dataset.sheetGrade)]);
+  });
   updateTermControls();
 };
 window.setSectionAssignmentTerms(bridge.terms());
@@ -277,6 +285,7 @@ termDialog.querySelector('form').addEventListener('submit',event=>{
 });
 function invalidateResults() {
   resultIncomplete=[];hoursExportResults=null;
+  studentPreviewStatus.textContent='';
   document.getElementById("hoursExportCard").classList.add("hidden");
   downloadBtn.classList.add('hidden');summary.classList.add('hidden');
 }
@@ -313,7 +322,6 @@ function runSheetInWorker(sheet,opts,logFn) {
     try{worker.postMessage({sheet,opts});}catch(error){finish(error);}
   });
 }
-let loadedData = null;
 let resultFilename = null;
 let bigsecEntries = [];
 let avoidPairs = []; // [{ sheetName, requesterRow, targetRows: [] }]
@@ -474,7 +482,7 @@ function renderSheetsTable() {
     const countText = counts.length === 1 ? String(counts[0]) : `${counts[0]}–${counts[counts.length-1]}`;
     const groupStr = s.groups.map((g,idx) => `${g}:${s.groupCredits[idx] || 3}`).join(', ');
     rows.push(`<tr>
-      <td>${escapeHtml(s.name)}</td><td>${s.students.length}</td><td>${countText}</td>
+      <td>${escapeHtml(s.name)}<div data-sheet-grade="${i}">${sheetGradeLabel(s)}</div></td><td>${s.students.length}</td><td>${countText}</td>
       <td><input type="number" min="0" max="100" placeholder="자동" title="빈칸: 자동 · 0: 검증 안 함" aria-label="${escapeHtml(s.name)} 기대 총학점" data-expected-credit="${i}" value="${s.expectedTotalCredits == null ? '' : Number(s.expectedTotalCredits)}" style="min-width:78px"></td>
       <td><input type="text" placeholder="A:3, B:3, C:3" title="코드:학점, 쉼표로 구분" aria-label="${escapeHtml(s.name)} 분반 코드와 학점" data-sheet-idx="${i}" value="${escapeHtml(groupStr)}"></td>
     </tr>`);
@@ -1089,7 +1097,6 @@ runBtn.addEventListener('click', async () => {
     for (const c of Object.keys(sheet.courses)) {
       const cr = Number(sheet.courseCredits[c]);
       const nsec = Number(sheet.courses[c]);
-      if((sheet.applicants[c]||0)>nsec*maxPerSection)throw new Error(`[${sheet.name}] '${c}': 신청 ${sheet.applicants[c]}명 > 수용 ${nsec*maxPerSection}명. 분반 수를 늘려 주세요.`);
       if (!Number.isFinite(cr) || cr < 1 || !Number.isFinite(nsec) || nsec < 1) {
         log(`✗ [${sheet.name}] '${c}'의 학점·분반 수 설정을 확인해 주세요.`, 'bad');
         runBtn.disabled = false; return;
@@ -1389,10 +1396,24 @@ downloadBtn.addEventListener('click',async ()=>{
 
 // school-course-hours v1: sheets[].courses[].sections are the workload records.
 // coupledCohorts describe links only; do not add them again to total hours.
-function sheetGrade(sheet){
-  const grades=new Set(sheet.students.map(student=>Number(student.grade||String(student.studentId??'').trim().match(/^([1-3])[0-9]{4}$/)?.[1])));
+function studentRosterGrade(sheet,student){
+  if(sheet.fixedIdx.학년!=null&&String(student.grade??'').trim())return Number(student.grade);
+  const idGrade=String(student.studentId??'').trim().match(/^([1-3])\d{4}$/)?.[1];
+  return Number(idGrade??sheet.grade);
+}
+function rosterGrade(sheet){
+  const grades=new Set(sheet.students.map(student=>studentRosterGrade(sheet,student)));
   const grade=grades.values().next().value;
   return grades.size===1&&[1,2,3].includes(grade)?grade:null;
+}
+function sheetGrade(sheet){
+  const original=rosterGrade(sheet),grade=original+termYearDifference();
+  return original!==null&&[1,2,3].includes(grade)?grade:null;
+}
+function sheetGradeLabel(sheet){
+  const original=rosterGrade(sheet),grade=sheetGrade(sheet);
+  if(!original||!termYearDifference())return '';
+  return grade?`${grade}학년(학적 ${original}학년)`:`대상 학년 직접 선택(학적 ${original}학년)`;
 }
 function buildHoursExport(sheets, results, candidateIndex) {
   if(!Number.isInteger(candidateIndex)||candidateIndex<0)throw new Error('결과 후보를 선택하세요.');
@@ -1407,31 +1428,43 @@ function buildHoursExport(sheets, results, candidateIndex) {
       const cohort=auditCoupledCohorts(sheet,result);
       if(!cohort.ok)throw new Error('2+1 결합 검증 실패');
       const labels=sectionDisplayCodes(sheet,result),state=sheet.algoState;
+      const originalGrade=rosterGrade(sheet),grade=sheetGrade(sheet);
+      const hoursCode=code=>grade&&grade!==originalGrade&&Number(code[0])===originalGrade&&/^[1-3][A-Z]/i.test(code)?grade+code.slice(1):code;
+      const originalByCode=new Map();
+      for(const code of [...sheet.groups,...labels]){
+        const converted=hoursCode(code),key=converted.trim().toUpperCase();
+        const previous=originalByCode.get(key);
+        if(previous!==undefined&&previous!==code&&(converted!==code||hoursCode(previous)!==previous)){
+          throw Error(`[${sheet.name}] ${previous}와 ${code}가 ${grade}학년 코드 ${key}로 겹칩니다.`);
+        }
+        originalByCode.set(key,code);
+      }
+      const capacities=sectionCapacities(sheet,lastRunSettings.maxPerSection,cohort.links);
       const sheetId='sheet:'+encodeURIComponent(sheet.name);
       const courseId=c=>sheetId+'/course:'+encodeURIComponent(c);
       const sectionId=sid=>courseId(state.sections[sid].course)+'/section:'+state.sections[sid].idx;
       const links=cohort.links.map(l=>({cohortId:sectionId(l.parentSid)+'/coupled',
         sectionIds:[sectionId(l.parentSid),sectionId(l.childSid)],
-        sectionCode:labels[l.parentSid],timeBlock:sheet.groups[result.secToGroup[l.parentSid]],
+        sectionCode:hoursCode(labels[l.parentSid]),timeBlock:hoursCode(sheet.groups[result.secToGroup[l.parentSid]]),
         combinedCredits:3,sameStudents:true,studentCount:l.count}));
       const linkBySection=new Map(links.flatMap(l=>l.sectionIds.map(id=>[id,l.cohortId])));
       const courses=Object.keys(sheet.courses).map(c=>{
         const credits=Number(sheet.courseCredits[c]);
         const sections=state.courseToSections[c].map(sid=>({sectionId:sectionId(sid),sectionNumber:state.sections[sid].idx,
-          sectionCode:labels[sid],timeBlock:sheet.groups[result.secToGroup[sid]],studentCount:result.sectionLoad[sid],
-          capacity:lastRunSettings.maxPerSection,weeklyHours:credits,cohortId:linkBySection.get(sectionId(sid))||null}));
+          sectionCode:hoursCode(labels[sid]),timeBlock:hoursCode(sheet.groups[result.secToGroup[sid]]),studentCount:result.sectionLoad[sid],
+          capacity:capacities[sid],weeklyHours:credits,cohortId:linkBySection.get(sectionId(sid))||null}));
         return {courseId:courseId(c),courseName:c,subjectGroup:null,credits,weeklyHours:credits,weeklyHoursBasis:'credits-default',
           sectionCount:sections.length,totalWeeklyHours:credits*sections.length,
           parallelSectionLimit:result.validation.parallelLimits[c],sections};
       });
-      return {sheetId,sourceSheetName:sheet.name,academicYear:null,semester:null,grade:sheetGrade(sheet),candidateRank:rank+1,
+      return {sheetId,sourceSheetName:sheet.name,academicYear:null,semester:null,grade,candidateRank:rank+1,
         studentCount:sheet.students.length,validation:{complete:true,hardConstraintsPassed:true,coupledCohortsPassed:true},
-        timeBlocks:sheet.groups.map((code,i)=>({code,credits:Number(sheet.groupCredits[i])})),courses,coupledCohorts:links,
+        timeBlocks:sheet.groups.map((code,i)=>({code:hoursCode(code),credits:Number(sheet.groupCredits[i])})),courses,coupledCohorts:links,
         totals:{courseCount:courses.length,sectionCount:courses.reduce((n,c)=>n+c.sectionCount,0),totalWeeklyHours:courses.reduce((n,c)=>n+c.totalWeeklyHours,0)}};
     })};
 }
 document.getElementById('hoursExportBtn').addEventListener('click',()=>{
-  if(isRunning||!hoursExportResults)return;
+  if(isRunning||!targetTerm||!hoursExportResults)return;
   try {
     const selected=document.getElementById('hoursCandidate').value;
     if(selected==='')throw new Error('완전배정 결과 후보가 없습니다.');
@@ -1451,11 +1484,11 @@ function selectedCandidate(){
 
 courseCountsBtn.addEventListener('click',async()=>{
   if(!loadedData||courseCountsBtn.disabled)return;
-  const workbook=loadedData,term=targetTerm,status=document.getElementById('courseCountsStatus');
+  const workbook=loadedData,term=targetTerm,sourceTerm=activeTerm,status=document.getElementById('courseCountsStatus');
   isLoadingCounts=true;updateTermControls();
   try{
     const rows=await bridge.loadCourseSections();
-    if(workbook!==loadedData||term!==targetTerm||isRunning)return;
+    if(workbook!==loadedData||term!==targetTerm||sourceTerm!==activeTerm||isRunning)return;
     const key=(grade,name)=>grade+'|'+name.normalize('NFKC').replace(/[\s_-]/g,'').toUpperCase();
     const counts=new Map();
     for(const row of rows){
@@ -1475,18 +1508,20 @@ courseCountsBtn.addEventListener('click',async()=>{
   finally{isLoadingCounts=false;updateTermControls();}
 });
 
-async function sendResult(send){
+async function sendResult(send,status=document.getElementById('hoursExportStatus')){
   if(termSwitchBtn.disabled)return;
   isSending=true;updateTermControls();
   try{await send();}
-  catch(error){document.getElementById('hoursExportStatus').textContent=error.message;}
+  catch(error){status.textContent=error.message;}
   finally{isSending=false;updateTermControls();}
 }
 document.getElementById('sendHoursBtn').addEventListener('click',()=>sendResult(()=>
   bridge.importHours(buildHoursExport(loadedData.sheets,hoursExportResults,selectedCandidate()))
 ));
-document.getElementById('previewStudentsBtn').addEventListener('click',()=>sendResult(()=>{
-    if(targetTerm!==activeTerm)throw Error(previewOnlyActive);
+previewStudentsBtn.addEventListener('click',()=>sendResult(async()=>{
+    studentPreviewStatus.textContent='';
+    if(targetTerm<activeTerm)throw Error('운영 학기보다 앞선 학기에는 학생 배정을 저장할 수 없습니다.');
+    const advance=termYearDifference(),future=targetTerm!==activeTerm;
     const rank=selectedCandidate();
     const students=loadedData.sheets.flatMap((sheet,si)=>{
       const candidates=hoursExportResults[si].topCandidates;
@@ -1494,16 +1529,18 @@ document.getElementById('previewStudentsBtn').addEventListener('click',()=>sendR
       const labels=sectionDisplayCodes(sheet,result);
       return sheet.students.map(student=>{
         const studentNo=String(student.studentId??'').trim().match(/^([1-3])(\d{2})(\d{2})$/);
-        const identity=[student.grade,student.cls,student.num].map((n,i)=>Number(n||studentNo?.[i+1]));
+        const identity=[studentRosterGrade(sheet,student),Number(student.cls||studentNo?.[2]),Number(student.num||studentNo?.[3])];
         if(identity[0]<1||identity[0]>3||identity.some(n=>!Number.isInteger(n)||n<1||n>99)||!student.name){
           throw Error(sheet.name+' 시트에 학년·반·번호 또는 이름이 없는 학생이 있습니다.');
         }
+        if(identity[0]+advance>3)throw Error('진급 학년이 3학년을 넘는 학생이 있습니다.');
         return {grade:String(identity[0]),classNum:String(identity[1]),number:String(identity[2]),name:student.name,
           choices:Object.fromEntries(student.selected.map((subject,j)=>[subject,labels[result.assignments[student.rowIndex][j]]]))};
       });
     });
-    return bridge.previewStudents(students);
-}));
+    const saved=await bridge.previewStudents(students);
+    if(future&&saved&&targetTerm===saved.term&&activeTerm===saved.sourceTerm)studentPreviewStatus.textContent=`${saved.term} 학생 배정 ${saved.count}명 저장`;
+},studentPreviewStatus));
 
 document.getElementById('cancelBtn').addEventListener('click',()=>{if(cancelActive)cancelActive();});
 document.addEventListener('change',e=>{

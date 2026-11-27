@@ -100,6 +100,102 @@ Windows, Node.js 24.22.1, pnpm 11.25.0, Miniflare 4.20260730.0, Wrangler 4.154.0
 - `a late Pages term AUTH_REQUIRED leaves the new admin session intact`와 `a current Pages term AUTH_REQUIRED clears the session and reopens login`은 교차 출처에서 실제 로컬 세션을 폐기하고 늦은 오류와 현재 오류를 구분하는지 확인한다.
 - 학기 전환 스타일은 `assets/section-assignment/view.html`에 유지했다. 기존 `style.css`의 정규화 SHA-256을 검증 계약이 고정한다.
 
+### 분반배정 진급 학기 연계와 정원 상향 · 2026-11-27
+
+- `future student transfers connect only matched promoted students and preserve legacy exact matching`은 다음 학기 생성, 운영 학기와 리비전 유지, 관리자 권한, 과거·잘못된 학기와 3학년 초과 진급 거부, 운영 학기·리비전 가드를 확인한다. 진급 명부에서 학번과 이름을 확인하고 대응 누락·이름 불일치·진급 학년 불일치·명부 없음·명부 이름 불일치를 제외한 뒤 분반을 반영한다. 대응표 누락·중복·형식 오류·연결 0명, 수동 배정 충돌, `TRANSFER_CHANGED`, 자동 백업, 기존 배열 자료의 정확 일치와 전체 반영 차단도 검사한다.
+- `section capacities rise only for overcrowded courses and validation rejects excess assignments`는 공통 정원 2에서 신청 5명인 과목의 두 분반에 정원 3을 적용하고 다른 과목은 정원 2를 쓰는지 확인한다. 배정을 바꿔 분반에 4명을 넣으면 검증이 정원 초과를 찾아낸다.
+- `promotion counts and future student staging use the target term at 390px`는 2학년 확정 분반 수를 불러오고 공통 정원 35에서 신청 36명을 한 분반에 완전배정한 뒤 학적 학년으로 다음 학기에 저장하는 흐름을 확인한다.
+- `promoted hours with a grade prefix import at grade two and export per-section capacities`는 2027-1 시수 전달·JSON의 2학년과 `2A`를 확인하고 실제 시수배당 가져오기를 적용한다. 결과 엑셀은 기존 파서의 학년과 `1A`를 유지하며 엑셀·JSON에 각 분반의 적용 정원이 기록된다. 같은 학년도와 3학년을 넘는 결과의 시수 전달 학년은 기존 브라우저 시나리오에서 확인한다.
+- `promoted student mapping file, exclusions and keyboard commit at 390px`는 32px·44px 버튼 높이, 파일 입력 초점, CSV 중복 거부, XLSX의 `학번` 열 사용, 제외 목록, 가로 넘침 및 키보드 등록을 확인한다. 미리보기와 등록이 같은 대응표를 보낸다.
+- `mixed roster grades leave the hours import target grade unselected`는 시트명이 한 학년이어도 학번의 학적 학년이 섞이면 대상 학년을 비워 두는지 확인한다.
+
+새 학생 전달은 `{sourceTerm, students}`로 저장한다. 기존 배열 자료는 전달 학기를 원본 학기로 읽는다. 진급 연결은 미리보기와 반영의 `transferRef.studentMapping`으로 `{oldNumber, newNumber, name}` 배열을 보내며 대응표는 DB에 저장하지 않는다.
+
+Windows의 Node.js 24.22.1과 Edge, Miniflare 로컬 D1 및 가상 자료로 확인했다. pnpm이 PATH에 없어 `test:all`의 10개 스크립트를 구성하는 Node 명령 14개를 순서대로 직접 실행했다. Worker 시험 래퍼는 `tests/wrangler.mjs`를 실행하며 세 Wrangler 자식 명령에 시험 전용 빈 `--env-file`을 전달했다. 공유 UI는 38개 화면 점검, 이관은 리허설 1건으로 집계했다.
+
+| 실행 명령 | 종료 코드 | 통과 | 실패 |
+| --- | ---: | ---: | ---: |
+| `node --test --test-concurrency=1 tests/*.test.mjs modules/allocation/tests/*.test.mjs` | 0 | 193 | 0 |
+| `node tests/browser.mjs` | 0 | 16 | 0 |
+| `node tests/solver-browser.mjs` | 0 | 1 | 0 |
+| `node tests/browser-solver.mjs` | 0 | 1 | 0 |
+| `node modules/allocation/tests/browser.mjs` | 0 | 10 | 0 |
+| `node modules/allocation/tests/term-switch-browser.mjs` | 0 | 6 | 0 |
+| `node tests/section-assignment-browser.mjs` | 0 | 12 | 0 |
+| `node tests/pages-browser.mjs` | 0 | 12 | 0 |
+| `node test-results/section-promotion-verification/run.mjs --wrangler` | 0 | 3 | 0 |
+| `node tests/teacher-tools-browser.mjs` | 0 | 9 | 0 |
+| `node tests/allocation-browser.mjs` | 0 | 23 | 0 |
+| `node tests/studyroom-browser.mjs` | 0 | 13 | 0 |
+| `node tests/ui-browser.mjs` | 0 | 38 화면 점검 | 0 |
+| `node tests/course-migration.mjs` | 0 | 1 리허설 | 0 |
+
+앞선 집중 시험 `node --test --test-concurrency=1 tests/api.test.mjs tests/section-assignment.test.mjs`는 종료 코드 0으로 27건이 통과했다. 첫 `node tests/section-assignment-browser.mjs` 실행은 진급 확인 뒤 종전 운영 학기로 돌아가지 않아 마지막 학생 로그인 검증에서 실패했다(종료 코드 1, 통과 10건, 실패 1건). 시험에서 기존 학기로 복귀시킨 뒤 전체 실행에서 분반배정 12건이 통과했다.
+
+`test-results/section-promotion-verification/`에 최초 구현의 명령별 로그가 있다. Edge에서 1440px 파일 선택과 390px 제외 목록을 확인했다. Impeccable 탐지기는 종료 코드 0이었으며, 소스에서 배포용 CSS 경로를 해석하지 못한 부분은 브라우저 렌더링과 공유 UI 시험으로 확인했다. 운영 환경과 실제 모바일 기기는 미검증이다.
+
+#### 독립 검토 반영
+
+- `legacy grade inference fingerprint and settings restore independently of roster grade`는 학년 열이 없는 `2학년` 시트의 `10101`을 사용한다. 기존 파서와 같은 지문으로 받은 schema 3 설정을 복원하고, 그 파일의 학생 전달에는 학적 1학년을, 2027-1 시수 전달에는 대상 2학년을 사용한다. 기존 엑셀 명단에는 파서 학년 2가 남고, 혼합 학년 시수 자료는 대상 학년을 비운다.
+- `a slow term lookup leaves admin navigation, file selection and calculation usable`은 시수배당 학기 응답 전 파일 선택·계산·결과 엑셀을 허용하고 시수 JSON을 잠근다. 응답 후 받은 JSON의 대상 학년 3을 확인한다.
+- `promoted split and coupled hours references match exported time blocks`는 시수 전달과 내려받은 JSON에서 `2A1`·`2A2` 결합 코드와 분반·결합의 `2A` 참조가 시간블록 목록과 일치하는지 확인한다.
+- `a coupled section warns when its partner limits the raised capacity`는 공통 정원 5에서 8명·2명 두 과목을 공통 1학점 과목과 결합한다. 8명 과목의 상향과 결합 적용 정원 5 제한 경고, 미배정 3명 및 제약 검증 통과를 확인한다. `raised coupled capacities keep both groups intact in parallel big sections`는 두 8명 집단과 공통 1학점의 대분반 두 개를 한 블록에 완전배정하고 동시 분반 상한과 동일 학생 구성을 확인한다.
+- `mapping rejects file and row limits while reading sparse workbook values`는 5MB 초과, 3,001개 데이터 행을 거부하고 65,001행에 떨어져 있는 실제 두 번째 엑셀 자료를 읽는다. 미래 학생 연결 API 시험은 대응표의 3,000행 수락과 미리보기·등록의 3,001행 거부를 확인한다.
+
+검토 반영 후 Windows Node.js 24.22.1, Edge, Miniflare 로컬 D1에서 `test:all`의 10개 스크립트를 구성하는 14개 명령을 재실행했다. 전체 명령은 종료 코드 0이며 검증 343건이 통과했다.
+
+작업 트리에 `.dev.vars`가 있어 Wrangler의 기본 로드를 피했다. 표의 래퍼가 기존 `tests/wrangler.mjs`를 실행하고 세 Wrangler 자식 명령에 시험 전용 빈 `--env-file`만 추가한다. 로컬 D1 마이그레이션, 배포 건식 실행, 로컬 라우팅 단언을 실행했다.
+
+| 실행 명령 | 종료 코드 | 통과 | 실패 |
+| --- | ---: | ---: | ---: |
+| `node --test --test-concurrency=1 tests/*.test.mjs modules/allocation/tests/*.test.mjs` | 0 | 195 | 0 |
+| `node tests/browser.mjs` | 0 | 16 | 0 |
+| `node tests/solver-browser.mjs` | 0 | 1 | 0 |
+| `node tests/browser-solver.mjs` | 0 | 1 | 0 |
+| `node modules/allocation/tests/browser.mjs` | 0 | 10 | 0 |
+| `node modules/allocation/tests/term-switch-browser.mjs` | 0 | 6 | 0 |
+| `node tests/section-assignment-browser.mjs` | 0 | 15 | 0 |
+| `node tests/pages-browser.mjs` | 0 | 12 | 0 |
+| `node test-results/section-promotion-verification/review-fixes/run.mjs --wrangler` | 0 | 3 | 0 |
+| `node tests/teacher-tools-browser.mjs` | 0 | 9 | 0 |
+| `node tests/allocation-browser.mjs` | 0 | 23 | 0 |
+| `node tests/studyroom-browser.mjs` | 0 | 13 | 0 |
+| `node tests/ui-browser.mjs` | 0 | 38 화면 점검 | 0 |
+| `node tests/course-migration.mjs` | 0 | 1 리허설 | 0 |
+
+집중 시험 `node --test --test-concurrency=1 tests/api.test.mjs tests/section-assignment.test.mjs`는 종료 코드 0으로 29건, `node tests/section-assignment-browser.mjs`는 종료 코드 0으로 15건이 통과했다. HEAD 파서를 불러온 `node test-results/section-promotion-verification/review-fixes/head-fingerprint.mjs`도 종료 코드 0으로 기존 지문과 내려받은 schema 3의 지문 1건이 일치했다. Impeccable 수동 탐지와 `git diff --check`는 종료 코드 0이었다. 탐지기가 소스의 배포용 CSS 경로를 해석하지 못한 부분은 Edge 390px 렌더와 공유 UI 시험으로 확인했다. `hours-import.js`와 분반배정 `style.css`의 차이 검사는 종료 코드 0이었다.
+
+명령별 로그는 `test-results/section-promotion-verification/review-fixes/`에 있다.
+
+#### 후속 독립 검토 반영
+
+- `promoted code collisions stop JSON downloads and hours transfers`는 같은 학생의 두 과목이 `1A`와 `2A`에 완전배정된 엑셀을 확인한다. 진급 변환으로 두 코드가 `2A`에서 겹치면 시트명과 원본 코드 둘을 표시하며 JSON 다운로드와 시수 서버 요청을 중단한다. 기존 비충돌 시간블록·분반·결합 변환도 브라우저 시험에서 확인한다.
+- `coupled hours JSON and result workbook record the paired section capacity`는 공통 정원 5에서 각각 12명·2분반, 5명·1분반인 2학점 과목 두 개가 공통 1학점 세 분반과 결합하는 사례를 확인한다. 17명을 완전배정한 뒤 5명 과목과 짝인 공통 분반의 적용 정원 5를 시수 JSON과 엑셀에서 확인한다. 시수 JSON에서 공통 분반 세 개의 적용 정원은 5·6·6이다.
+- `a coupled section warns when its partner limits the raised capacity`는 결과 후보의 결합 링크를 사용한 출력용 정원도 엔진에서 적용한 값과 일치하는지 확인한다.
+
+집중 시험 `node --test --test-concurrency=1 tests/api.test.mjs tests/section-assignment.test.mjs`는 종료 코드 0, 29건 통과, 실패 0건이었다. 이어서 직접 실행한 `node tests/section-assignment-browser.mjs`는 종료 코드 0, 17건 통과, 실패 0건이었다.
+
+이후 Windows Node.js 24.22.1과 Edge에서 `test:all`의 10개 스크립트를 구성하는 14개 명령을 다시 실행했다. 모두 종료 코드 0으로 검증 345건이 통과했다. Wrangler 래퍼는 `.dev.vars` 로드를 피하기 위해 기존 `tests/wrangler.mjs`의 자식 명령에 시험 전용 빈 `--env-file`만 추가했다.
+
+| 실행 명령 | 종료 코드 | 통과 | 실패 |
+| --- | ---: | ---: | ---: |
+| `node --test --test-concurrency=1 tests/*.test.mjs modules/allocation/tests/*.test.mjs` | 0 | 195 | 0 |
+| `node tests/browser.mjs` | 0 | 16 | 0 |
+| `node tests/solver-browser.mjs` | 0 | 1 | 0 |
+| `node tests/browser-solver.mjs` | 0 | 1 | 0 |
+| `node modules/allocation/tests/browser.mjs` | 0 | 10 | 0 |
+| `node modules/allocation/tests/term-switch-browser.mjs` | 0 | 6 | 0 |
+| `node tests/section-assignment-browser.mjs` | 0 | 17 | 0 |
+| `node tests/pages-browser.mjs` | 0 | 12 | 0 |
+| `node test-results/section-promotion-verification/final-review/run.mjs --wrangler` | 0 | 3 | 0 |
+| `node tests/teacher-tools-browser.mjs` | 0 | 9 | 0 |
+| `node tests/allocation-browser.mjs` | 0 | 23 | 0 |
+| `node tests/studyroom-browser.mjs` | 0 | 13 | 0 |
+| `node tests/ui-browser.mjs` | 0 | 38 화면 점검 | 0 |
+| `node tests/course-migration.mjs` | 0 | 1 리허설 | 0 |
+
+`git diff --check`와 고정 파일 `hours-import.js`, `style.css`의 차이 검사는 종료 코드 0이었다. 명령별 로그는 `test-results/section-promotion-verification/final-review/`에 있다.
+
 ## 기능·보안 시나리오
 
 - 익명 설정 조회·학생 한 명 조회, 전체 학생/다른 학생 미노출, 교사/관리자 접근 경계, 다른 출처·출처 없는 변경 거부, API no-store.

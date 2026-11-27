@@ -11,6 +11,8 @@
 <style>
   .assignment-term { display:flex; flex-wrap:wrap; align-items:center; gap:0 8px; padding:4px 24px; }
   .assignment-term span { color:var(--ui-ink-2); font-size:13px; }
+  [data-sheet-grade] { color:var(--ui-ink-2); font-size:13px; }
+  [data-sheet-grade]:empty { display:none; }
   #termDialog { inset:8px 0 auto; margin:0 auto; width:min(360px,calc(100% - 32px)); padding:16px;
     border:1px solid var(--ui-line-strong); border-radius:var(--ui-radius); background:var(--ui-paper); color:var(--ui-ink); }
   #termDialog::backdrop { background:#0005; }

@@ -3,6 +3,10 @@
   const fields=new Set(['순번','학년','반','번호','이름','비고','학번','학적','학생ID']);
   const str=v=>v==null?'':String(v).trim();
   const num=v=>String(Number(v));
+  async function firstSheet(file){
+    const wb=/\.csv$/i.test(file.name)?XLSX.read(await file.text(),{type:'string',raw:true}):XLSX.read(await file.arrayBuffer(),{type:'array'});
+    return wb.Sheets[wb.SheetNames[0]];
+  }
   function fromMatrices(teacher,elective,studentMatrices){
     const payload={format:'timetable-import'},warnings=[];
     if(teacher)payload.teacherRows=teacher.map(r=>r.map(str));
@@ -47,8 +51,7 @@
       return [['학년','반','번호','학번','이름','비고',...subjects],...data.students.map(s=>[s.grade,s.classNum,s.number,s.studentNumber,s.name,s.note,...subjects.map(subject=>s.choices?.[subject])])];
     }
     if(!/\.(xlsx|csv)$/i.test(file.name))throw Error(kind?'XLSX, CSV 또는 JSON 파일을 선택하세요.':'XLSX 또는 CSV 파일을 선택하세요.');
-    const wb=/\.csv$/i.test(file.name)?XLSX.read(await file.text(),{type:'string',raw:true}):XLSX.read(await file.arrayBuffer(),{type:'array'});
-    return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:'',blankrows:true});
+    return XLSX.utils.sheet_to_json(await firstSheet(file),{header:1,raw:false,defval:'',blankrows:true});
   }
   async function files(teacher,elective,students,term){
     const [teacherRows,sections,studentRows]=await Promise.all([matrix(teacher),matrix(elective,'sections',term),Promise.all(Array.from(students||[],file=>matrix(file,'students',term)))]);
@@ -56,6 +59,37 @@
     if(sections?.sections)result.payload.sections=sections.sections;
     return result;
   }
-  global.TTImport={fromMatrices,files};
+  async function studentMapping(file){
+    if(!file||!/\.(xlsx|csv)$/i.test(file.name))throw Error('XLSX 또는 CSV 파일을 선택하세요.');
+    if(file.size>5*1024*1024)throw Error('구학번 대응 파일은 5MB까지입니다.');
+    // 셀 값만 순회해 서식 때문에 길어진 엑셀 범위를 펼치지 않는다.
+    const sheet=await firstSheet(file)??{},rowsByIndex=new Map();
+    for(const address of Object.keys(sheet)){
+      if(address.startsWith('!')||sheet[address].v==null)continue;
+      const value=str(XLSX.utils.format_cell(sheet[address]));
+      if(!value)continue;
+      const {r,c}=XLSX.utils.decode_cell(address);
+      if(!rowsByIndex.has(r)){
+        if(rowsByIndex.size>=3001)throw Error('구학번 대응표는 3,000행까지입니다.');
+        rowsByIndex.set(r,new Map());
+      }
+      rowsByIndex.get(r).set(c,value);
+    }
+    const [header=new Map(),...rows]=[...rowsByIndex].sort(([a],[b])=>a-b).map(([,row])=>row);
+    const findCol=label=>[...header].find(([,value])=>value===label)?.[0];
+    const oldCol=findCol('구학번'),newCol=findCol('신학번')??findCol('학번'),nameCol=findCol('이름');
+    if([oldCol,newCol,nameCol].includes(undefined))throw Error('구학번·신학번(또는 학번)·이름 열을 확인하세요.');
+    const oldNumbers=new Set(),newNumbers=new Set(),sid=/^\d{5}$/;
+    const mapping=rows.map(row=>{
+      const oldNumber=row.get(oldCol)??'',newNumber=row.get(newCol)??'',name=row.get(nameCol)??'';
+      if(!sid.test(oldNumber)||!sid.test(newNumber)||!name||name.length>80)throw Error('구학번 대응의 학번·이름을 확인하세요.');
+      if(oldNumbers.has(oldNumber)||newNumbers.has(newNumber))throw Error('구학번 또는 신학번이 중복됩니다.');
+      oldNumbers.add(oldNumber);newNumbers.add(newNumber);
+      return {oldNumber,newNumber,name};
+    });
+    if(!mapping.length)throw Error('구학번 대응 파일에 학생이 없습니다.');
+    return mapping;
+  }
+  global.TTImport={fromMatrices,files,studentMapping};
   if(typeof module!=='undefined'&&module.exports)module.exports=global.TTImport;
 })(typeof window!=='undefined'?window:globalThis);
