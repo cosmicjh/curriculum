@@ -151,7 +151,12 @@ async function read(db,ctx,req){
   const cs=Array.isArray(q.classes)?q.classes:[];if(cs.length>30||cs.some(s=>!String(s).match(/^[1-3]-[1-9][0-9]?$/)))Auth.fail(400,'INVALID_REQUEST','학급을 확인하세요.');
   const rows=await db.all("SELECT grade,class_num AS classNum,number,name,note FROM students WHERE term_id=? AND status='재학' AND grade||'-'||class_num IN (SELECT value FROM json_each(?)) ORDER BY CAST(grade AS INTEGER),CAST(class_num AS INTEGER),CAST(number AS INTEGER)",ctx.term,JSON.stringify(cs));return {title:D.clean(q.subject),detail:D.clean(q.detail)||cs.join(', '),students:rows};
  }
- if(a==='previewImport'){const payload=await importPayload(db,ctx.term,req),st=await S.load(db,ctx);return D.prepareImport(st,payload,req.preserveManual!==false,String(ctx.revision),true).summary;}
+ if(a==='previewImport'){
+  const st=await S.load(db,ctx),payload=await importPayload(db,st,req);
+  const {summary}=D.prepareImport(st,payload,req.preserveManual!==false,String(ctx.revision),true);
+  if(req.transferRef?.kind==='students'&&payload.excludedStudents)summary.excludedStudents=payload.excludedStudents;
+  return summary;
+ }
  if(a==='dashboard'){const st=await S.load(db,ctx),rt=Core.runtime(st);return {store:st,meta:await S.metadata(db,ctx,true),...(await links(db,ctx)),lessons:Object.values(rt.bindings).map(D.lesson),history:await db.all('SELECT id,at,term_id AS term,action,target FROM history WHERE term_id=? ORDER BY at DESC LIMIT 100',ctx.term),backups:await S.backupList(db,ctx.term),terms:(await db.all('SELECT id FROM terms ORDER BY id DESC')).map(r=>r.id)};}
  Auth.fail(404,'NOT_FOUND','요청한 API를 찾을 수 없습니다.');
 }
@@ -219,21 +224,22 @@ async function mutate(db,env,ctx,session,req,headers){
   statements.push(db.prepare('INSERT INTO terms(id,settings) VALUES(?,?)',req.term,JSON.stringify(defaults)));
   target=req.term;result={term:req.term};historyOnly=true;
  }else if(action==='stageToolTransfer'){
-  if(req.kind==='hours'){
+  if(req.kind==='hours'||req.kind==='students'){
    if(!validTerm(req.term))throw Error('학년도와 학기를 확인하세요.');
+   if(req.kind==='students'&&req.term<ctx.term)Auth.fail(409,'TERM_CHANGED','운영 학기보다 앞선 학기에는 학생 배정을 저장할 수 없습니다.');
    if(req.term!==ctx.term){
     const defaults=newTermSettings(ctx.settings,req.term);
     statements.push(db.prepare('INSERT OR IGNORE INTO terms(id,settings) VALUES(?,?)',req.term,JSON.stringify(defaults)));
    }
   }else if(req.term!==ctx.term)Auth.fail(409,'TERM_CHANGED','현재 학기를 다시 확인하세요.');
-  const prepared=prepareToolTransfer(db,req.term,req.kind,req.data);
+  const prepared=prepareToolTransfer(db,req.term,req.kind,req.data,ctx.term);
   statements.push(prepared.statement);result=prepared.result;
   target=req.kind;after=result;historyOnly=true;
  }else if(action==='switchTerm'){
   if(!await db.first('SELECT id FROM terms WHERE id=?',req.term||''))throw Error('학기 정보가 없습니다.');activeTerm=req.term;parts=['config'];bootstrap=true;
  }else if(action==='commitImport'||action==='restore'){
   const st=await S.load(db,ctx);let next;
-  if(action==='commitImport'){const p=D.prepareImport(st,await importPayload(db,ctx.term,req),req.preserveManual!==false,String(ctx.revision));if(p.summary.errors.length)throw Error(p.summary.errors.join('\n'));next=p.store;parts=p.parts;result=p.summary;}
+  if(action==='commitImport'){const p=D.prepareImport(st,await importPayload(db,st,req),req.preserveManual!==false,String(ctx.revision));if(p.summary.errors.length)throw Error(p.summary.errors.join('\n'));next=p.store;parts=p.parts;result=p.summary;}
   else {const raw=req.backup||await S.readBackup(db,req.backupId);if(raw.format!=='school-timetable-backup'||raw.schemaVersion!==1)throw Error('백업 형식·버전을 확인하세요.');next=structuredClone(raw.store);if(!next?.settings||String(next.settings.academicYear)+'-'+next.settings.semester!==ctx.term||next.term&&next.term!==ctx.term)throw Error('백업과 현재 학기가 다릅니다. 먼저 해당 학기로 전환하세요.');next.term=ctx.term;next.overrides??=[];next.blocks??=[];parts=['students','sections','teacherRows','overrides','blocks','allocation','config'];}
   if(next.allocation)next=prepareAllocation(next,next.allocation).store;
   D.assertStore(next);nextSwapStore=next;const snap=S.snapshot(db,st,action==='restore'?'복원 전':'자료 등록 전');backupId=snap.id;

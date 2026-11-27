@@ -95,14 +95,35 @@
   }
   async function previewAssignedStudents(source,students){
     requireSectionAssignment(source);
-    if(state.sectionTerm!==state.admin.store.term)throw Error('학생 배정 미리보기는 통합시간표 운영 학기에서만 할 수 있습니다.');
-    const saved=await call('stageToolTransfer',{term:state.admin.store.term,kind:'students',data:students},'admin');
-    await previewServerTransfer(saved);
+    const saved=await call('stageToolTransfer',{term:state.sectionTerm,kind:'students',data:students},'admin');
+    if(saved.term===state.admin.store.term)await previewServerTransfer(saved);
+    else state.admin.loaded.settings=false;
+    return saved;
   }
-  async function previewServerTransfer(saved,kind=saved?.kind||'students'){
+  async function previewServerTransfer(saved,kind=saved?.kind||'students',studentMapping){
     const title=kind==='course'?'시수배당 전달 자료':'학생 배정 미리보기';
     if(!saved){openDialog(modalHead(title)+'<p>현재 학기에 전달된 자료가 없습니다.</p>');return;}
-    const transferRef={kind,id:saved.id};
+    if(kind==='students'&&saved.sourceTerm?.slice(0,4)<saved.term.slice(0,4)&&!studentMapping){
+      openDialog(modalHead(title+' · '+saved.term)+'<form id="student-mapping-form">'+
+        field('구학번 대응 파일','student-mapping',input('student-mapping','','type="file" accept=".xlsx,.csv" required autofocus'))+
+        '<p id="student-mapping-error" class="error" role="alert" hidden></p>'+
+        '<div class="form-footer"><button type="submit" class="primary">미리보기</button></div></form>');
+      $('#student-mapping-form').addEventListener('submit',event=>{
+        event.preventDefault();
+        const file=$('#student-mapping').files[0],message=$('#student-mapping-error');
+        message.hidden=true;message.textContent='';
+        run(async()=>{
+          const version=window.TIMETABLE_CONFIG?.assetVersion||'1';
+          await Promise.all([TTAssets.load('xlsx'),import('./import.js?v='+version)]);
+          let mapping;
+          try{mapping=await TTImport.studentMapping(file);}
+          catch(error){message.hidden=false;message.textContent=error.message;return;}
+          await previewServerTransfer(saved,kind,mapping);
+        });
+      });
+      return;
+    }
+    const transferRef={kind,id:saved.id,...(studentMapping?{studentMapping}:{})};
     const preview=await call('previewImport',{transferRef},'admin');
     state.importPayload=null;state.importRef=transferRef;state.importPreview=preview;state.preserveManual=true;
     const summary=kind==='course'?'분반 '+saved.count+'개':'배정 대상 '+saved.count+'명';
@@ -230,6 +251,9 @@
   }
   for(const event of ['click','submit','beforeinput','keydown','paste','drop'])document.addEventListener(event,e=>{if(busyCount&&surfaces.some(root=>root.contains(e.target))){e.preventDefault();e.stopImmediatePropagation();}},true);
   modal.addEventListener('cancel',e=>{if(busyCount)e.preventDefault();});
+  modal.addEventListener('close',()=>{
+    if(!modal.open&&state.importRef?.studentMapping){state.importRef=null;state.importPreview=null;}
+  });
   function route(){const h=location.hash.match(/^#\/(home|student|teacher|admin)/);return h?h[1]:(document.body.dataset.page||'home');}
   function href(page){return '#/'+page;}
   function session(role){try{const s=JSON.parse(sessionStorage.getItem('timetable.'+role)||'null')||(role==='teacher'?TTApi.rememberedTeacher():null);if(s&&s.expiresAt>Date.now()&&TTApi.hasSession(role))return s;}catch(e){}sessionStorage.removeItem('timetable.'+role);return null;}
@@ -482,7 +506,12 @@
   async function previewCourseTransfer(){
     await previewServerTransfer(await call('courseTransfer',{summary:true},'admin'),'course');
   }
-  function renderImportPreview(p){const registered=$('#registered-exceptions');if(registered)registered.hidden=true;$('#import-preview').innerHTML='<div class="stat-row"><span><strong>'+p.students+'</strong>학생</span><span><strong>'+p.teachers+'</strong>교사</span><span><strong>'+p.sections+'</strong>분반</span></div><p class="muted">학생 추가 '+p.addedStudents+' · 변경 '+p.changedStudents+' · 수정값 유지 '+p.preservedFields+'</p>'+(p.inferredSections?.length?'<details open><summary>학생 배정에서 추가할 분반 '+p.inferredSections.length+'개</summary><ul class="notice-list">'+p.inferredSections.map(name=>'<li>'+esc(name)+'</li>').join('')+'</ul></details>':'')+(p.errors.length?'<ul class="notice-list">'+p.errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>':'')+(p.warnings.length?'<ul class="notice-list">'+p.warnings.slice(0,50).map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>':'')+exceptionLessons(p.linkExceptions)+'<div class="form-footer"><button class="primary" data-action="commit-import" '+(p.errors.length?'disabled':'')+'>등록</button></div>';}
+  function renderImportPreview(p){
+    const registered=$('#registered-exceptions');if(registered)registered.hidden=true;
+    const excluded=p.excludedStudents?.length?'<details open><summary>연결 제외 '+p.excludedStudents.length+'명</summary><ul class="notice-list" tabindex="0">'+
+      p.excludedStudents.map(({oldNumber,name,reason})=>'<li>'+esc(oldNumber+' '+name+' · '+reason)+'</li>').join('')+'</ul></details>':'';
+    $('#import-preview').innerHTML='<div class="stat-row"><span><strong>'+p.students+'</strong>학생</span><span><strong>'+p.teachers+'</strong>교사</span><span><strong>'+p.sections+'</strong>분반</span></div><p class="muted">학생 추가 '+p.addedStudents+' · 변경 '+p.changedStudents+' · 수정값 유지 '+p.preservedFields+'</p>'+excluded+(p.inferredSections?.length?'<details open><summary>학생 배정에서 추가할 분반 '+p.inferredSections.length+'개</summary><ul class="notice-list">'+p.inferredSections.map(name=>'<li>'+esc(name)+'</li>').join('')+'</ul></details>':'')+(p.errors.length?'<ul class="notice-list">'+p.errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>':'')+(p.warnings.length?'<ul class="notice-list">'+p.warnings.slice(0,50).map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>':'')+exceptionLessons(p.linkExceptions)+'<div class="form-footer"><button class="primary" data-action="commit-import" '+(p.errors.length?'disabled':'')+'>등록</button></div>';
+  }
   function renderLinks(root){const data=state.admin;root.innerHTML='<div class="toolbar"><button data-action="admin-tab" data-tab="imports">자료 등록으로</button>'+select('link-teacher',data.teachers,'','확인 필요')+'<small>'+data.warnings.length+'건</small></div><div id="link-table"></div><details class="settings-section"><summary>시간블록</summary><div class="toolbar" style="margin-top:20px">'+select('block-grade',Object.keys(data.meta.classes),'','학년')+'</div><div id="block-table"></div></details>';renderLinkTable();}
   function renderLinkTable(){const teacher=$('#link-teacher').value,source=teacher?(state.admin.lessonCache[teacher]||[]):state.admin.warnings;state.visibleLinks=source;$('#link-table').innerHTML='<div class="table-scroll"><table class="data-table"><thead><tr><th>교사</th><th>교시</th><th>원본 과목</th><th>연결 분반</th><th></th></tr></thead><tbody>'+source.map((l,i)=>{const over=state.admin.store.overrides.find(o=>o.teacher===l.teacher&&o.day===l.day&&Number(o.period)===l.period);const automatic=l.sectionId?state.admin.store.sections.find(s=>s.id===l.sectionId):null;return '<tr><td>'+esc(l.teacher)+'</td><td>'+l.day+l.period+'</td><td>'+esc(l.rawSubject)+'<br><small>'+esc(l.rawRoom)+'</small></td><td><select data-link-index="'+i+'" aria-label="연결 분반">'+options(state.admin.store.sections.map(s=>({value:s.id,label:s.grade+'학년 '+s.subject+' '+s.code})),over&&over.sectionId,'자동'+(automatic?' · '+automatic.subject+' '+automatic.code:''))+'</select></td><td><button class="mini" data-action="save-link" data-index="'+i+'">저장</button></td></tr>';}).join('')+'</tbody></table></div>';}
   function renderBlocks(){const g=$('#block-grade').value;if(!g){$('#block-table').innerHTML='';return;}const allBlocks=Array.from(new Set(state.admin.store.sections.filter(s=>s.grade===g).map(s=>(s.code.match(/^[A-Za-z]+/)||[''])[0].toUpperCase()))).filter(Boolean).sort();let html='<form data-form="save-blocks"><div class="table-scroll"><table class="data-table block-grid"><thead><tr><th></th>'+days.map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody>';for(let p=1;p<=7;p++){html+='<tr><th>'+p+'</th>';days.forEach(d=>{const o=state.admin.store.blocks.find(o=>o.grade===g&&o.day===d&&Number(o.period)===p),auto=(state.admin.blocks[d+'-'+p]||{})[g];html+='<td><select data-block-day="'+d+'" data-block-period="'+p+'" aria-label="'+d+p+' 시간블록">'+options(allBlocks,o?o.block:'','자동'+(auto?' · '+auto:''))+'</select></td>';});html+='</tr>';}html+='</tbody></table></div><div class="form-footer"><button class="primary">저장</button></div></form>';$('#block-table').innerHTML=html;}
