@@ -49,6 +49,34 @@ test('course-hours JSON import validates student exclusion and preserves other d
   assert.equal(result.sectionCount,1);assert.equal(result.total,3);assert.deepEqual(S.departmentPart(result.state,'d2'),S.departmentPart(state,'d2'));
   raw.includesStudentData=true;assert.throws(()=>H.parse(raw));
 });
+test('course-hours accepts optional incomplete counts and requires both validation flags',()=>{
+  const file=hoursFixture(),validation=file.sheets[0].validation;
+  let [sheet]=H.parse(file).sheets;
+  assert.equal(sheet.complete,true);
+  for(const key of ['missingChoices','unassignedStudents'])assert(!Object.hasOwn(sheet,key));
+  validation.complete=false;
+  assert.equal(H.parse(file).sheets[0].complete,false);
+  Object.assign(validation,{missingChoices:3,unassignedStudents:0});
+  [sheet]=H.parse(file).sheets;
+  assert.equal(sheet.missingChoices,3);
+  assert.equal(sheet.unassignedStudents,0);
+  for(const key of ['hardConstraintsPassed','coupledCohortsPassed','complete']){
+    const original=validation[key];
+    validation[key]=key==='complete'?'false':false;
+    assert.throws(()=>H.parse(file),/배정 제약과 2\+1 결합 검증/);
+    validation[key]=original;
+  }
+  for(const key of ['missingChoices','unassignedStudents']){
+    const original=validation[key];
+    validation[key]=Number.MAX_SAFE_INTEGER;
+    assert.equal(H.parse(file).sheets[0][key],Number.MAX_SAFE_INTEGER);
+    for(const value of [-1,1.5,'3',null,Number.MAX_SAFE_INTEGER+1,1e100]){
+      validation[key]=value;
+      assert.throws(()=>H.parse(file),/미배정/);
+    }
+    validation[key]=original;
+  }
+});
 test('reset, CSV escaping and blank/current SVG print remain available',()=>{
   const state=demoState();state.teachers[0].name='=가상수식';assert.match(C.csv(state,'d1'),/'=가상수식/);
   assert.match(P.blankFormSvg(state,'d1'),/<svg/);assert.match(P.currentFormSvg(state,'d1',true),/가상수식/);

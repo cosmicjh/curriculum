@@ -67,6 +67,35 @@ const hours={format:'school-course-hours',schemaVersion:1,hoursUnit:'weekly-peri
   sections:[{sectionId:'science-a',sectionCode:'A',timeBlock:'A',weeklyHours:3}]}]
 }]};
 
+test('staged hours keep incomplete counts in storage and assignment-hours',async t=>{
+ const h=await harness({course:true});t.after(()=>h.close());
+ const {cookie:admin}=await h.login();
+ const term='2026-2',data=structuredClone(hours),validation=data.sheets[0].validation;
+ const stage=()=>h.mutation('stageToolTransfer',{kind:'hours',term,data},admin);
+ Object.assign(validation,{complete:false,missingChoices:7,unassignedStudents:2});
+ const saved=await stage();assert(saved.ok,saved.error);
+ for(const [key,value] of [
+  ['complete',null],['hardConstraintsPassed',false],['coupledCohortsPassed',false],
+  ['missingChoices',-1],['unassignedStudents',1.5],
+  ...['missingChoices','unassignedStudents'].flatMap(key=>[Number.MAX_SAFE_INTEGER+1,1e100].map(value=>[key,value]))
+ ]){
+  const original=validation[key];validation[key]=value;
+  assert.equal((await stage()).status,400,key);
+  validation[key]=original;
+ }
+ const stored=await h.sql("SELECT transfer_id,content FROM tool_transfers WHERE term_id=? AND kind='hours'",term);
+ const course=(path,method='GET',data={})=>h.api('courseWorkspace',{role:'admin',path,method,data},admin);
+ assert((await course('/term','POST',{term})).ok);
+ const received=await course('/assignment-hours');assert(received.ok,received.error);
+ assert.equal(stored.results[0].transfer_id,saved.data.result.id);
+ assert.equal(received.data.id,saved.data.result.id);
+ for(const [sheet] of [JSON.parse(stored.results[0].content).sheets,received.data.data.sheets]){
+  assert.equal(sheet.complete,false);
+  assert.equal(sheet.missingChoices,7);
+  assert.equal(sheet.unassignedStudents,2);
+ }
+});
+
 test('school terms and staged transfers are admin-only, isolated, and versioned',async t=>{
  const h=await harness({course:true});t.after(()=>h.close());
  const {cookie:admin}=await h.login(),{cookie:teacher}=await h.login('teacher');
@@ -94,6 +123,8 @@ test('school terms and staged transfers are admin-only, isolated, and versioned'
  const received=await receive('admin',admin);
  assert(received.ok,received.error);assert.equal(received.data.term,'2026-2');
  assert.equal(received.data.data.sheets[0].year,2026);assert.equal(received.data.data.sheets[0].grade,3);
+ assert.equal(received.data.data.sheets[0].complete,true);
+ assert(!Object.hasOwn(received.data.data.sheets[0],'missingChoices'));
  assert(!JSON.stringify(received.data).includes('전달에서 제외할 이름'));
  assert.equal((await receive('teacher',teacher)).status,403);
  assert((await h.mutation('switchTerm',{term:'2027-1'},admin)).ok);

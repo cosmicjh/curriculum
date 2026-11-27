@@ -9,7 +9,12 @@ function parse(raw){
   if(raw.hoursUnit!=='weekly-periods'||raw.includesStudentData!==false)throw new Error('주당 시수 단위와 학생정보 제외 여부를 확인하세요.');
   if(!Array.isArray(raw.sheets)||!raw.sheets.length||raw.sheets.length>30)throw new Error('가져올 시트 목록을 확인하세요.');
   const sheets=raw.sheets.map(s=>{
-    if(!s.validation||s.validation.complete!==true||s.validation.hardConstraintsPassed!==true||s.validation.coupledCohortsPassed!==true)throw new Error('완전배정 검증을 통과한 결과만 가져올 수 있습니다.');
+    const validation=s.validation;
+    if(typeof validation?.complete!=='boolean'||validation.hardConstraintsPassed!==true||validation.coupledCohortsPassed!==true)throw new Error('배정 제약과 2+1 결합 검증을 통과한 결과만 가져올 수 있습니다.');
+    const assignmentStatus={complete:validation.complete};
+    for(const [key,label] of [['missingChoices','미배정 수강 신청 수'],['unassignedStudents','전체 미배정 학생 수']]){
+      if(Object.hasOwn(validation,key))assignmentStatus[key]=number(validation[key],label,0,Number.MAX_SAFE_INTEGER);
+    }
     if(!Array.isArray(s.courses)||!s.courses.length||s.courses.length>300)throw new Error('시트의 과목 목록을 확인하세요.');
     const courses=s.courses.map(c=>{
       if(!Array.isArray(c.sections)||!c.sections.length||c.sections.length>312)throw new Error('과목의 실제 분반 목록을 확인하세요.');
@@ -30,7 +35,7 @@ function parse(raw){
     });
     unique(links,'id','결합 식별자');if(all.some(a=>a.cohortId&&!used.has(a.id)))throw new Error('연결되지 않은 결합 분반이 있습니다.');
     if(s.totals&&(s.totals.courseCount!==courses.length||s.totals.sectionCount!==all.length||s.totals.totalWeeklyHours!==C.sum(all.map(a=>a.hours))))throw new Error('시트 합계가 실제 분반 정보와 일치하지 않습니다.');
-    return {id:text(s.sheetId,'시트 식별자'),name:text(s.sourceSheetName,'시트명',100),grade:s.grade==null?null:number(s.grade,'대상 학년',1,3),year:s.academicYear==null?null:number(s.academicYear,'학년도',2000,2100),semester:s.semester==null?null:number(s.semester,'학기',1,2),courses,links};
+    return {id:text(s.sheetId,'시트 식별자'),name:text(s.sourceSheetName,'시트명',100),grade:s.grade==null?null:number(s.grade,'대상 학년',1,3),year:s.academicYear==null?null:number(s.academicYear,'학년도',2000,2100),semester:s.semester==null?null:number(s.semester,'학기',1,2),...assignmentStatus,courses,links};
   });
   unique(sheets,'id','시트 식별자');
   return {sheets,exportedAt:typeof raw.exportedAt==='string'?raw.exportedAt:'',toolVersion:typeof raw.source?.toolVersion==='string'?raw.source.toolVersion:''};

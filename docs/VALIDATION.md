@@ -304,3 +304,22 @@ await import('./tests/browser.mjs');
 Windows 기본 Chromium에서는 수정 전 Escape 직후의 초점 단언을 지나 다음 확인 창 열기에서 시간 초과가 발생했다. 두 로그는 `test-results/student-delete-focus-verification/chromium-before.log`와 `chromium-after.log`에 있다. 수정 후 Ubuntu CI 결과는 미검증이다.
 
 이 수정 후 Windows에서 `test:all` 구성 명령 14개를 직접 실행했다. 기본 브라우저 시험은 저장소의 Windows 기본값인 Edge로 실행했고 전체 결과는 위 구성 명령 표와 같은 종료 코드와 통과·실패 수였다. Worker 시험은 앞과 같은 방식으로 세 Wrangler 자식 명령에 빈 `--env-file test-results/student-delete-focus-verification/empty.env`를 전달했다. 명령별 기록과 원시 로그는 `test-results/student-delete-focus-verification/`에 있다.
+
+## 미배정 포함 분반배정 결과 전달 · 2026-11-27
+
+- 가상 엑셀로 부분·전체 미배정을 만들고, 기본 차단과 체크박스 활성화 후 JSON 다운로드·시수배당 전송을 확인했다. 파일과 서버 자료의 미배정 표시, 서버 자료 적용, 체크박스 해제 시 후보 복귀, 새로고침 초기화, 데스크톱과 390px 화면의 높이·가로 넘침·키보드 조작을 확인했다.
+- 운영 학기 학생 미리보기·등록과 다른 학기 저장에서 미배정 과목과 전체 미배정 학생이 제외됐다. 등록 후 생략한 과목의 기존 분반이 유지됐다. 전송할 학생이 없거나 제약 또는 2+1 결합 검증을 통과하지 못하면 거부됐다.
+- 단위·API 시험으로 완전배정 파일 호환, 미배정 누락 수 검증, 두 검증 플래그 검사, 서버 저장본과 `/assignment-hours` 응답의 `complete`·미배정 수 보존을 확인했다.
+- Windows Node.js 24.22.1, Edge, 가상 자료와 로컬 D1에서 `test:all` 구성 명령 14개를 직접 실행했다. 각 명령은 종료 코드 0이며 352건이 통과했다. 단위·통합 197건, 분반배정 브라우저 22건, 공유 UI 화면 점검 38건을 포함한다. Worker 시험은 `node tests/wrangler.mjs`의 세 Wrangler 자식 명령에 시험 전용 빈 `--env-file`을 지정했다.
+- 명령별 통과·실패 수, 로그와 화면은 `test-results/section-incomplete-verification/`에 있다.
+
+### 독립 검토 반영
+
+- 학생 자료에서 모든 행의 학적과 진급 학년을 먼저 확인하고, 미완성 후보에서는 신청 과목이 있으나 하나도 배정되지 않은 학생만 제외한다. 완전배정에서 신청 과목이 없는 가상 행을 유지해 명부 불일치가 같은 학기 등록을 차단하고, 다른 학기 저장 요청에도 해당 행이 남는 것을 확인했다.
+- 정상 결과 카드 렌더 뒤 두 번째 시트의 `validation.ok`를 false로 바꾸거나 2+1 결합 한쪽을 제거했다. 각 경우 두 시수 동작과 두 학생 동작에서 오류가 표시됐고 다운로드와 전달 요청은 발생하지 않았다. 미배정 수 두 필드는 `Number.MAX_SAFE_INTEGER`까지 허용하며, 초과 값은 단위 시험과 API 시험에서 거부됐다.
+- 집중 단위·API 시험은 종료 코드 0으로 41건, 분반배정 브라우저 시험은 종료 코드 0으로 25건이 통과했다. 이어 `test:all`의 구성 명령 14개를 재실행해 모두 종료 코드 0으로 355건이 통과했다. 세 Wrangler 자식 호출에는 시험 전용 빈 환경 파일을 지정했다. 재실행 로그와 명령별 집계는 `test-results/section-incomplete-verification/review-fixes/`의 로그와 상위 `worker-report.md`에 있다.
+
+### 재검토 반영
+
+- 신청 과목이 없는 행만 남은 경우에도 미완성 후보의 실제 배정이 0건이면 오류를 표시한다. 실제 배정이 든 학생 자료를 미리 저장한 뒤 2027-1 저장과 2026-2 미리보기를 시도했다. 두 동작 모두 `보낼 학생 배정이 없습니다.`를 표시했고 `stageToolTransfer` 요청 없이 두 학기의 전달 ID와 내용을 보존했다. 완전배정의 학생 배열은 기존 회귀 시험으로 확인했다.
+- 집중 단위·API 시험 41건과 분반배정 브라우저 시험 26건이 종료 코드 0으로 통과했다. 첫 전체 실행은 로컬 D1 API 시험 프로세스에서 멈춰 종료했다. `test:all` 구성 명령 14개를 재실행해 모두 종료 코드 0으로 356건이 통과했다. Wrangler의 자식 호출에는 시험 전용 빈 환경 파일을 지정했다. 명령별 결과는 `test-results/section-incomplete-verification/zero-assignment-fix/rerun/`의 로그와 `test-results/section-incomplete-verification/worker-report.md`에 있다.
