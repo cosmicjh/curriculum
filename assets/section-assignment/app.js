@@ -230,7 +230,7 @@ function buildOutputWorkbook(allSheets, allSheetResults, candidateIndex) {
 // UI 와이어링
 // ============================================================
 let isRunning=false, fileLoadToken=0, cancelActive=null;
-let lastRunSettings=null, resultIncomplete=[];
+let lastRunSettings=null, candidateSummaries=[];
 let hoursExportResults=null;
 let lockedControls=[];
 let loadedData=null;
@@ -239,21 +239,52 @@ const termSwitchBtn=document.getElementById('termSwitchBtn'),termDialog=document
 const termYear=document.getElementById('termYear'),termSemester=document.getElementById('termSemester');
 const courseCountsBtn=document.getElementById('courseCountsBtn');
 const previewStudentsBtn=document.getElementById('previewStudentsBtn'),studentPreviewStatus=document.getElementById('studentPreviewStatus');
+const includeIncomplete=document.getElementById('includeIncomplete');
+const candidateSelect=document.getElementById('hoursCandidate');
+const hoursExportBtn=document.getElementById('hoursExportBtn'),sendHoursBtn=document.getElementById('sendHoursBtn');
+const hoursExportStatus=document.getElementById('hoursExportStatus');
 const termYearDifference=()=>Number(targetTerm?.slice(0,4))-Number(activeTerm?.slice(0,4));
+const resultAt=(sheetResult,rank)=>sheetResult.topCandidates[Math.min(rank,sheetResult.topCandidates.length-1)].result;
+const candidateAllowed=summary=>Boolean(summary&&(summary.complete||includeIncomplete.checked));
 function updateTermControls(){
-  const complete=hoursExportResults&&resultIncomplete.includes(false);
+  const selected=candidateAllowed(candidateSummaries[candidateSelect.value]);
   const unavailable=isRunning||isSending||!targetTerm;
   termSwitchBtn.disabled=unavailable;
   courseCountsBtn.disabled=unavailable||isLoadingCounts;
-  document.getElementById('hoursExportBtn').disabled=isRunning||!targetTerm||!complete;
-  document.getElementById('sendHoursBtn').disabled=unavailable||!complete;
-  previewStudentsBtn.disabled=unavailable||!complete;
+  includeIncomplete.disabled=unavailable;
+  candidateSelect.disabled=unavailable;
+  hoursExportBtn.disabled=isRunning||!targetTerm||!selected;
+  sendHoursBtn.disabled=unavailable||!selected;
+  previewStudentsBtn.disabled=unavailable||!selected;
   previewStudentsBtn.textContent=targetTerm&&targetTerm!==activeTerm?'학생 배정 저장':'학생 배정 미리보기';
 }
+function renderCandidates(selected){
+  candidateSelect.replaceChildren();
+  candidateSummaries.forEach((summary,i)=>{
+    const option=document.createElement('option');option.value=String(i);
+    const detail=includeIncomplete.checked
+      ?` · 미배정 ${summary.unassignedStudents}명/${summary.missingChoices}과목`:' · 미완성(내보내기 불가)';
+    option.textContent=`${i+1}순위${summary.complete?'':detail}`;
+    option.disabled=!candidateAllowed(summary);
+    candidateSelect.appendChild(option);
+  });
+  const first=candidateSummaries.findIndex(candidateAllowed);
+  candidateSelect.value=candidateAllowed(candidateSummaries[selected])?selected:first<0?'':String(first);
+  hoursExportStatus.textContent=first<0?'미배정이 있어 내보낼 수 없습니다.':'';
+  updateTermControls();
+}
+includeIncomplete.addEventListener('change',()=>{
+  studentPreviewStatus.textContent='';
+  renderCandidates(candidateSelect.value);
+});
+candidateSelect.addEventListener('change',()=>{
+  studentPreviewStatus.textContent=hoursExportStatus.textContent='';
+  updateTermControls();
+});
 window.setSectionAssignmentTerms=terms=>{
   if(terms.targetTerm!==targetTerm||terms.activeTerm!==activeTerm){
     document.getElementById('courseCountsStatus').textContent='';
-    document.getElementById('hoursExportStatus').textContent='';
+    hoursExportStatus.textContent='';
     studentPreviewStatus.textContent='';
   }
   ({targetTerm,activeTerm}=terms);
@@ -284,10 +315,11 @@ termDialog.querySelector('form').addEventListener('submit',event=>{
   }catch(error){document.getElementById('termError').textContent=error.message;}
 });
 function invalidateResults() {
-  resultIncomplete=[];hoursExportResults=null;
+  candidateSummaries=[];hoursExportResults=null;
   studentPreviewStatus.textContent='';
   document.getElementById("hoursExportCard").classList.add("hidden");
   downloadBtn.classList.add('hidden');summary.classList.add('hidden');
+  updateTermControls();
 }
 function setBusy(busy) {
   isRunning=busy;
@@ -1351,20 +1383,16 @@ runBtn.addEventListener('click', async () => {
   summary.classList.remove('hidden');
 
   const maxN=Math.max(...allResults.map(r=>r.topCandidates.length));
-  resultIncomplete=Array.from({length:maxN},(_,i)=>allResults.some(r=>!r.topCandidates[Math.min(i,r.topCandidates.length-1)].result.validation.complete));
+  candidateSummaries=Array.from({length:maxN},(_,i)=>{
+    const results=allResults.map(r=>resultAt(r,i));
+    return {complete:results.every(r=>r.validation.complete),
+      missingChoices:results.reduce((n,r)=>n+r.validation.missingTotal,0),
+      unassignedStudents:results.reduce((n,r)=>n+r.unassigned.length,0)};
+  });
   downloadBtn.textContent='결과 XLSX '+maxN+'개 다운로드';
   downloadBtn.classList.remove('hidden');
   hoursExportResults=allResults;
-  const candidateSelect=document.getElementById('hoursCandidate');
-  candidateSelect.replaceChildren();
-  for(let i=0;i<maxN;i++) {
-    const option=document.createElement('option');option.value=String(i);
-    option.textContent=`${i+1}순위${resultIncomplete[i]?' · 미완성(내보내기 불가)':''}`;
-    option.disabled=resultIncomplete[i];candidateSelect.appendChild(option);
-  }
-  const firstComplete=resultIncomplete.findIndex(v=>!v);
-  candidateSelect.value=firstComplete<0?'':String(firstComplete);
-  document.getElementById('hoursExportStatus').textContent=firstComplete<0?'미배정이 있어 내보낼 수 없습니다.':'';
+  renderCandidates('');
   document.getElementById('hoursExportCard').classList.remove('hidden');
   } catch(err) {
     invalidateResults();log('✗ '+err.message,'bad');console.error(err);
@@ -1373,7 +1401,7 @@ runBtn.addEventListener('click', async () => {
 
 downloadBtn.addEventListener('click',async ()=>{
   if(isRunning||!hoursExportResults)return;
-  const results=hoursExportResults,sheets=loadedData.sheets,incomplete=resultIncomplete.slice();
+  const results=hoursExportResults,sheets=loadedData.sheets,incomplete=candidateSummaries.map(summary=>!summary.complete);
   const baseName=resultFilename.replace(/.xlsx$/,'');
   const padWidth=Math.max(2,String(incomplete.length).length);
   downloadBtn.disabled=true;
@@ -1424,7 +1452,6 @@ function buildHoursExport(sheets, results, candidateIndex) {
     sheets:sheets.map((sheet,si)=>{
       const candidates=results[si].topCandidates;
       const rank=Math.min(candidateIndex,candidates.length-1),result=candidates[rank].result;
-      if(!result.validation?.ok||!result.validation.complete)throw new Error('검증을 통과한 완전배정 결과만 내보낼 수 있습니다.');
       const cohort=auditCoupledCohorts(sheet,result);
       if(!cohort.ok)throw new Error('2+1 결합 검증 실패');
       const labels=sectionDisplayCodes(sheet,result),state=sheet.algoState;
@@ -1457,28 +1484,29 @@ function buildHoursExport(sheets, results, candidateIndex) {
           sectionCount:sections.length,totalWeeklyHours:credits*sections.length,
           parallelSectionLimit:result.validation.parallelLimits[c],sections};
       });
+      const {complete,missingTotal}=result.validation;
+      const validation={complete,hardConstraintsPassed:true,coupledCohortsPassed:true};
+      if(!complete)Object.assign(validation,{missingChoices:missingTotal,unassignedStudents:result.unassigned.length});
       return {sheetId,sourceSheetName:sheet.name,academicYear:null,semester:null,grade,candidateRank:rank+1,
-        studentCount:sheet.students.length,validation:{complete:true,hardConstraintsPassed:true,coupledCohortsPassed:true},
+        studentCount:sheet.students.length,validation,
         timeBlocks:sheet.groups.map((code,i)=>({code:hoursCode(code),credits:Number(sheet.groupCredits[i])})),courses,coupledCohorts:links,
         totals:{courseCount:courses.length,sectionCount:courses.reduce((n,c)=>n+c.sectionCount,0),totalWeeklyHours:courses.reduce((n,c)=>n+c.totalWeeklyHours,0)}};
     })};
 }
-document.getElementById('hoursExportBtn').addEventListener('click',()=>{
-  if(isRunning||!targetTerm||!hoursExportResults)return;
+hoursExportBtn.addEventListener('click',()=>{
+  if(hoursExportBtn.disabled)return;
   try {
-    const selected=document.getElementById('hoursCandidate').value;
-    if(selected==='')throw new Error('완전배정 결과 후보가 없습니다.');
-    const index=Number(selected),data=buildHoursExport(loadedData.sheets,hoursExportResults,index);
+    const index=selectedCandidate(),data=buildHoursExport(loadedData.sheets,hoursExportResults,index);
     const base=resultFilename.replace(/\.xlsx$/i,'');
     downloadJson(data,base+'_시수배당연동_'+String(index+1).padStart(2,'0')+'순위.json');
-    document.getElementById('hoursExportStatus').textContent='JSON 파일을 저장했습니다.';
-  }catch(err){document.getElementById('hoursExportStatus').textContent='내보내기 실패: '+err.message;}
+    hoursExportStatus.textContent='JSON 파일을 저장했습니다.';
+  }catch(err){hoursExportStatus.textContent='내보내기 실패: '+err.message;}
 });
 
 function selectedCandidate(){
-  const selected=document.getElementById('hoursCandidate').value;
-  const rank=Number(selected);
-  if(!hoursExportResults||selected===''||resultIncomplete[rank]!==false)throw Error('완전배정 결과 후보가 없습니다.');
+  const selected=candidateSelect.value,rank=Number(selected);
+  if(!hoursExportResults||!candidateAllowed(candidateSummaries[selected]))throw Error('내보낼 결과 후보가 없습니다.');
+  if(hoursExportResults.some(r=>resultAt(r,rank).validation?.ok!==true))throw Error('제약 검증을 통과한 결과만 내보낼 수 있습니다.');
   return rank;
 }
 
@@ -1508,14 +1536,14 @@ courseCountsBtn.addEventListener('click',async()=>{
   finally{isLoadingCounts=false;updateTermControls();}
 });
 
-async function sendResult(send,status=document.getElementById('hoursExportStatus')){
+async function sendResult(send,status=hoursExportStatus){
   if(termSwitchBtn.disabled)return;
   isSending=true;updateTermControls();
   try{await send();}
   catch(error){status.textContent=error.message;}
   finally{isSending=false;updateTermControls();}
 }
-document.getElementById('sendHoursBtn').addEventListener('click',()=>sendResult(()=>
+sendHoursBtn.addEventListener('click',()=>sendResult(()=>
   bridge.importHours(buildHoursExport(loadedData.sheets,hoursExportResults,selectedCandidate()))
 ));
 previewStudentsBtn.addEventListener('click',()=>sendResult(async()=>{
@@ -1523,28 +1551,39 @@ previewStudentsBtn.addEventListener('click',()=>sendResult(async()=>{
     if(targetTerm<activeTerm)throw Error('운영 학기보다 앞선 학기에는 학생 배정을 저장할 수 없습니다.');
     const advance=termYearDifference(),future=targetTerm!==activeTerm;
     const rank=selectedCandidate();
+    const {complete,missingChoices}=candidateSummaries[rank];
     const students=loadedData.sheets.flatMap((sheet,si)=>{
-      const candidates=hoursExportResults[si].topCandidates;
-      const result=candidates[Math.min(rank,candidates.length-1)].result;
+      const result=resultAt(hoursExportResults[si],rank);
       const labels=sectionDisplayCodes(sheet,result);
-      return sheet.students.map(student=>{
+      return sheet.students.flatMap(student=>{
         const studentNo=String(student.studentId??'').trim().match(/^([1-3])(\d{2})(\d{2})$/);
         const identity=[studentRosterGrade(sheet,student),Number(student.cls||studentNo?.[2]),Number(student.num||studentNo?.[3])];
         if(identity[0]<1||identity[0]>3||identity.some(n=>!Number.isInteger(n)||n<1||n>99)||!student.name){
           throw Error(sheet.name+' 시트에 학년·반·번호 또는 이름이 없는 학생이 있습니다.');
         }
         if(identity[0]+advance>3)throw Error('진급 학년이 3학년을 넘는 학생이 있습니다.');
+        const assigned=result.assignments[student.rowIndex];
+        const choices=student.selected.flatMap((subject,j)=>{
+          const sid=assigned?.[j]??-1;
+          return sid===-1?[]:[[subject,labels[sid]]];
+        });
+        if(!complete&&student.selected.length&&!choices.length)return [];
         return {grade:String(identity[0]),classNum:String(identity[1]),number:String(identity[2]),name:student.name,
-          choices:Object.fromEntries(student.selected.map((subject,j)=>[subject,labels[result.assignments[student.rowIndex][j]]]))};
+          choices:Object.fromEntries(choices)};
       });
     });
+    if(!complete&&!students.some(student=>Object.keys(student.choices).length>0))throw Error('보낼 학생 배정이 없습니다.');
+    const excluded=missingChoices?`미배정 ${missingChoices}과목 제외`:'';
     const saved=await bridge.previewStudents(students);
-    if(future&&saved&&targetTerm===saved.term&&activeTerm===saved.sourceTerm)studentPreviewStatus.textContent=`${saved.term} 학생 배정 ${saved.count}명 저장`;
+    if(saved&&targetTerm===saved.term&&activeTerm===saved.sourceTerm){
+      const status=future?`${saved.term} 학생 배정 ${saved.count}명 저장`:'';
+      studentPreviewStatus.textContent=[status,excluded].filter(Boolean).join(' · ');
+    }
 },studentPreviewStatus));
 
 document.getElementById('cancelBtn').addEventListener('click',()=>{if(cancelActive)cancelActive();});
 document.addEventListener('change',e=>{
-  if(!isRunning && loadedData && e.target.matches('input,select') && !e.target.closest('#termDialog') && !['fileInput','settingsFile','hoursCandidate'].includes(e.target.id))invalidateResults();
+  if(!isRunning && loadedData && e.target.matches('input,select') && !e.target.closest('#termDialog,#hoursExportCard') && !['fileInput','settingsFile'].includes(e.target.id))invalidateResults();
 },true);
 document.addEventListener('click',e=>{
   if(!isRunning && loadedData && e.target.closest('.btn-remove-pair,.x,#addCreditPairBtn,#addBigsecBtn,#addAvoidBtn,#addTeacherBtn,#applyDefaultMaxBtn'))invalidateResults();

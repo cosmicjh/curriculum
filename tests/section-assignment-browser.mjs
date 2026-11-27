@@ -73,6 +73,7 @@ try{
   const switchDialog=frame.getByRole('dialog',{name:'학기 전환'});
   const preview=frame.locator('#previewStudentsBtn'),counts=frame.locator('#courseCountsBtn'),send=frame.locator('#sendHoursBtn');
   const hoursJson=frame.locator('#hoursExportBtn');
+  const includeIncomplete=frame.getByRole('checkbox',{name:'미배정이 있어도 내보내기'});
   async function downloadFrom(button,path){
     const pending=page.waitForEvent('download');
     await button.click();
@@ -103,7 +104,7 @@ try{
     await frame.locator('#hoursExportCard').waitFor();
     assert(await hoursJson.isDisabled());
     assert(await frame.locator('#downloadBtn').isEnabled());
-    for(const control of [switchButton,counts,send,preview])assert(await control.isDisabled());
+    for(const control of [switchButton,counts,send,preview,includeIncomplete])assert(await control.isDisabled());
   }finally{initialTermGate.resolve();}
   await waitForTerm('2026학년도 1학기');
   await page.unroute('**/api/courseWorkspace',delayInitialTerm);
@@ -174,6 +175,7 @@ try{
     assert.equal(sent.term,'2027-1');assert.equal(sent.expectedTerm,'2026-2');
     assert.equal(sent.data.sheets[0].grade,null);
     assert(await switchButton.isDisabled());
+    assert(await includeIncomplete.isDisabled());
   }finally{permitStage();}
   await page.getByText('2027-1 학기로 전환한 뒤 서버 분반배정을 불러오세요.',{exact:true}).waitFor();
   assert.equal((await h.api('bootstrap')).data.term,'2026-2');
@@ -510,6 +512,298 @@ try{
   assert.equal((await mixedRequest).postDataJSON().data.sheets[0].grade,null);
   await hours.locator('.hours-import-dialog').waitFor();
   console.log('PASS mixed roster grades leave the hours import target grade unselected');
+
+  const incompleteOutput='test-results/section-incomplete-verification';
+  await mkdir(incompleteOutput,{recursive:true});
+  const incomplete=XLSX.utils.book_new(),incompleteSheet='1학년',studentNames=['가상부분1','가상부분2','가상기피1','가상기피2'];
+  const pairedTwo='가상 결합 이학점',pairedOne='가상 결합 일학점',omitted='가상 미배정 과목';
+  const studentIds=[];
+  for(const [i,name] of studentNames.entries()){
+    const choices=i===0?{[omitted]:'B2'}:{};
+    const saved=await h.mutation('saveStudent',{student:{grade:'1',classNum:'1',number:String(i+1),name,status:'재학',choices}},admin.cookie);
+    assert(saved.ok,saved.error);
+    studentIds.push(saved.data.result.id);
+  }
+  assert((await course('/term','POST',{term:'2026-2'})).ok);
+  await page.reload();await idle();
+  await waitForTerm('2026학년도 2학기');
+  XLSX.utils.book_append_sheet(incomplete,XLSX.utils.aoa_to_sheet([
+    ['학번','이름',pairedTwo,pairedOne,omitted],
+    ...studentNames.map((name,i)=>[10101+i,name,Number(i<2),Number(i<2),1])
+  ]),incompleteSheet);
+  await frame.locator('#fileInput').setInputFiles(xlsx(incomplete,'incomplete.xlsx'));
+  await frame.getByText('incomplete.xlsx',{exact:true}).waitFor();
+  const incompleteSettings=JSON.parse(await downloadFrom(saveSettings,incompleteOutput+'/settings.json'));
+  Object.assign(incompleteSettings.sheets[0],{
+    groups:['A','B','C','D'],groupCredits:[3,1,1,1],expectedTotalCredits:0,
+    courseCredits:{[pairedTwo]:2,[pairedOne]:1,[omitted]:3}
+  });
+  incompleteSettings.creditPairs=[{sheetName:incompleteSheet,course2:pairedTwo,course1:pairedOne}];
+  incompleteSettings.avoidPairs=[{sheetName:incompleteSheet,requesterRow:3,targetRows:[4]}];
+  await settingsFile.setInputFiles({name:'incomplete-settings.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(incompleteSettings))});
+  await frame.getByText('✓ 설정을 복원했습니다. 배정을 다시 실행해 주세요.',{exact:true}).waitFor();
+  const runButton=frame.locator('#runBtn'),resultCard=frame.locator('#hoursExportCard'),candidate=frame.locator('#hoursCandidate');
+  await runButton.evaluate(button=>button.addEventListener('click',()=>{
+    button.dataset.incompleteLocked=String(document.querySelector('#includeIncomplete').disabled);
+  },{once:true}));
+  await runButton.click();
+  await resultCard.waitFor();
+  assert.equal(await runButton.getAttribute('data-incomplete-locked'),'true');
+  assert.equal(await includeIncomplete.isChecked(),false);
+  assert.equal(await candidate.inputValue(),'');
+  assert((await candidate.locator('option').first().isDisabled()));
+  for(const control of [hoursJson,send,preview])assert(await control.isDisabled());
+  for(const [width,height] of [[1440,32],[390,44]]){
+    await page.setViewportSize({width,height:844});
+    for(const control of [includeIncomplete,hoursJson,send,preview]){
+      assert(await control.evaluate((el,min)=>el.getBoundingClientRect().height>=min,height));
+    }
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    assert(await resultCard.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  }
+  await includeIncomplete.press('Space');
+  assert(await includeIncomplete.isChecked());
+  const rankLabel='1순위 · 미배정 1명/3과목';
+  await candidate.selectOption({label:rankLabel});
+  await resultCard.screenshot({path:incompleteOutput+'/transfer-mobile.png'});
+  const json=await downloadFrom(hoursJson,incompleteOutput+'/hours.json');
+  const [incompleteHours]=JSON.parse(json).sheets;
+  assert.deepEqual(incompleteHours.validation,{complete:false,hardConstraintsPassed:true,coupledCohortsPassed:true,missingChoices:3,unassignedStudents:1});
+  assert.deepEqual(Object.fromEntries(incompleteHours.courses.map(c=>[c.courseName,c.sections[0].studentCount])),{[pairedTwo]:2,[pairedOne]:2,[omitted]:1});
+  await includeIncomplete.press('Space');
+  assert(await resultCard.isVisible());
+  assert.equal(await candidate.inputValue(),'');
+  for(const control of [hoursJson,send,preview])assert(await control.isDisabled());
+  await includeIncomplete.press('Space');
+  assert.equal(await candidate.inputValue(),'0');
+  console.log('PASS incomplete export is opt-in and keyboard-accessible at 390px without recalculation');
+
+  function studentTransfer(request,term){
+    const {kind,data,term:actualTerm}=request.postDataJSON();
+    assert.equal(kind,'students');assert.equal(actualTerm,term);assert.equal(data.length,3);
+    for(const name of studentNames.slice(0,2))assert.deepEqual(data.find(row=>row.name===name).choices,{[pairedTwo]:'A',[pairedOne]:'A'});
+    const other=data.find(row=>studentNames.slice(2).includes(row.name));
+    assert.deepEqual(other.choices,{[omitted]:'A'});
+    return data;
+  }
+  const partialPreviewRequest=page.waitForRequest('**/api/stageToolTransfer');
+  await preview.press('Enter');
+  const stagedStudents=studentTransfer(await partialPreviewRequest,'2026-2');
+  const partialPreview=page.locator('[data-assignment-preview]');
+  await partialPreview.getByText('업로드에 없는 기존 학생 1명은 유지합니다.',{exact:true}).waitFor();
+  await frame.getByText('미배정 3과목 제외',{exact:true}).waitFor();
+  await partialPreview.getByRole('button',{name:'등록',exact:true}).press('Enter');await idle();
+  const retained=await h.api('adminStudent',{id:studentIds[0]},admin.cookie);
+  assert.deepEqual(retained.data.student.choices,{[omitted]:'B2',[pairedTwo]:'A',[pairedOne]:'A'});
+  await switchAssignment('2027','1');
+  const partialSaveRequest=page.waitForRequest('**/api/stageToolTransfer');
+  await preview.press('Enter');
+  assert.deepEqual(studentTransfer(await partialSaveRequest,'2027-1'),stagedStudents);
+  await frame.getByText('2027-1 학생 배정 3명 저장 · 미배정 3과목 제외',{exact:true}).waitFor();
+  assert(await page.locator('#modal').isHidden());
+  console.log('PASS partial student preview and future staging omit missing choices and retain existing assignments');
+
+  await switchAssignment('2026','2');
+  const partialHoursRequest=page.waitForRequest('**/api/stageToolTransfer');
+  await send.press('Enter');
+  assert.deepEqual((await partialHoursRequest).postDataJSON().data.sheets,[incompleteHours]);
+  const partialHoursDialog=hours.locator('.hours-import-dialog');
+  await partialHoursDialog.getByText('미배정 3건 포함',{exact:true}).waitFor();
+  await partialHoursDialog.getByRole('button',{name:'닫기',exact:true}).click();
+  await hours.locator('#hours-import-file').setInputFiles({name:'incomplete.json',mimeType:'application/json',buffer:json});
+  await partialHoursDialog.getByText('미배정 3건 포함',{exact:true}).waitFor();
+  await partialHoursDialog.getByRole('button',{name:'닫기',exact:true}).click();
+  await hours.getByRole('button',{name:'서버 분반배정',exact:true}).click();
+  await partialHoursDialog.getByText('미배정 3건 포함',{exact:true}).waitFor();
+  for(const name of [pairedTwo,pairedOne,omitted])await partialHoursDialog.getByLabel(name+' 교과군').fill('가상 미배정 교과군');
+  await partialHoursDialog.getByRole('button',{name:'미리보기',exact:true}).click();
+  await partialHoursDialog.getByText('1학년 '+omitted,{exact:true}).waitFor();
+  await partialHoursDialog.getByRole('button',{name:'확인 후 적용',exact:true}).click();
+  await hours.locator('.hours-import-pending').waitFor();
+  console.log('PASS server and file hours imports show incomplete counts and staged hours apply');
+
+  await clickMenu(page,page.locator('.admin-nav [data-tab=sectionAssignment]'));await idle();
+  const workerPattern='**/section-assignment/worker.js?*';
+  async function withCandidateMutation(mutation,check){
+    const rewriteWorker=async route=>{
+      const original=await route.fetch();
+      await route.fulfill({response:original,body:`
+        let fixtureSheet;
+        self.addEventListener('message',event=>{fixtureSheet=event.data.sheet;});
+        const sendMessage=self.postMessage.bind(self);
+        self.postMessage=message=>{
+          if(message.type==='result'){
+            const candidates=message.result.topCandidates;
+            const {result}=candidates[0];
+            ${mutation};
+          }
+          sendMessage(message);
+        };
+        ${await original.text()}
+      `});
+    };
+    await page.route(workerPattern,rewriteWorker);
+    try{await check();}
+    finally{await page.unroute(workerPattern,rewriteWorker);}
+  }
+  for(const [mutation,message] of [
+    ['result.secToGroup[0] = -1','코드 범위 오류'],
+    ['result.assignments[1][1] = -1','2+1 결합 일부 배정']
+  ]){
+    await withCandidateMutation(mutation,async()=>{
+      assert(await frame.locator('#includeIncomplete').isChecked());
+      await runButton.click();
+      await frame.locator('.progress .bad').filter({hasText:message}).waitFor();
+      assert(await resultCard.isHidden());
+    });
+  }
+  console.log('PASS incomplete opt-in rejects hard-constraint and coupled validation failures');
+
+  await loadWorkbook();
+  await frame.getByText('synthetic.xlsx',{exact:true}).waitFor();
+  await withCandidateMutation(`
+    const empty={...result,assignments:{},sectionLoad:result.sectionLoad.map(()=>0),
+      unassigned:fixtureSheet.students,partialMisses:[]};
+    candidates.splice(0,candidates.length,{...candidates[0],result:empty},candidates[0]);
+  `,async()=>{
+    await runButton.click();
+    await resultCard.waitFor();
+    await candidate.selectOption('0');
+    const before=requests.filter(path=>path==='/api/stageToolTransfer').length;
+    await preview.press('Enter');
+    await frame.getByText('보낼 학생 배정이 없습니다.',{exact:true}).waitFor();
+    assert.equal(requests.filter(path=>path==='/api/stageToolTransfer').length,before);
+    await includeIncomplete.press('Space');
+    assert.equal(await candidate.inputValue(),'1');
+    assert.equal(await candidate.locator('option:checked').textContent(),'2순위');
+    assert(await hoursJson.isEnabled());
+    await includeIncomplete.press('Space');
+  });
+  await page.reload();await idle();await waitForTerm('2026학년도 2학기');
+  assert(!(await frame.locator('#includeIncomplete').isChecked()));
+  console.log('PASS empty student transfer is refused, disabling opt-in falls back to a complete candidate, and refresh resets opt-in');
+
+  const completeBook=XLSX.utils.book_new(),pairedSheet='1학년 결합',emptyName='가상신청없음';
+  XLSX.utils.book_append_sheet(completeBook,XLSX.utils.aoa_to_sheet([
+    ['학번','이름',courseName],[10101,studentNames[0],1],[10209,emptyName,0]
+  ]),incompleteSheet);
+  XLSX.utils.book_append_sheet(completeBook,XLSX.utils.aoa_to_sheet([
+    ['학번','이름',pairedTwo,pairedOne],[10102,studentNames[1],1,1]
+  ]),pairedSheet);
+  await frame.locator('#fileInput').setInputFiles(xlsx(completeBook,'complete-zero-choice.xlsx'));
+  await frame.getByText('complete-zero-choice.xlsx',{exact:true}).waitFor();
+  const completeSettings=JSON.parse(await downloadFrom(saveSettings,incompleteOutput+'/complete-settings.json'));
+  for(const sheet of completeSettings.sheets)Object.assign(sheet,{groups:['A'],groupCredits:[3],expectedTotalCredits:0});
+  completeSettings.sheets[1].courseCredits={[pairedTwo]:2,[pairedOne]:1};
+  completeSettings.creditPairs=[{sheetName:pairedSheet,course2:pairedTwo,course1:pairedOne}];
+  await settingsFile.setInputFiles({name:'complete-settings.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(completeSettings))});
+  await frame.getByText('✓ 설정을 복원했습니다. 배정을 다시 실행해 주세요.',{exact:true}).waitFor();
+  await runButton.evaluate(()=>{
+    const results=[];
+    window.transferTestResults=results;
+    window.Worker=class extends Worker{
+      constructor(...args){
+        super(...args);
+        this.addEventListener('message',({data})=>{if(data.type==='result')results.push(data.result);});
+      }
+    };
+  });
+  await runButton.click();
+  await resultCard.waitFor();
+  assert.equal(await includeIncomplete.isChecked(),false);
+  assert.equal(await candidate.locator('option:checked').textContent(),'1순위');
+  const expectedStudents=[
+    {grade:'1',classNum:'1',number:'1',name:studentNames[0],choices:{[courseName]:'A'}},
+    {grade:'1',classNum:'2',number:'9',name:emptyName,choices:{}},
+    {grade:'1',classNum:'1',number:'2',name:studentNames[1],choices:{[pairedTwo]:'A',[pairedOne]:'A'}}
+  ];
+  const completePreviewRequest=page.waitForRequest('**/api/stageToolTransfer');
+  await preview.press('Enter');
+  const completePreviewPayload=(await completePreviewRequest).postDataJSON();
+  assert.equal(completePreviewPayload.term,'2026-2');
+  assert.deepEqual(completePreviewPayload.data,expectedStudents);
+  await partialPreview.getByText('10209 재학생 명부와 이름 또는 학번이 일치하지 않습니다.',{exact:true}).waitFor();
+  assert(await partialPreview.getByRole('button',{name:'등록',exact:true}).isDisabled());
+  await page.locator('#modal [data-action=close-modal]').click();await idle();
+  await switchAssignment('2027','1');
+  const completeSaveRequest=page.waitForRequest('**/api/stageToolTransfer');
+  await preview.press('Enter');
+  const completeSavePayload=(await completeSaveRequest).postDataJSON();
+  assert.equal(completeSavePayload.term,'2027-1');
+  assert.deepEqual(completeSavePayload.data,expectedStudents);
+  await frame.getByText('2027-1 학생 배정 3명 저장',{exact:true}).waitFor();
+  console.log('PASS complete transfers keep zero-choice rows for exact roster validation and future staging');
+
+  await switchAssignment('2026','2');
+  await includeIncomplete.press('Space');
+  assert(await includeIncomplete.isChecked());
+  const verifiedSheets=await resultCard.evaluate(()=>window.transferTestResults.map(r=>r.topCandidates[0].result.validation.ok));
+  assert.deepEqual(verifiedSheets,[true,true]);
+  const countTransferRequests=()=>requests.filter(path=>['/api/stageToolTransfer','/api/previewImport','/api/commitImport'].includes(path)).length;
+  const beforeFailedTransfers=countTransferRequests();
+  const failedDownloads=[],recordFailedDownload=download=>failedDownloads.push(download.suggestedFilename());
+  page.on('download',recordFailedDownload);
+  try{
+    for(const [hard,message] of [[true,/제약 검증/],[false,/2\+1.*검증 실패/]]){
+      await resultCard.evaluate((_,hard)=>{
+        const result=window.transferTestResults[1].topCandidates[0].result;
+        if(hard)result.validation.ok=false;
+        else{
+          result.validation.ok=true;
+          if(result.assignments[1][1]<0)throw Error('결합 과목이 배정되어 있어야 합니다.');
+          result.assignments[1][1]=-1;
+        }
+      },hard);
+      assert.equal(await preview.textContent(),'학생 배정 미리보기');
+      for(const [button,status] of [[hoursJson,'#hoursExportStatus'],[send,'#hoursExportStatus'],[preview,'#studentPreviewStatus']]){
+        await candidate.dispatchEvent('change');
+        await button.press('Enter');
+        await frame.locator(status).filter({hasText:message}).waitFor();
+      }
+      await switchAssignment('2027','1');
+      assert.equal(await preview.textContent(),'학생 배정 저장');
+      await preview.press('Enter');
+      await frame.locator('#studentPreviewStatus').filter({hasText:message}).waitFor();
+      assert.equal(countTransferRequests(),beforeFailedTransfers);
+      assert.deepEqual(failedDownloads,[]);
+      await switchAssignment('2026','2');
+      console.log('PASS all transfer paths reject a second-sheet '+(hard?'hard validation flag failure':'coupled assignment failure')+' after calculation');
+    }
+  }finally{page.off('download',recordFailedDownload);}
+
+  const emptyAssignmentBook=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(emptyAssignmentBook,completeBook.Sheets[incompleteSheet],incompleteSheet);
+  await frame.locator('#fileInput').setInputFiles(xlsx(emptyAssignmentBook,'empty-assignment.xlsx'));
+  await frame.getByText('empty-assignment.xlsx',{exact:true}).waitFor();
+  await frame.locator('[data-expected-credit]').fill('0');
+  await frame.locator('[data-expected-credit]').press('Tab');
+  const readStudentTransfers=async()=> (await h.sql(
+    "SELECT term_id,transfer_id,content FROM tool_transfers WHERE kind='students' AND term_id IN (?,?) ORDER BY term_id",'2026-2','2027-1'
+  )).results;
+  const previousTransfers=await readStudentTransfers();
+  assert.deepEqual(previousTransfers.map(row=>row.term_id),['2026-2','2027-1']);
+  assert(previousTransfers.every(row=>JSON.parse(row.content).students.some(student=>Object.keys(student.choices).length>0)));
+  await withCandidateMutation(`
+    candidates.splice(0,candidates.length,{...candidates[0],result:{
+      ...result,assignments:{},sectionLoad:result.sectionLoad.map(()=>0),
+      unassigned:fixtureSheet.students.filter(student=>student.selected.length),partialMisses:[]
+    }});
+  `,async()=>{
+    await runButton.click();
+    await resultCard.waitFor();
+    await includeIncomplete.check();
+    await candidate.selectOption({label:'1순위 · 미배정 1명/1과목'});
+    const before=countTransferRequests();
+    for(const [year,semester,button] of [['2027','1','학생 배정 저장'],['2026','2','학생 배정 미리보기']]){
+      await switchAssignment(year,semester);
+      assert.equal(await preview.textContent(),button);
+      await preview.press('Enter');
+      await frame.getByText('보낼 학생 배정이 없습니다.',{exact:true}).waitFor();
+      assert.equal(countTransferRequests(),before);
+      assert.deepEqual(await readStudentTransfers(),previousTransfers);
+    }
+  });
+  console.log('PASS zero assigned choices with a zero-choice row preserves current and future student transfers');
 
   await page.route('**/api/courseWorkspace',route=>{
     const request=route.request().postDataJSON();
